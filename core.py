@@ -56,9 +56,14 @@ def db_connect():
             key TEXT PRIMARY KEY,
             name TEXT,
             group_title TEXT,
-            url TEXT NOT NULL
+            url TEXT NOT NULL,
+            sort_order INTEGER
         )
     """)
+    try:
+        conn.execute("ALTER TABLE selections ADD COLUMN sort_order INTEGER")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("""
         CREATE TABLE IF NOT EXISTS custom_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,20 +118,102 @@ def load_selected_keys_from_db() -> set[str]:
 def save_selected_channels_to_db(selected_channels: list[dict]) -> None:
     conn = db_connect()
     try:
+        existing_order = {
+            row[0]: row[1]
+            for row in conn.execute("SELECT key, sort_order FROM selections").fetchall()
+        }
+        next_order = max(
+            [order for order in existing_order.values() if order is not None] or [-1]
+        ) + 1
+
         conn.execute("DELETE FROM selections")
         for ch in selected_channels:
             key = channel_key(ch)
             if not key:
                 continue
+
+            sort_order = existing_order.get(key)
+            if sort_order is None:
+                sort_order = next_order
+                next_order += 1
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO selections
-                (key, name, group_title, url)
-                VALUES (?, ?, ?, ?)
+                (key, name, group_title, url, sort_order)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (key, ch.get("name", ""), ch.get("group", ""), ch.get("url", "")),
+                (
+                    key,
+                    ch.get("name", ""),
+                    ch.get("group", ""),
+                    ch.get("url", ""),
+                    sort_order,
+                ),
             )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def selected_channels_in_order() -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT key FROM selections ORDER BY sort_order IS NULL, sort_order, name"
+        ).fetchall()
+        ordered_keys = [row[0] for row in rows]
+    finally:
+        conn.close()
+
+    current = channel_by_key_map()
+    return [current[key] for key in ordered_keys if key in current]
+
+
+def selected_channel_order_payload() -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """
+            SELECT key, name, group_title, url, sort_order
+            FROM selections
+            ORDER BY sort_order IS NULL, sort_order, name
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "key": row[0],
+            "name": row[1],
+            "group": row[2],
+            "url": row[3],
+            "sort_order": row[4],
+        }
+        for row in rows
+    ]
+
+
+def save_channel_order(keys: list[str]) -> int:
+    conn = db_connect()
+    try:
+        existing = {
+            row[0]
+            for row in conn.execute("SELECT key FROM selections").fetchall()
+        }
+
+        order = 0
+        for key in keys:
+            if key in existing:
+                conn.execute(
+                    "UPDATE selections SET sort_order = ? WHERE key = ?",
+                    (order, key),
+                )
+                order += 1
+
+        conn.commit()
+        return order
     finally:
         conn.close()
 
@@ -222,11 +309,35 @@ def download_m3u_text(url: str, timeout: int = 60) -> str:
 
 
 
-def write_current_playlist() -> int:
+def selected_channels_from_selected_ids_in_order() -> list[dict]:
     selected_channels = [ch for ch in channels if int(ch["id"]) in selected_ids]
+
+    conn = db_connect()
+    try:
+        existing_order = {
+            row[0]: row[1]
+            for row in conn.execute("SELECT key, sort_order FROM selections").fetchall()
+        }
+    finally:
+        conn.close()
+
+    def sort_key(ch: dict):
+        key = channel_key(ch)
+        order = existing_order.get(key)
+        if order is None:
+            return (1, ch.get("name", "").lower(), key)
+        return (0, order, ch.get("name", "").lower())
+
+    return sorted(selected_channels, key=sort_key)
+
+
+def write_current_playlist() -> int:
+    selected_channels = selected_channels_from_selected_ids_in_order()
+
     lines = ["#EXTM3U"]
     for ch in selected_channels:
         lines.extend(ch["raw"])
+
     PLAYLIST_PATH.write_text("\n".join(lines), encoding="utf-8")
     save_selected_channels_to_db(selected_channels)
     return len(selected_channels)

@@ -73,6 +73,23 @@ def register_routes(app):
             url="/playlist/custom.m3u",
         )
 
+
+    @app.get("/api/selection/order")
+    def api_selection_order():
+        core.write_current_playlist()
+        return jsonify(channels=core.selected_channel_order_payload())
+
+    @app.post("/api/selection/order")
+    def api_save_selection_order():
+        data = request.get_json(force=True, silent=True) or {}
+        keys = [str(k).strip() for k in data.get("keys", []) if str(k).strip()]
+
+        count = core.save_channel_order(keys)
+        core.write_current_playlist()
+        core.save_config()
+
+        return jsonify(count=count, url="/playlist/custom.m3u")
+
     @app.get("/api/channels")
     def api_channels():
         return jsonify(

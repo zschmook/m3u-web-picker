@@ -104,3 +104,26 @@ body { background: #111827; color: #e5e7eb; }
     padding-bottom: 0;
   }
 }
+
+
+/* v18 UI Cleanup v9 order modal */
+.order-list-wrap {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: .5rem;
+}
+
+#orderTable tr {
+  cursor: pointer;
+}
+
+#orderTable tr.order-selected > td {
+  background: #374151 !important;
+}
+
+
+/* v11 Manage Order polish */
+#manageOrderBtn {
+  margin-left: 6px;
+}

@@ -18,8 +18,6 @@ Run:
 ```bash
 pip install -r requirements.txt
 python app.py
-or 
-python3 app.py
 ```
 
 Open:
@@ -86,3 +84,29 @@ V_18_UI_Cleanup_v8:
 - API routes now reference shared state through the `core` module instead of copied globals.
 - This keeps selected channel state and loaded channel catalog in sync when saving.
 - Removed the stale `/epg.xml` route from the cleanup branch.
+
+
+V_18_UI_Cleanup_v9:
+- Added `python3 app.py -d` / `--dev` to run on port 9998.
+- Added Manage Order button next to custom.m3u URL.
+- Added Custom Playlist Order modal.
+- Selected channels now keep a persistent `sort_order` in SQLite.
+- Saving order rewrites `custom.m3u` in that order.
+
+
+V_18_UI_Cleanup_v10:
+- Fixed Manage Order modal not loading saved channels.
+- v9 wrote custom.m3u from DB order first, so newly selected in-memory channels could be missing from the DB/order payload.
+- v10 writes from the current selected_ids, preserves existing sort_order, and refreshes the DB before opening the order modal.
+
+
+V_18_UI_Cleanup_v12:
+- Removed the search textbox from the Manage Order popup.
+- Popup now focuses only on Move Up / Move Down and Save Order.
+
+
+V_18_UI_Cleanup_v15:
+- Rebuilt from v12.
+- Custom Groups UI is hidden using `d-none` instead of being commented out.
+- This preserves the DOM elements that the existing JavaScript expects.
+- Provider URL loading should work again.

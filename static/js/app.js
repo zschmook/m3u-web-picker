@@ -424,6 +424,92 @@ if (els.excludeSdChannels) {
   });
 }
 
+
+
+// Custom playlist order modal
+let orderChannels = [];
+let orderSelectedKey = "";
+
+function renderOrderTable() {
+  const tbody = document.getElementById("orderTable");
+
+  tbody.innerHTML = orderChannels.map(ch => {
+    const index = orderChannels.findIndex(item => item.key === ch.key);
+    return `
+      <tr data-key="${escapeHtml(ch.key)}" class="${ch.key === orderSelectedKey ? "order-selected" : ""}">
+        <td>${index + 1}</td>
+        <td>${escapeHtml(ch.name || ch.url)}</td>
+        <td>${escapeHtml(ch.group || "")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function openOrderModal() {
+  const res = await fetch("/api/selection/order");
+  const data = await res.json();
+
+  orderChannels = data.channels || [];
+  orderSelectedKey = "";
+
+  renderOrderTable();
+
+  const modal = new bootstrap.Modal(document.getElementById("orderModal"));
+  modal.show();
+}
+
+function moveSelectedOrder(direction) {
+  if (!orderSelectedKey) return;
+
+  const idx = orderChannels.findIndex(ch => ch.key === orderSelectedKey);
+  if (idx < 0) return;
+
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= orderChannels.length) return;
+
+  const [item] = orderChannels.splice(idx, 1);
+  orderChannels.splice(newIdx, 0, item);
+
+  renderOrderTable();
+}
+
+async function saveOrder() {
+  const keys = orderChannels.map(ch => ch.key);
+
+  const res = await fetch("/api/selection/order", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({keys})
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    return alert(data.error || "Could not save order.");
+  }
+
+  setStatus(`Saved custom.m3u order for ${data.count} channels.`);
+
+  const modalEl = document.getElementById("orderModal");
+  const modal = bootstrap.Modal.getInstance(modalEl);
+  if (modal) {
+    modal.hide();
+  }
+}
+
+document.getElementById("manageOrderBtn").addEventListener("click", openOrderModal);
+
+document.getElementById("orderTable").addEventListener("click", e => {
+  const row = e.target.closest("tr");
+  if (!row) return;
+  orderSelectedKey = row.dataset.key;
+  renderOrderTable();
+});
+
+document.getElementById("moveOrderUpBtn").addEventListener("click", () => moveSelectedOrder(-1));
+document.getElementById("moveOrderDownBtn").addEventListener("click", () => moveSelectedOrder(1));
+document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
+
 loadInitialChannels();
 loadGroups();
 render();
