@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+config.json
+*.db
+*.m3u
+
+data/
+.env
+.vscode/
+.idea/
