@@ -151,3 +151,11 @@ body { background: #111827; color: #e5e7eb; }
 .search-clear-btn:hover {
   color: #ffffff;
 }
+
+
+/* V19.2 status polish */
+.status-line {
+  color: #ffffff;
+  font-weight: 700;
+  margin-bottom: 6px;
+}

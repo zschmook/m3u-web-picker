@@ -134,3 +134,10 @@ New in V19:
 - Added an inline `X` button inside the search box.
 - The button appears only when search text exists.
 - Clicking it clears search, refreshes the channel list, and keeps focus in the search box.
+
+
+## V19.2
+
+- Moved status display above the Hide SD / LOW BANDWIDTH checkbox.
+- Added inline `Status:` label.
+- Made status line bold white for better visibility.
