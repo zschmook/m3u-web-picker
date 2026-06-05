@@ -106,6 +106,29 @@ def channel_key(channel: dict) -> str:
     return str(channel.get("url", "")).strip()
 
 
+def rewrite_extinf_attr(line: str, key: str, value: str) -> str:
+    if not line.startswith("#EXTINF"):
+        return line
+
+    if re.search(rf'{re.escape(key)}="[^"]*"', line):
+        return re.sub(rf'{re.escape(key)}="[^"]*"', f'{key}="{value}"', line)
+
+    if "," in line:
+        left, right = line.rsplit(",", 1)
+        return f'{left} {key}="{value}",{right}'
+
+    return f'{line} {key}="{value}"'
+
+
+def apply_channel_number(channel: dict, number: int) -> list[str]:
+    raw = list(channel.get("raw", []))
+    if not raw:
+        return raw
+
+    raw[0] = rewrite_extinf_attr(raw[0], "tvg-chno", str(number))
+    return raw
+
+
 def load_selected_keys_from_db() -> set[str]:
     conn = db_connect()
     try:
@@ -335,8 +358,8 @@ def write_current_playlist() -> int:
     selected_channels = selected_channels_from_selected_ids_in_order()
 
     lines = ["#EXTM3U"]
-    for ch in selected_channels:
-        lines.extend(ch["raw"])
+    for number, ch in enumerate(selected_channels, start=1):
+        lines.extend(apply_channel_number(ch, number))
 
     PLAYLIST_PATH.write_text("\n".join(lines), encoding="utf-8")
     save_selected_channels_to_db(selected_channels)

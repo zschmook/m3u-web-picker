@@ -127,3 +127,27 @@ body { background: #111827; color: #e5e7eb; }
 #manageOrderBtn {
   margin-left: 6px;
 }
+
+
+/* V19.1 search clear button */
+.search-input-wrap {
+  position: relative;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.search-clear-btn:hover {
+  color: #ffffff;
+}

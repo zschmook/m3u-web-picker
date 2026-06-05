@@ -101,7 +101,10 @@
         <div class="filter-toolbar">
           <div class="filter-search">
             <label class="form-label mb-1">Search</label>
-            <input id="search" class="form-control" placeholder="channel, group, or URL">
+            <div class="search-input-wrap">
+              <input id="search" class="form-control pe-5" placeholder="channel, group, or URL">
+              <button id="clearSearchBtn" class="search-clear-btn d-none" type="button" aria-label="Clear search">×</button>
+            </div>
           </div>
 
           <div class="filter-provider">

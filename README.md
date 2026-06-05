@@ -110,3 +110,23 @@ V_18_UI_Cleanup_v15:
 - Custom Groups UI is hidden using `d-none` instead of being commented out.
 - This preserves the DOM elements that the existing JavaScript expects.
 - Provider URL loading should work again.
+
+
+# V19 M3U Proxy
+
+Promoted from the v18 UI cleanup branch.
+
+New in V19:
+- Auto-generates `tvg-chno` channel numbers in `custom.m3u`.
+- Channel numbers follow the saved custom playlist order.
+- Reordering channels in Manage Order rewrites channel numbers on save.
+- Existing provider `tvg-chno` values are replaced.
+- Missing `tvg-chno` values are added.
+- Custom Groups UI remains hidden.
+
+
+## V19.1
+
+- Added an inline `X` button inside the search box.
+- The button appears only when search text exists.
+- Clicking it clears search, refreshes the channel list, and keeps focus in the search box.

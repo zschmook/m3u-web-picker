@@ -26,6 +26,19 @@ els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
 
 function setStatus(msg) { els.status.textContent = msg || ""; }
 
+
+function updateClearSearchButton() {
+  const btn = document.getElementById("clearSearchBtn");
+  if (!btn) return;
+
+  if (els.search.value.length > 0) {
+    btn.classList.remove("d-none");
+  } else {
+    btn.classList.add("d-none");
+  }
+}
+
+
 async function copyInputValue(inputId, buttonId) {
   const input = document.getElementById(inputId);
   const btn = document.getElementById(buttonId);
@@ -410,7 +423,10 @@ document.getElementById("groupPills").addEventListener("click", e => {
   setActiveGroup(pill.dataset.slug);
 });
 
-els.search.addEventListener("input", render);
+els.search.addEventListener("input", () => {
+  updateClearSearchButton();
+  render();
+});
 els.groupFilter.addEventListener("change", render);
 els.selectedOnly.addEventListener("change", render);
 if (els.excludeSdChannels) {
@@ -510,6 +526,15 @@ document.getElementById("moveOrderUpBtn").addEventListener("click", () => moveSe
 document.getElementById("moveOrderDownBtn").addEventListener("click", () => moveSelectedOrder(1));
 document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
 
+
+document.getElementById("clearSearchBtn").addEventListener("click", () => {
+  els.search.value = "";
+  updateClearSearchButton();
+  render();
+  els.search.focus();
+});
+
 loadInitialChannels();
 loadGroups();
 render();
+updateClearSearchButton();
