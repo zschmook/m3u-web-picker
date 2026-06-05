@@ -72,6 +72,52 @@ function setSourceMode(mode) {
   }
 }
 
+
+function lockLoadedSourceControls() {
+  const urlInput = document.getElementById("m3uUrl");
+  const loadUrlBtn = document.getElementById("loadUrlBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
+  const fileInput = document.getElementById("m3uFile");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const label = document.getElementById("sourceModeLabel");
+
+  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
+
+  urlInput.value = "Source Loaded";
+  urlInput.disabled = true;
+  urlInput.classList.add("source-loaded-placeholder");
+
+  loadUrlBtn.disabled = true;
+  if (fileInput) fileInput.disabled = true;
+  if (uploadBtn) uploadBtn.disabled = true;
+
+  changeSourceBtn.classList.remove("d-none");
+  if (label) label.textContent = "Source loaded. Click Change Source to replace it.";
+}
+
+function unlockLoadedSourceControls() {
+  const urlInput = document.getElementById("m3uUrl");
+  const loadUrlBtn = document.getElementById("loadUrlBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
+  const fileInput = document.getElementById("m3uFile");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const label = document.getElementById("sourceModeLabel");
+
+  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
+
+  urlInput.value = "";
+  urlInput.disabled = false;
+  urlInput.classList.remove("source-loaded-placeholder");
+
+  loadUrlBtn.disabled = false;
+  if (fileInput) fileInput.disabled = false;
+  if (uploadBtn) uploadBtn.disabled = false;
+
+  changeSourceBtn.classList.add("d-none");
+  if (label) label.textContent = "Choose a source URL or upload an M3U file.";
+  urlInput.focus();
+}
+
 function showUrlModal() {
   const modalEl = document.getElementById("urlModal");
   const modalInput = document.getElementById("modalUrlInput");
@@ -289,6 +335,7 @@ async function loadFromUrl() {
   rebuildProviderGroupFilter();
   render();
   setSourceMode("url");
+  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
   setStatus(`Loaded ${channels.length} channels from URL.`);
 }
@@ -309,6 +356,7 @@ async function uploadFile() {
   rebuildProviderGroupFilter();
   render();
   setSourceMode("file");
+  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
   setStatus(`Loaded ${channels.length} channels from file.`);
 }
@@ -331,6 +379,7 @@ async function loadInitialChannels() {
     }
 
     if (channels.length > 0) {
+      lockLoadedSourceControls();
       setStatus(`Loaded ${channels.length} cached channels.`);
     }
   } catch (err) {
@@ -381,17 +430,6 @@ document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyI
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
 document.getElementById("modalLoadBtn").addEventListener("click", acceptModalUrl);
 document.getElementById("modalUrlInput").addEventListener("keydown", e => { if (e.key === "Enter") acceptModalUrl(); });
-document.getElementById("changeSourceBtn").addEventListener("click", () => { setSourceMode(""); setStatus("Source unlocked."); });
-document.getElementById("createGroupBtn").addEventListener("click", createGroup);
-document.getElementById("newGroupName").addEventListener("keydown", e => { if (e.key === "Enter") createGroup(); });
-els.activeGroup.addEventListener("change", e => setActiveGroup(e.target.value));
-document.getElementById("addVisibleToGroupBtn").addEventListener("click", addVisibleToGroup);
-document.getElementById("removeVisibleFromGroupBtn").addEventListener("click", removeVisibleFromGroup);
-document.getElementById("showGroupOnlyBtn").addEventListener("click", () => {
-  showGroupOnly = activeGroupSlug ? !showGroupOnly : false;
-  setStatus(showGroupOnly ? "Showing active group only." : "Showing all matching channels.");
-  render();
-});
 
 document.getElementById("selectVisibleBtn").addEventListener("click", () => {
   const visible = filteredChannels();
@@ -532,6 +570,12 @@ document.getElementById("clearSearchBtn").addEventListener("click", () => {
   updateClearSearchButton();
   render();
   els.search.focus();
+});
+
+
+document.getElementById("changeSourceBtn").addEventListener("click", () => {
+  unlockLoadedSourceControls();
+  setStatus("Source cleared. Paste a URL or choose a file.");
 });
 
 loadInitialChannels();

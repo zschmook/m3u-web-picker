@@ -141,3 +141,11 @@ New in V19:
 - Moved status display above the Hide SD / LOW BANDWIDTH checkbox.
 - Added inline `Status:` label.
 - Made status line bold white for better visibility.
+
+
+## V19.13
+
+- Removes appdirs/platformdirs/Application Support style runtime persistence.
+- Runtime files are app-folder local.
+- Source input changes to `Source Loaded` after successful URL/file/cached load.
+- `Change Source` unlocks source controls.

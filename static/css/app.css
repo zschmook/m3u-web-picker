@@ -159,3 +159,10 @@ body { background: #111827; color: #e5e7eb; }
   font-weight: 700;
   margin-bottom: 6px;
 }
+
+
+/* V19.13 source privacy */
+.source-loaded-placeholder {
+  font-weight: 700;
+  color: #e5e7eb;
+}
