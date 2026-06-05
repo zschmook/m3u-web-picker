@@ -26,7 +26,7 @@ Open:
 ```text
 http://localhost:9999
 or
-http://localhost:9999 (if in debug mode)
+http://localhost:9998 (if in debug mode)
 ```
 
 Note:
