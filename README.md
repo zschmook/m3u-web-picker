@@ -17,7 +17,9 @@ Changes:
 Run:
 ```bash
 pip install -r requirements.txt
-python app.py
+python3 app.py
+or
+python3 app.py -d for debug on port 9998 so that you can run two at a time for testing
 ```
 
 Open:
