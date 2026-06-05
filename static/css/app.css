@@ -1,0 +1,106 @@
+body { background: #111827; color: #e5e7eb; }
+    .card { background: #1f2937; border-color: #374151; }
+    .form-control, .form-select { background: #111827; color: #e5e7eb; border-color: #4b5563; }
+    .form-control:focus, .form-select:focus { background: #111827; color: #e5e7eb; }
+    .form-control:disabled { background: #374151; color: #9ca3af; }
+    .table {
+      --bs-table-bg: #111827;
+      --bs-table-color: #e5e7eb;
+      --bs-table-border-color: #374151;
+      --bs-table-hover-bg: #1f2937;
+      --bs-table-hover-color: #ffffff;
+    }
+    .table-wrap { max-height: 58vh; overflow: auto; border: 1px solid #374151; border-radius: .5rem; }
+    thead th { position: sticky; top: 0; background: #1f2937 !important; z-index: 2; }
+    .small-muted { color: #9ca3af; font-size: .9rem; }
+    .url-cell { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .group-pill { cursor: pointer; }
+    .group-pill.active { outline: 2px solid #22c55e; }
+
+.toolbar-row{
+  display:flex;
+  align-items:flex-start;
+  gap:16px;
+  flex-wrap:wrap;
+}
+.toolbar-spacer{
+  flex:1;
+}
+.autosave-inline{
+  white-space:nowrap;
+  margin-top:28px;
+}
+
+
+/* v18 UI Cleanup v5 SD filter */
+#excludeSdChannels {
+  cursor: pointer;
+}
+
+
+
+
+
+/* v18 UI Cleanup v7 filter layout */
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sd-filter-row {
+  margin-bottom: 2px;
+}
+
+.filter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(260px, 360px) auto;
+  align-items: end;
+  gap: 16px;
+}
+
+.filter-search {
+  min-width: 320px;
+}
+
+.filter-provider {
+  min-width: 260px;
+}
+
+.filter-autosave {
+  justify-self: end;
+  align-self: end;
+  padding-bottom: 4px;
+  white-space: nowrap;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e5e7eb;
+}
+
+.filter-option .form-check-input {
+  margin: 0;
+}
+
+.search-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+@media (max-width: 1000px) {
+  .filter-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .filter-autosave {
+    justify-self: start;
+    align-self: start;
+    padding-bottom: 0;
+  }
+}

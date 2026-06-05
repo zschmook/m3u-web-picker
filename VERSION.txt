@@ -1,0 +1,3 @@
+V_18_UI_Cleanup_v8
+
+Fixes custom.m3u empty output caused by split module state.
