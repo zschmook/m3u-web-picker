@@ -18,6 +18,8 @@ Run:
 ```bash
 pip install -r requirements.txt
 python app.py
+or 
+python3 app.py
 ```
 
 Open:
