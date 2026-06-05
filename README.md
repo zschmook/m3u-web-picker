@@ -19,12 +19,14 @@ Run:
 pip install -r requirements.txt
 python3 app.py
 or
-python3 app.py -d for debug on port 9998 so that you can run two at a time for testing
+python3 app.py -d (for debug on port 9998 so that you can run two at a time for testing)
 ```
 
 Open:
 ```text
 http://localhost:9999
+or
+http://localhost:9999 (if in debug mode)
 ```
 
 Note:
