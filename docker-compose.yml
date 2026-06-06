@@ -1,0 +1,7 @@
+services:
+  m3u-picker:
+    build: .
+    container_name: m3u-picker
+    ports:
+      - "9999:9999"
+    restart: unless-stopped
