@@ -116,6 +116,16 @@ def register_routes(app):
             schedule={"hour": core.SCHEDULE_HOUR, "minute": core.SCHEDULE_MINUTE},
         )
 
+    
+    @app.get("/export")
+    def export_playlist():
+        return send_file(
+            core.PLAYLIST_PATH,
+            as_attachment=True,
+            download_name="download.m3u",
+            mimetype="audio/x-mpegurl",
+        )
+
     @app.get("/playlist/custom.m3u")
     def playlist():
         if not core.PLAYLIST_PATH.exists():

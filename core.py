@@ -11,15 +11,14 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-
-APP_DIR = Path(__file__).resolve().parent
 from typing import List
 
 from flask import Flask, Response, jsonify, request, send_file
 
 
+APP_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = APP_DIR / "exports"
-EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+EXPORT_DIR.mkdir(exist_ok=True)
 
 DB_PATH = APP_DIR / "m3u_picker.db"
 CONFIG_PATH = APP_DIR / "config.json"
@@ -49,8 +48,6 @@ class Entry:
     url: str
     raw: list[str]
 
-
-EPG_CACHE_PATH = APP_DIR / "epg.xml"
 
 def db_connect():
     conn = sqlite3.connect(DB_PATH)

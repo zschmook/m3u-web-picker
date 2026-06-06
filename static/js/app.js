@@ -57,18 +57,29 @@ function setSourceMode(mode) {
   const fileBtn = document.getElementById("uploadBtn");
   const label = document.getElementById("sourceModeLabel");
 
+  // If the source is locked after a successful load, do not unlock it here.
+  if (urlInput && urlInput.value === "Source Loaded") {
+    return;
+  }
+
   if (mode === "url") {
-    fileInput.disabled = true; fileBtn.disabled = true;
-    urlInput.disabled = false; urlBtn.disabled = false;
-    label.textContent = "URL source active. File loading disabled.";
+    if (fileInput) fileInput.disabled = true;
+    if (fileBtn) fileBtn.disabled = true;
+    if (urlInput) urlInput.disabled = false;
+    if (urlBtn) urlBtn.disabled = false;
+    if (label) label.textContent = "URL source active. File loading disabled.";
   } else if (mode === "file") {
-    urlInput.disabled = true; urlBtn.disabled = true;
-    fileInput.disabled = false; fileBtn.disabled = false;
-    label.textContent = "File source active. URL loading disabled.";
+    if (urlInput) urlInput.disabled = true;
+    if (urlBtn) urlBtn.disabled = true;
+    if (fileInput) fileInput.disabled = false;
+    if (fileBtn) fileBtn.disabled = false;
+    if (label) label.textContent = "File source active. URL loading disabled.";
   } else {
-    urlInput.disabled = false; urlBtn.disabled = false;
-    fileInput.disabled = false; fileBtn.disabled = false;
-    label.textContent = "";
+    if (urlInput) urlInput.disabled = false;
+    if (urlBtn) urlBtn.disabled = false;
+    if (fileInput) fileInput.disabled = false;
+    if (fileBtn) fileBtn.disabled = false;
+    if (label) label.textContent = "";
   }
 }
 
@@ -76,9 +87,9 @@ function setSourceMode(mode) {
 function lockLoadedSourceControls() {
   const urlInput = document.getElementById("m3uUrl");
   const loadUrlBtn = document.getElementById("loadUrlBtn");
-  const changeSourceBtn = document.getElementById("changeSourceBtn");
   const fileInput = document.getElementById("m3uFile");
   const uploadBtn = document.getElementById("uploadBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
   const label = document.getElementById("sourceModeLabel");
 
   if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
@@ -98,9 +109,9 @@ function lockLoadedSourceControls() {
 function unlockLoadedSourceControls() {
   const urlInput = document.getElementById("m3uUrl");
   const loadUrlBtn = document.getElementById("loadUrlBtn");
-  const changeSourceBtn = document.getElementById("changeSourceBtn");
   const fileInput = document.getElementById("m3uFile");
   const uploadBtn = document.getElementById("uploadBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
   const label = document.getElementById("sourceModeLabel");
 
   if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
@@ -110,11 +121,15 @@ function unlockLoadedSourceControls() {
   urlInput.classList.remove("source-loaded-placeholder");
 
   loadUrlBtn.disabled = false;
-  if (fileInput) fileInput.disabled = false;
+  if (fileInput) {
+    fileInput.disabled = false;
+    fileInput.value = "";
+  }
   if (uploadBtn) uploadBtn.disabled = false;
 
   changeSourceBtn.classList.add("d-none");
-  if (label) label.textContent = "Choose a source URL or upload an M3U file.";
+  if (label) label.textContent = "";
+
   urlInput.focus();
 }
 
@@ -381,6 +396,8 @@ async function loadInitialChannels() {
     if (channels.length > 0) {
       lockLoadedSourceControls();
       setStatus(`Loaded ${channels.length} cached channels.`);
+    } else {
+      unlockLoadedSourceControls();
     }
   } catch (err) {
     setStatus("Could not load cached channels.");
@@ -430,6 +447,17 @@ document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyI
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
 document.getElementById("modalLoadBtn").addEventListener("click", acceptModalUrl);
 document.getElementById("modalUrlInput").addEventListener("keydown", e => { if (e.key === "Enter") acceptModalUrl(); });
+document.getElementById("changeSourceBtn").addEventListener("click", () => { setSourceMode(""); setStatus("Source unlocked."); });
+document.getElementById("createGroupBtn").addEventListener("click", createGroup);
+document.getElementById("newGroupName").addEventListener("keydown", e => { if (e.key === "Enter") createGroup(); });
+els.activeGroup.addEventListener("change", e => setActiveGroup(e.target.value));
+document.getElementById("addVisibleToGroupBtn").addEventListener("click", addVisibleToGroup);
+document.getElementById("removeVisibleFromGroupBtn").addEventListener("click", removeVisibleFromGroup);
+document.getElementById("showGroupOnlyBtn").addEventListener("click", () => {
+  showGroupOnly = activeGroupSlug ? !showGroupOnly : false;
+  setStatus(showGroupOnly ? "Showing active group only." : "Showing all matching channels.");
+  render();
+});
 
 document.getElementById("selectVisibleBtn").addEventListener("click", () => {
   const visible = filteredChannels();
@@ -570,12 +598,6 @@ document.getElementById("clearSearchBtn").addEventListener("click", () => {
   updateClearSearchButton();
   render();
   els.search.focus();
-});
-
-
-document.getElementById("changeSourceBtn").addEventListener("click", () => {
-  unlockLoadedSourceControls();
-  setStatus("Source cleared. Paste a URL or choose a file.");
 });
 
 loadInitialChannels();

@@ -1,3 +1,3 @@
-V19.13_App_Folder_State_Source_Loaded
+V20_Export_Source_Loaded_Fix_Source
 
-Removes Application Support persistence and applies Source Loaded after successful source load.
+Fixes source controls after restoring Source Loaded behavior.

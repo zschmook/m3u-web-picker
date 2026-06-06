@@ -143,9 +143,9 @@ New in V19:
 - Made status line bold white for better visibility.
 
 
-## V19.13
+## V20 Source Loaded + Export
 
-- Removes appdirs/platformdirs/Application Support style runtime persistence.
-- Runtime files are app-folder local.
-- Source input changes to `Source Loaded` after successful URL/file/cached load.
-- `Change Source` unlocks source controls.
+- Restored `Source Loaded` behavior after successful channel table load.
+- Source controls lock only after URL/file/cached channels successfully load.
+- Export remains after Manage Order.
+- `/export` downloads the canonical `custom.m3u` as `download.m3u`.

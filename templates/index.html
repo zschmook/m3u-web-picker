@@ -22,7 +22,7 @@
         <div class="input-group mb-2">
           <input id="playlistUrl" class="form-control" readonly>
           <button class="btn btn-success" id="copyPlaylistBtn" type="button">Copy</button>
-          <button class="btn btn-outline-light" id="manageOrderBtn" type="button">Manage Order</button>
+<a class="btn btn-outline-light ms-2" id="exportPlaylistBtn" href="/export">Export</a>
         </div>
       </div>
     </div>
@@ -50,7 +50,7 @@
         </div>
 
         <div class="mt-3">
-          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm" type="button">Change Source</button>
+          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm d-none" type="button">Change Source</button>
           <span id="sourceModeLabel" class="small-muted ms-2"></span>
         </div>
       </div>
@@ -116,6 +116,9 @@
 
           <div class="filter-autosave">
             <span class="badge text-bg-success p-2" title="Selections are saved automatically">Auto-save enabled</span>
+              <div class="mt-2">
+                <button class="btn btn-outline-light btn-sm" id="manageOrderBtn" type="button">Manage Order</button>
+              </div>
           </div>
         </div>
 
