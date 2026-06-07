@@ -18,6 +18,7 @@ from typing import List
 from flask import Flask, Response, jsonify, request, send_file
 
 
+# All app-generated files must stay inside this folder.
 APP_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = APP_DIR / "exports"
 EXPORT_DIR.mkdir(exist_ok=True)
