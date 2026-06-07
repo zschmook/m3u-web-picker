@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import gzip
 import json
 import re
+import ssl
 import sqlite3
 import threading
 import time
@@ -23,6 +25,8 @@ EXPORT_DIR.mkdir(exist_ok=True)
 DB_PATH = APP_DIR / "m3u_picker.db"
 CONFIG_PATH = APP_DIR / "config.json"
 MASTER_CACHE_PATH = APP_DIR / "master_playlist_cache.m3u"
+EPG_DIR = APP_DIR / "epg"
+EPG_DIR.mkdir(exist_ok=True)
 
 PLAYLIST_NAME = "custom.m3u"
 PLAYLIST_PATH = EXPORT_DIR / PLAYLIST_NAME
@@ -30,6 +34,7 @@ PORT = 9999
 
 SCHEDULE_HOUR = 3
 SCHEDULE_MINUTE = 0
+EPG_REFRESH_OFFSET_MINUTES = 15
 
 
 channels: List[dict] = []
@@ -37,7 +42,9 @@ selected_ids: set[int] = set()
 last_source_url = ""
 last_refresh = None
 source_mode = ""
+epg_sources: list[dict] = []
 scheduler_started = False
+epg_startup_cache_started = False
 
 
 @dataclass
@@ -266,16 +273,32 @@ def save_config() -> None:
         "source_mode": source_mode,
         "last_refresh": last_refresh,
         "schedule": {"hour": SCHEDULE_HOUR, "minute": SCHEDULE_MINUTE},
+        "epg_sources": epg_sources,
+        "epg_schedule": {"offset_minutes_after_m3u": EPG_REFRESH_OFFSET_MINUTES},
     }
     CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def restore_config() -> None:
-    global last_source_url, source_mode, last_refresh
+    global last_source_url, source_mode, last_refresh, epg_sources
     data = load_config()
     last_source_url = str(data.get("source_url", "")).strip()
     source_mode = str(data.get("source_mode", "")).strip()
     last_refresh = data.get("last_refresh")
+    epg_sources = []
+    for source in data.get("epg_sources", []) or []:
+        name = str(source.get("name", "")).strip()
+        url = str(source.get("url", "")).strip()
+        if not name or not url:
+            continue
+        source_id = normalize_epg_id(source.get("id") or name)
+        epg_sources.append({
+            "id": source_id,
+            "name": name,
+            "url": url,
+            "last_refresh": source.get("last_refresh"),
+            "last_error": source.get("last_error"),
+        })
 
 
 def parse_m3u_text(text: str) -> list[dict]:
@@ -317,14 +340,73 @@ def parse_m3u_text(text: str) -> list[dict]:
     return [asdict(entry) for entry in parsed]
 
 
-def download_url_text(url: str, timeout: int = 90) -> str:
+def download_url_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict]:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "M3U-Web-Picker/1.0", "Accept": "*/*"},
+        headers={
+            "User-Agent": "M3U-Web-Picker/1.0",
+            "Accept": "*/*",
+            # Do not let servers apply transparent HTTP compression.
+            # XMLTV .gz URLs are still handled explicitly below.
+            "Accept-Encoding": "identity",
+        },
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:
         raw = response.read()
+        headers = dict(response.headers.items())
+    return raw, headers
+
+
+def download_url_text(url: str, timeout: int = 90) -> str:
+    raw, headers = download_url_bytes(url, timeout=timeout)
     return raw.decode("utf-8-sig", errors="replace")
+
+
+def download_epg_url_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict]:
+    """Download provider EPG bytes only.
+
+    Some XMLTV providers have broken/self-signed/expired TLS chains. Ignore SSL
+    verification here only; M3U downloading and M3U serving continue to use the
+    existing code paths unchanged.
+    """
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "M3U-Web-Picker/1.0",
+            "Accept": "application/xml,text/xml,*/*",
+            "Accept-Encoding": "identity",
+        },
+    )
+    context = ssl._create_unverified_context() if url.lower().startswith("https://") else None
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
+        raw = response.read()
+        headers = dict(response.headers.items())
+    return raw, headers
+
+
+def download_epg_bytes(url: str, timeout: int = 90) -> bytes:
+    """Download an XMLTV EPG and return XML bytes suitable to serve directly.
+
+    Preserve provider bytes instead of decoding/re-encoding so XML declarations
+    and non-UTF-8 encodings remain intact for clients like Jellyfin. If the
+    provider URL/headers indicate gzip, decompress once and cache the XML bytes.
+    """
+    raw, headers = download_epg_url_bytes(url, timeout=timeout)
+    content_encoding = str(headers.get("Content-Encoding", "")).lower()
+    content_type = str(headers.get("Content-Type", "")).lower()
+    is_gzip = (
+        "gzip" in content_encoding
+        or "gzip" in content_type
+        or url.lower().endswith((".gz", ".gzip"))
+        or raw.startswith(b"\x1f\x8b")
+    )
+    if is_gzip:
+        raw = gzip.decompress(raw)
+    return raw
+
+
+def download_epg_text(url: str, timeout: int = 90) -> str:
+    return download_epg_bytes(url, timeout=timeout).decode("utf-8-sig", errors="replace")
 
 
 def download_m3u_text(url: str, timeout: int = 60) -> str:
@@ -426,6 +508,110 @@ def m3u_from_channels(items: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+
+def normalize_epg_id(source_id: str) -> str:
+    return slugify(str(source_id or "").removesuffix(".xml"))
+
+
+def epg_cache_path(source_id: str) -> Path:
+    return EPG_DIR / f"{normalize_epg_id(source_id)}.xml"
+
+
+def epg_public_url(source_id: str) -> str:
+    return f"/epg/{normalize_epg_id(source_id)}.xml"
+
+
+def find_epg_source(source_id: str) -> dict | None:
+    wanted = normalize_epg_id(source_id)
+    return next((item for item in epg_sources if normalize_epg_id(item.get("id")) == wanted), None)
+
+
+def epg_sources_payload() -> list[dict]:
+    payload = []
+    for source in epg_sources:
+        source_id = normalize_epg_id(source.get("id"))
+        item = dict(source)
+        item["id"] = source_id
+        item["url_path"] = epg_public_url(source_id)
+        item["cached"] = epg_cache_path(source_id).exists()
+        payload.append(item)
+    return payload
+
+
+def add_epg_source(name: str, url: str) -> dict:
+    global epg_sources
+    name = name.strip()
+    url = url.strip()
+    if not name:
+        raise ValueError("EPG name is required.")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("EPG URL must start with http:// or https://")
+
+    source_id = unique_epg_id(name)
+    source = {
+        "id": source_id,
+        "name": name,
+        "url": url,
+        "last_refresh": None,
+        "last_error": None,
+    }
+    epg_sources.append(source)
+    save_config()
+    return source
+
+
+def unique_epg_id(name: str) -> str:
+    base = normalize_epg_id(name)
+    existing = {normalize_epg_id(source.get("id", "")) for source in epg_sources}
+    source_id = base
+    i = 2
+    while source_id in existing:
+        source_id = f"{base}-{i}"
+        i += 1
+    return source_id
+
+
+def delete_epg_source(source_id: str) -> bool:
+    global epg_sources
+    wanted = normalize_epg_id(source_id)
+    before = len(epg_sources)
+    epg_sources = [source for source in epg_sources if normalize_epg_id(source.get("id")) != wanted]
+    try:
+        epg_cache_path(wanted).unlink(missing_ok=True)
+    except Exception:
+        pass
+    save_config()
+    return len(epg_sources) != before
+
+def refresh_epg_source(source_id: str) -> tuple[bool, str]:
+    source_id = normalize_epg_id(source_id)
+    source = find_epg_source(source_id)
+    if not source:
+        return False, "EPG source not found."
+
+    try:
+        raw = download_epg_bytes(source["url"], timeout=90)
+        epg_cache_path(source_id).write_bytes(raw)
+        source["last_refresh"] = datetime.now().isoformat(timespec="seconds")
+        source["last_error"] = None
+        save_config()
+        return True, f"Refreshed {source['name']}."
+    except Exception as exc:
+        source["last_error"] = str(exc)
+        save_config()
+        return False, str(exc)
+
+
+def refresh_all_epg_sources() -> dict:
+    results = []
+    ok_count = 0
+    for source in list(epg_sources):
+        ok, message = refresh_epg_source(source["id"])
+        ok_count += 1 if ok else 0
+        results.append({"id": source["id"], "name": source["name"], "ok": ok, "message": message})
+    return {"count": len(results), "ok_count": ok_count, "results": results}
+
+
 def refresh_master_from_url() -> tuple[bool, str]:
     global channels, last_refresh, source_mode
     if not last_source_url:
@@ -457,6 +643,8 @@ def scheduler_loop() -> None:
     while True:
         time.sleep(seconds_until_next_run(SCHEDULE_HOUR, SCHEDULE_MINUTE))
         refresh_master_from_url()
+        time.sleep(EPG_REFRESH_OFFSET_MINUTES * 60)
+        refresh_all_epg_sources()
 
 
 def start_scheduler_once() -> None:
@@ -465,6 +653,28 @@ def start_scheduler_once() -> None:
         return
     scheduler_started = True
     threading.Thread(target=scheduler_loop, daemon=True).start()
+
+
+def refresh_missing_epg_caches() -> None:
+    """Generate any missing EPG cache files after startup.
+
+    EPG source configuration and EPG cache files are separate. On a fresh
+    install/rebuild the config can exist while the cache directory is empty,
+    so generate missing caches immediately instead of waiting for the 3:15 AM
+    scheduled refresh.
+    """
+    for source in list(epg_sources):
+        source_id = normalize_epg_id(source.get("id"))
+        if source_id and not epg_cache_path(source_id).exists():
+            refresh_epg_source(source_id)
+
+
+def start_epg_startup_cache_once() -> None:
+    global epg_startup_cache_started
+    if epg_startup_cache_started:
+        return
+    epg_startup_cache_started = True
+    threading.Thread(target=refresh_missing_epg_caches, daemon=True).start()
 
 
 restore_config()
@@ -484,4 +694,5 @@ def load_cached_master_playlist_on_startup() -> None:
         print(f"Startup cache load failed: {exc}")
 
 load_cached_master_playlist_on_startup()
+start_epg_startup_cache_once()
 start_scheduler_once()

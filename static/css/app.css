@@ -166,3 +166,90 @@ body { background: #111827; color: #e5e7eb; }
   font-weight: 700;
   color: #e5e7eb;
 }
+
+/* EPG source manager */
+.epg-add-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(320px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.epg-list {
+  font-size: .9rem;
+}
+
+.epg-table-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: .5rem;
+}
+
+.epg-table-wrap th,
+.epg-table-wrap td {
+  white-space: nowrap;
+}
+
+.epg-name-cell {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.epg-url-cell {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.epg-served-cell {
+  min-width: 260px;
+  max-width: 380px;
+}
+
+.epg-status-cell {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 900px) {
+  .epg-add-row {
+    grid-template-columns: 1fr;
+  }
+
+  .epg-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* v33 manager labels */
+.manager-heading {
+  margin-bottom: .65rem;
+}
+
+.manager-title {
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: .035em;
+  font-size: 1.25rem;
+  line-height: 1.15;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  text-transform: uppercase;
+}
+
+.manager-icon {
+  color: #0d6efd;
+  font-size: 1.15rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.form-label {
+  color: #ffffff;
+  font-weight: 700;
+}

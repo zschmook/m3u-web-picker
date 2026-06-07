@@ -5,6 +5,7 @@ let customGroups = [];
 let activeGroupSlug = "";
 let activeGroupMembers = new Set();
 let showGroupOnly = false;
+let epgSources = [];
 
 const els = {
   table: document.getElementById("channelTable"),
@@ -39,11 +40,43 @@ function updateClearSearchButton() {
 }
 
 
+async function copyTextValue(value, input = null) {
+  const text = String(value || "");
+
+  // navigator.clipboard is unavailable on many plain-http LAN pages,
+  // which is the normal way this app is used. Try it only when present,
+  // then fall back to the old selection-based copy method.
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {}
+  }
+
+  if (input) {
+    input.focus();
+    input.select();
+    input.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  }
+
+  const temp = document.createElement("textarea");
+  temp.value = text;
+  temp.setAttribute("readonly", "");
+  temp.style.position = "fixed";
+  temp.style.left = "-9999px";
+  document.body.appendChild(temp);
+  temp.focus();
+  temp.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(temp);
+  return ok;
+}
+
 async function copyInputValue(inputId, buttonId) {
   const input = document.getElementById(inputId);
   const btn = document.getElementById(buttonId);
-  try { await navigator.clipboard.writeText(input.value); }
-  catch { input.select(); document.execCommand("copy"); }
+  await copyTextValue(input.value, input);
   btn.textContent = "Copied!";
   setTimeout(() => { btn.textContent = "Copy"; }, 1500);
 }
@@ -257,6 +290,101 @@ async function loadGroups() {
   const data = await res.json();
   customGroups = data.groups || [];
   renderGroups();
+}
+
+function renderEpgSources() {
+  const list = document.getElementById("epgSources");
+  if (!list) return;
+
+  if (!epgSources.length) {
+    list.innerHTML = `<div class="small-muted">No EPG sources added yet.</div>`;
+    return;
+  }
+
+  const rows = epgSources.map(source => {
+    const publicUrl = `${location.origin}${source.url_path || `/epg/${source.id}.xml`}`;
+    const state = source.last_error
+      ? `<span class="text-warning" title="${escapeHtml(source.last_error)}">Error</span>`
+      : source.last_refresh
+        ? escapeHtml(source.last_refresh)
+        : `Not refreshed`;
+
+    return `
+      <tr class="epg-source-row" data-id="${escapeHtml(source.id)}">
+        <td class="epg-name-cell" title="${escapeHtml(source.name)}"><strong>${escapeHtml(source.name)}</strong></td>
+        <td class="epg-url-cell" title="${escapeHtml(source.url)}">${escapeHtml(source.url)}</td>
+        <td class="epg-served-cell">
+          <div class="input-group input-group-sm">
+            <input class="form-control" value="${escapeHtml(publicUrl)}" readonly>
+            <button class="btn btn-success epg-copy-btn" type="button" data-url="${escapeHtml(publicUrl)}">Copy</button>
+          </div>
+        </td>
+        <td class="epg-status-cell small-muted" title="${source.last_error ? escapeHtml(source.last_error) : ''}">${source.last_error ? state : (source.last_refresh ? `Updated: ${state}` : state)}</td>
+        <td class="text-end"><button class="btn btn-outline-danger btn-sm epg-delete-btn" type="button">Delete</button></td>
+      </tr>
+    `;
+  }).join("");
+
+  list.innerHTML = `
+    <div class="epg-table-wrap">
+      <table class="table table-hover table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>URL</th>
+            <th>Served URL</th>
+            <th>Last Updated</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadEpgSources() {
+  try {
+    const res = await fetch("/api/epg");
+    const data = await res.json();
+    epgSources = data.sources || [];
+    renderEpgSources();
+  } catch {
+    epgSources = [];
+    renderEpgSources();
+  }
+}
+
+async function addEpgSource() {
+  const nameInput = document.getElementById("epgName");
+  const urlInput = document.getElementById("epgUrl");
+  const name = nameInput.value.trim();
+  const url = urlInput.value.trim();
+
+  if (!name) { nameInput.focus(); return; }
+  if (!url) { urlInput.focus(); return; }
+
+  const res = await fetch("/api/epg", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, url})
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "Could not add EPG source.");
+
+  nameInput.value = "";
+  urlInput.value = "";
+  await loadEpgSources();
+  setStatus(`Added EPG source: ${name}`);
+}
+
+async function deleteEpgSource(sourceId) {
+  const res = await fetch(`/api/epg/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "Could not delete EPG source.");
+  epgSources = data.sources || [];
+  renderEpgSources();
+  setStatus("Deleted EPG source.");
 }
 
 async function setActiveGroup(slug) {
@@ -600,7 +728,36 @@ document.getElementById("clearSearchBtn").addEventListener("click", () => {
   els.search.focus();
 });
 
+
+const addEpgBtn = document.getElementById("addEpgBtn");
+if (addEpgBtn) addEpgBtn.addEventListener("click", addEpgSource);
+
+
+const epgSourcesEl = document.getElementById("epgSources");
+if (epgSourcesEl) {
+  epgSourcesEl.addEventListener("click", e => {
+    const row = e.target.closest(".epg-source-row");
+    if (!row) return;
+    const sourceId = row.dataset.id;
+
+
+    if (e.target.classList.contains("epg-delete-btn")) {
+      deleteEpgSource(sourceId);
+      return;
+    }
+
+    if (e.target.classList.contains("epg-copy-btn")) {
+      const input = row.querySelector(".epg-served-cell input");
+      const value = input ? input.value : (e.target.dataset.url || "");
+      copyTextValue(value, input);
+      e.target.textContent = "Copied!";
+      setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
+    }
+  });
+}
+
 loadInitialChannels();
 loadGroups();
+loadEpgSources();
 render();
 updateClearSearchButton();

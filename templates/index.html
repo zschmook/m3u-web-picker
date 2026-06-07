@@ -10,8 +10,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body>
-  <div class="container-fluid py-3">
-    <div class="d-flex align-items-center justify-content-between mb-3 gap-3">
+  <div class="container-fluid pt-1 pb-3">
+    <div class="d-flex align-items-center justify-content-between mb-2 gap-3">
       <div>
         <h1 class="h3 mb-1">M3U Web Picker</h1>
         <div class="small-muted">Load, select, group, auto-save, and serve M3U playlists.</div>
@@ -28,8 +28,11 @@
     </div>
 
     <div class="card mb-3">
-      <div class="card-body">
-        <h2 class="h6 mb-3">Load Master Playlist</h2>
+      <div class="card-body py-2">
+        <div class="manager-heading mb-2">
+          <div class="manager-title"><span class="manager-icon">▦</span><span>SOURCE MANAGER</span></div>
+          <div class="small-muted">Manage the master playlist source and refresh schedule.</div>
+        </div>
 
         <div class="mb-3">
           <label class="form-label">M3U URL</label>
@@ -53,6 +56,33 @@
           <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm d-none" type="button">Change Source</button>
           <span id="sourceModeLabel" class="small-muted ms-2"></span>
         </div>
+      </div>
+    </div>
+
+
+
+    <div class="card mb-3">
+      <div class="card-body py-2">
+        <div class="manager-heading mb-2">
+          <div class="manager-title"><span class="manager-icon">▰</span><span>EPG MANAGER</span></div>
+          <div class="small-muted">Manage XMLTV guide sources served by the application.</div>
+        </div>
+
+        <div class="epg-add-row mb-2">
+          <div>
+            <label class="form-label mb-1">Name</label>
+            <input id="epgName" class="form-control form-control-sm" placeholder="Pluto">
+          </div>
+          <div>
+            <label class="form-label mb-1">URL</label>
+            <input id="epgUrl" class="form-control form-control-sm" placeholder="https://example.com/epg.xml">
+          </div>
+          <div class="d-grid">
+            <button id="addEpgBtn" class="btn btn-primary btn-sm" type="button">Add</button>
+          </div>
+        </div>
+
+        <div id="epgSources" class="epg-list mt-2"></div>
       </div>
     </div>
 
@@ -92,6 +122,10 @@
     </div>
 
     <div class="card mb-3"><div class="card-body">
+      <div class="manager-heading mb-2">
+        <div class="manager-title"><span class="manager-icon">▶</span><span>CHANNEL MANAGER</span></div>
+        <div class="small-muted">Select channels and build your custom playlist.</div>
+      </div>
       <div class="filter-panel">
         <div class="status-line"><strong>Status:</strong> <span id="status"></span></div>
 
