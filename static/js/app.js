@@ -5,6 +5,7 @@ let customGroups = [];
 let activeGroupSlug = "";
 let activeGroupMembers = new Set();
 let showGroupOnly = false;
+let epgSources = [];
 
 const els = {
   table: document.getElementById("channelTable"),
@@ -26,11 +27,56 @@ els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
 
 function setStatus(msg) { els.status.textContent = msg || ""; }
 
+
+function updateClearSearchButton() {
+  const btn = document.getElementById("clearSearchBtn");
+  if (!btn) return;
+
+  if (els.search.value.length > 0) {
+    btn.classList.remove("d-none");
+  } else {
+    btn.classList.add("d-none");
+  }
+}
+
+
+async function copyTextValue(value, input = null) {
+  const text = String(value || "");
+
+  // navigator.clipboard is unavailable on many plain-http LAN pages,
+  // which is the normal way this app is used. Try it only when present,
+  // then fall back to the old selection-based copy method.
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {}
+  }
+
+  if (input) {
+    input.focus();
+    input.select();
+    input.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  }
+
+  const temp = document.createElement("textarea");
+  temp.value = text;
+  temp.setAttribute("readonly", "");
+  temp.style.position = "fixed";
+  temp.style.left = "-9999px";
+  document.body.appendChild(temp);
+  temp.focus();
+  temp.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(temp);
+  return ok;
+}
+
 async function copyInputValue(inputId, buttonId) {
   const input = document.getElementById(inputId);
   const btn = document.getElementById(buttonId);
-  try { await navigator.clipboard.writeText(input.value); }
-  catch { input.select(); document.execCommand("copy"); }
+  await copyTextValue(input.value, input);
   btn.textContent = "Copied!";
   setTimeout(() => { btn.textContent = "Copy"; }, 1500);
 }
@@ -44,19 +90,80 @@ function setSourceMode(mode) {
   const fileBtn = document.getElementById("uploadBtn");
   const label = document.getElementById("sourceModeLabel");
 
-  if (mode === "url") {
-    fileInput.disabled = true; fileBtn.disabled = true;
-    urlInput.disabled = false; urlBtn.disabled = false;
-    label.textContent = "URL source active. File loading disabled.";
-  } else if (mode === "file") {
-    urlInput.disabled = true; urlBtn.disabled = true;
-    fileInput.disabled = false; fileBtn.disabled = false;
-    label.textContent = "File source active. URL loading disabled.";
-  } else {
-    urlInput.disabled = false; urlBtn.disabled = false;
-    fileInput.disabled = false; fileBtn.disabled = false;
-    label.textContent = "";
+  // If the source is locked after a successful load, do not unlock it here.
+  if (urlInput && urlInput.value === "Source Loaded") {
+    return;
   }
+
+  if (mode === "url") {
+    if (fileInput) fileInput.disabled = true;
+    if (fileBtn) fileBtn.disabled = true;
+    if (urlInput) urlInput.disabled = false;
+    if (urlBtn) urlBtn.disabled = false;
+    if (label) label.textContent = "URL source active. File loading disabled.";
+  } else if (mode === "file") {
+    if (urlInput) urlInput.disabled = true;
+    if (urlBtn) urlBtn.disabled = true;
+    if (fileInput) fileInput.disabled = false;
+    if (fileBtn) fileBtn.disabled = false;
+    if (label) label.textContent = "File source active. URL loading disabled.";
+  } else {
+    if (urlInput) urlInput.disabled = false;
+    if (urlBtn) urlBtn.disabled = false;
+    if (fileInput) fileInput.disabled = false;
+    if (fileBtn) fileBtn.disabled = false;
+    if (label) label.textContent = "";
+  }
+}
+
+
+function lockLoadedSourceControls() {
+  const urlInput = document.getElementById("m3uUrl");
+  const loadUrlBtn = document.getElementById("loadUrlBtn");
+  const fileInput = document.getElementById("m3uFile");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
+  const label = document.getElementById("sourceModeLabel");
+
+  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
+
+  urlInput.value = "Source Loaded";
+  urlInput.disabled = true;
+  urlInput.classList.add("source-loaded-placeholder");
+
+  loadUrlBtn.disabled = true;
+  if (fileInput) fileInput.disabled = true;
+  if (uploadBtn) uploadBtn.disabled = true;
+
+  changeSourceBtn.classList.remove("d-none");
+  if (label) label.textContent = "Source loaded. Click Change Source to replace it.";
+}
+
+function unlockLoadedSourceControls() {
+  const urlInput = document.getElementById("m3uUrl");
+  const loadUrlBtn = document.getElementById("loadUrlBtn");
+  const fileInput = document.getElementById("m3uFile");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const changeSourceBtn = document.getElementById("changeSourceBtn");
+  const label = document.getElementById("sourceModeLabel");
+
+  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
+
+  urlInput.value = "";
+  urlInput.disabled = false;
+  urlInput.classList.remove("source-loaded-placeholder");
+
+  loadUrlBtn.disabled = false;
+  if (fileInput) {
+    fileInput.disabled = false;
+    fileInput.value = "";
+  }
+  if (uploadBtn) uploadBtn.disabled = false;
+
+  changeSourceBtn.classList.add("d-none");
+  if (label) label.textContent = "";
+
+  urlInput.focus();
 }
 
 function showUrlModal() {
@@ -185,6 +292,101 @@ async function loadGroups() {
   renderGroups();
 }
 
+function renderEpgSources() {
+  const list = document.getElementById("epgSources");
+  if (!list) return;
+
+  if (!epgSources.length) {
+    list.innerHTML = `<div class="small-muted">No EPG sources added yet.</div>`;
+    return;
+  }
+
+  const rows = epgSources.map(source => {
+    const publicUrl = `${location.origin}${source.url_path || `/epg/${source.id}.xml`}`;
+    const state = source.last_error
+      ? `<span class="text-warning" title="${escapeHtml(source.last_error)}">Error</span>`
+      : source.last_refresh
+        ? escapeHtml(source.last_refresh)
+        : `Not refreshed`;
+
+    return `
+      <tr class="epg-source-row" data-id="${escapeHtml(source.id)}">
+        <td class="epg-name-cell" title="${escapeHtml(source.name)}"><strong>${escapeHtml(source.name)}</strong></td>
+        <td class="epg-url-cell" title="${escapeHtml(source.url)}">${escapeHtml(source.url)}</td>
+        <td class="epg-served-cell">
+          <div class="input-group input-group-sm">
+            <input class="form-control" value="${escapeHtml(publicUrl)}" readonly>
+            <button class="btn btn-success epg-copy-btn" type="button" data-url="${escapeHtml(publicUrl)}">Copy</button>
+          </div>
+        </td>
+        <td class="epg-status-cell small-muted" title="${source.last_error ? escapeHtml(source.last_error) : ''}">${source.last_error ? state : (source.last_refresh ? `Updated: ${state}` : state)}</td>
+        <td class="text-end"><button class="btn btn-outline-danger btn-sm epg-delete-btn" type="button">Delete</button></td>
+      </tr>
+    `;
+  }).join("");
+
+  list.innerHTML = `
+    <div class="epg-table-wrap">
+      <table class="table table-hover table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>URL</th>
+            <th>Served URL</th>
+            <th>Last Updated</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadEpgSources() {
+  try {
+    const res = await fetch("/api/epg");
+    const data = await res.json();
+    epgSources = data.sources || [];
+    renderEpgSources();
+  } catch {
+    epgSources = [];
+    renderEpgSources();
+  }
+}
+
+async function addEpgSource() {
+  const nameInput = document.getElementById("epgName");
+  const urlInput = document.getElementById("epgUrl");
+  const name = nameInput.value.trim();
+  const url = urlInput.value.trim();
+
+  if (!name) { nameInput.focus(); return; }
+  if (!url) { urlInput.focus(); return; }
+
+  const res = await fetch("/api/epg", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, url})
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "Could not add EPG source.");
+
+  nameInput.value = "";
+  urlInput.value = "";
+  await loadEpgSources();
+  setStatus(`Added EPG source: ${name}`);
+}
+
+async function deleteEpgSource(sourceId) {
+  const res = await fetch(`/api/epg/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "Could not delete EPG source.");
+  epgSources = data.sources || [];
+  renderEpgSources();
+  setStatus("Deleted EPG source.");
+}
+
 async function setActiveGroup(slug) {
   activeGroupSlug = slug || "";
   els.activeGroup.value = activeGroupSlug;
@@ -276,6 +478,7 @@ async function loadFromUrl() {
   rebuildProviderGroupFilter();
   render();
   setSourceMode("url");
+  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
   setStatus(`Loaded ${channels.length} channels from URL.`);
 }
@@ -296,6 +499,7 @@ async function uploadFile() {
   rebuildProviderGroupFilter();
   render();
   setSourceMode("file");
+  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
   setStatus(`Loaded ${channels.length} channels from file.`);
 }
@@ -318,7 +522,10 @@ async function loadInitialChannels() {
     }
 
     if (channels.length > 0) {
+      lockLoadedSourceControls();
       setStatus(`Loaded ${channels.length} cached channels.`);
+    } else {
+      unlockLoadedSourceControls();
     }
   } catch (err) {
     setStatus("Could not load cached channels.");
@@ -410,7 +617,10 @@ document.getElementById("groupPills").addEventListener("click", e => {
   setActiveGroup(pill.dataset.slug);
 });
 
-els.search.addEventListener("input", render);
+els.search.addEventListener("input", () => {
+  updateClearSearchButton();
+  render();
+});
 els.groupFilter.addEventListener("change", render);
 els.selectedOnly.addEventListener("change", render);
 if (els.excludeSdChannels) {
@@ -424,6 +634,130 @@ if (els.excludeSdChannels) {
   });
 }
 
+
+
+// Custom playlist order modal
+let orderChannels = [];
+let orderSelectedKey = "";
+
+function renderOrderTable() {
+  const tbody = document.getElementById("orderTable");
+
+  tbody.innerHTML = orderChannels.map(ch => {
+    const index = orderChannels.findIndex(item => item.key === ch.key);
+    return `
+      <tr data-key="${escapeHtml(ch.key)}" class="${ch.key === orderSelectedKey ? "order-selected" : ""}">
+        <td>${index + 1}</td>
+        <td>${escapeHtml(ch.name || ch.url)}</td>
+        <td>${escapeHtml(ch.group || "")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function openOrderModal() {
+  const res = await fetch("/api/selection/order");
+  const data = await res.json();
+
+  orderChannels = data.channels || [];
+  orderSelectedKey = "";
+
+  renderOrderTable();
+
+  const modal = new bootstrap.Modal(document.getElementById("orderModal"));
+  modal.show();
+}
+
+function moveSelectedOrder(direction) {
+  if (!orderSelectedKey) return;
+
+  const idx = orderChannels.findIndex(ch => ch.key === orderSelectedKey);
+  if (idx < 0) return;
+
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= orderChannels.length) return;
+
+  const [item] = orderChannels.splice(idx, 1);
+  orderChannels.splice(newIdx, 0, item);
+
+  renderOrderTable();
+}
+
+async function saveOrder() {
+  const keys = orderChannels.map(ch => ch.key);
+
+  const res = await fetch("/api/selection/order", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({keys})
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    return alert(data.error || "Could not save order.");
+  }
+
+  setStatus(`Saved custom.m3u order for ${data.count} channels.`);
+
+  const modalEl = document.getElementById("orderModal");
+  const modal = bootstrap.Modal.getInstance(modalEl);
+  if (modal) {
+    modal.hide();
+  }
+}
+
+document.getElementById("manageOrderBtn").addEventListener("click", openOrderModal);
+
+document.getElementById("orderTable").addEventListener("click", e => {
+  const row = e.target.closest("tr");
+  if (!row) return;
+  orderSelectedKey = row.dataset.key;
+  renderOrderTable();
+});
+
+document.getElementById("moveOrderUpBtn").addEventListener("click", () => moveSelectedOrder(-1));
+document.getElementById("moveOrderDownBtn").addEventListener("click", () => moveSelectedOrder(1));
+document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
+
+
+document.getElementById("clearSearchBtn").addEventListener("click", () => {
+  els.search.value = "";
+  updateClearSearchButton();
+  render();
+  els.search.focus();
+});
+
+
+const addEpgBtn = document.getElementById("addEpgBtn");
+if (addEpgBtn) addEpgBtn.addEventListener("click", addEpgSource);
+
+
+const epgSourcesEl = document.getElementById("epgSources");
+if (epgSourcesEl) {
+  epgSourcesEl.addEventListener("click", e => {
+    const row = e.target.closest(".epg-source-row");
+    if (!row) return;
+    const sourceId = row.dataset.id;
+
+
+    if (e.target.classList.contains("epg-delete-btn")) {
+      deleteEpgSource(sourceId);
+      return;
+    }
+
+    if (e.target.classList.contains("epg-copy-btn")) {
+      const input = row.querySelector(".epg-served-cell input");
+      const value = input ? input.value : (e.target.dataset.url || "");
+      copyTextValue(value, input);
+      e.target.textContent = "Copied!";
+      setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
+    }
+  });
+}
+
 loadInitialChannels();
 loadGroups();
+loadEpgSources();
 render();
+updateClearSearchButton();

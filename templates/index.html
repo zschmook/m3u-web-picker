@@ -10,25 +10,29 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body>
-  <div class="container-fluid py-3">
-    <div class="d-flex align-items-center justify-content-between mb-3 gap-3">
+  <div class="container-fluid pt-1 pb-3">
+    <div class="d-flex align-items-center justify-content-between mb-2 gap-3">
       <div>
         <h1 class="h3 mb-1">M3U Web Picker</h1>
         <div class="small-muted">Load, select, group, auto-save, and serve M3U playlists.</div>
       </div>
 
       <div class="text-end" style="min-width: 560px;">
-        <div class="small-muted">Selected Playlist URL</div>
+        <!--<div class="small-muted">Selected Playlist URL</div>-->
         <div class="input-group mb-2">
           <input id="playlistUrl" class="form-control" readonly>
           <button class="btn btn-success" id="copyPlaylistBtn" type="button">Copy</button>
+<a class="btn btn-outline-light ms-2" id="exportPlaylistBtn" href="/export">Export</a>
         </div>
       </div>
     </div>
 
     <div class="card mb-3">
-      <div class="card-body">
-        <h2 class="h6 mb-3">Load Master Playlist</h2>
+      <div class="card-body py-2">
+        <div class="manager-heading mb-2">
+          <div class="manager-title"><span class="manager-icon">▦</span><span>SOURCE MANAGER</span></div>
+          <div class="small-muted">Manage the master playlist source and refresh schedule.</div>
+        </div>
 
         <div class="mb-3">
           <label class="form-label">M3U URL</label>
@@ -49,13 +53,40 @@
         </div>
 
         <div class="mt-3">
-          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm" type="button">Change Source</button>
+          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm d-none" type="button">Change Source</button>
           <span id="sourceModeLabel" class="small-muted ms-2"></span>
         </div>
       </div>
     </div>
 
+
+
     <div class="card mb-3">
+      <div class="card-body py-2">
+        <div class="manager-heading mb-2">
+          <div class="manager-title"><span class="manager-icon">▰</span><span>EPG MANAGER</span></div>
+          <div class="small-muted">Manage XMLTV guide sources served by the application.</div>
+        </div>
+
+        <div class="epg-add-row mb-2">
+          <div>
+            <label class="form-label mb-1">Name</label>
+            <input id="epgName" class="form-control form-control-sm" placeholder="Pluto">
+          </div>
+          <div>
+            <label class="form-label mb-1">URL</label>
+            <input id="epgUrl" class="form-control form-control-sm" placeholder="https://example.com/epg.xml">
+          </div>
+          <div class="d-grid">
+            <button id="addEpgBtn" class="btn btn-primary btn-sm" type="button">Add</button>
+          </div>
+        </div>
+
+        <div id="epgSources" class="epg-list mt-2"></div>
+      </div>
+    </div>
+
+    <div class="card mb-3 d-none" data-disabled-section="custom-groups">
       <div class="card-body">
         <div class="d-flex align-items-end gap-2 flex-wrap">
           <div style="min-width:260px;">
@@ -91,7 +122,13 @@
     </div>
 
     <div class="card mb-3"><div class="card-body">
+      <div class="manager-heading mb-2">
+        <div class="manager-title"><span class="manager-icon">▶</span><span>CHANNEL MANAGER</span></div>
+        <div class="small-muted">Select channels and build your custom playlist.</div>
+      </div>
       <div class="filter-panel">
+        <div class="status-line"><strong>Status:</strong> <span id="status"></span></div>
+
         <div class="filter-option sd-filter-row">
           <input id="excludeSdChannels" class="form-check-input" type="checkbox">
           <label class="form-check-label" for="excludeSdChannels">Hide SD / LOW BANDWIDTH channels</label>
@@ -100,7 +137,10 @@
         <div class="filter-toolbar">
           <div class="filter-search">
             <label class="form-label mb-1">Search</label>
-            <input id="search" class="form-control" placeholder="channel, group, or URL">
+            <div class="search-input-wrap">
+              <input id="search" class="form-control pe-5" placeholder="channel, group, or URL">
+              <button id="clearSearchBtn" class="search-clear-btn d-none" type="button" aria-label="Clear search">×</button>
+            </div>
           </div>
 
           <div class="filter-provider">
@@ -110,6 +150,9 @@
 
           <div class="filter-autosave">
             <span class="badge text-bg-success p-2" title="Selections are saved automatically">Auto-save enabled</span>
+              <div class="mt-2">
+                <button class="btn btn-outline-light btn-sm" id="manageOrderBtn" type="button">Manage Order</button>
+              </div>
           </div>
         </div>
 
@@ -130,7 +173,7 @@
         <div><strong id="selectedCount">0</strong> selected</div>
         <div><strong id="visibleCount">0</strong> visible</div>
         <div><strong id="totalCount">0</strong> total</div>
-        <div id="status" class="small-muted"></div>
+        
       </div>
     </div></div>
 
@@ -161,6 +204,47 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="orderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title">Custom Playlist Order</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="d-flex gap-2 mb-3">
+          <button id="moveOrderUpBtn" class="btn btn-outline-light" type="button">Move Up</button>
+          <button id="moveOrderDownBtn" class="btn btn-outline-light" type="button">Move Down</button>
+        </div>
+
+        <div class="order-list-wrap">
+          <table class="table table-hover table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width:60px;">#</th>
+                <th>Channel</th>
+                <th>Provider Group</th>
+              </tr>
+            </thead>
+            <tbody id="orderTable"></tbody>
+          </table>
+        </div>
+
+        <div class="small-muted mt-2">
+          Select a row, then use Move Up / Move Down. Save Order rewrites custom.m3u.
+        </div>
+      </div>
+
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-success" id="saveOrderBtn">Save Order</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

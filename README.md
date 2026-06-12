@@ -17,14 +17,16 @@ Changes:
 Run:
 ```bash
 pip install -r requirements.txt
-python app.py
-or 
 python3 app.py
+or
+python3 app.py -d (for debug on port 9998 so that you can run two at a time for testing)
 ```
 
 Open:
 ```text
 http://localhost:9999
+or
+http://localhost:9998 (if in debug mode)
 ```
 
 Note:
@@ -86,3 +88,64 @@ V_18_UI_Cleanup_v8:
 - API routes now reference shared state through the `core` module instead of copied globals.
 - This keeps selected channel state and loaded channel catalog in sync when saving.
 - Removed the stale `/epg.xml` route from the cleanup branch.
+
+
+V_18_UI_Cleanup_v9:
+- Added `python3 app.py -d` / `--dev` to run on port 9998.
+- Added Manage Order button next to custom.m3u URL.
+- Added Custom Playlist Order modal.
+- Selected channels now keep a persistent `sort_order` in SQLite.
+- Saving order rewrites `custom.m3u` in that order.
+
+
+V_18_UI_Cleanup_v10:
+- Fixed Manage Order modal not loading saved channels.
+- v9 wrote custom.m3u from DB order first, so newly selected in-memory channels could be missing from the DB/order payload.
+- v10 writes from the current selected_ids, preserves existing sort_order, and refreshes the DB before opening the order modal.
+
+
+V_18_UI_Cleanup_v12:
+- Removed the search textbox from the Manage Order popup.
+- Popup now focuses only on Move Up / Move Down and Save Order.
+
+
+V_18_UI_Cleanup_v15:
+- Rebuilt from v12.
+- Custom Groups UI is hidden using `d-none` instead of being commented out.
+- This preserves the DOM elements that the existing JavaScript expects.
+- Provider URL loading should work again.
+
+
+# V19 M3U Proxy
+
+Promoted from the v18 UI cleanup branch.
+
+New in V19:
+- Auto-generates `tvg-chno` channel numbers in `custom.m3u`.
+- Channel numbers follow the saved custom playlist order.
+- Reordering channels in Manage Order rewrites channel numbers on save.
+- Existing provider `tvg-chno` values are replaced.
+- Missing `tvg-chno` values are added.
+- Custom Groups UI remains hidden.
+
+
+## V19.1
+
+- Added an inline `X` button inside the search box.
+- The button appears only when search text exists.
+- Clicking it clears search, refreshes the channel list, and keeps focus in the search box.
+
+
+## V19.2
+
+- Moved status display above the Hide SD / LOW BANDWIDTH checkbox.
+- Added inline `Status:` label.
+- Made status line bold white for better visibility.
+
+
+## V20 Source Loaded + Export
+
+- Restored `Source Loaded` behavior after successful channel table load.
+- Source controls lock only after URL/file/cached channels successfully load.
+- Export remains after Manage Order.
+- `/export` downloads the canonical `custom.m3u` as `download.m3u`.
