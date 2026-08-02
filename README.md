@@ -4,6 +4,10 @@
 
 This is a single-page Flask application for loading an M3U playlist, manually selecting channels, ordering the custom playlist, and automatically generating temporary daily sports channels with matching XMLTV guide data.
 
+## Supported sports and live events
+
+![Supported sports and event categories](docs/images/info.png)
+
 ## Jellyfin URLs
 
 The M3U creates the channels. Jellyfin still needs an XMLTV guide source.
