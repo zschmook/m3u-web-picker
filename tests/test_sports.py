@@ -308,6 +308,83 @@ http://provider.test/user/pass/bad.ts
         fresh = Path(self.temp.name) / "fresh.db"
         sports.init_db(fresh)
         self.assertEqual(sports.get_rules(fresh), [])
+        self.assertFalse(sports.get_settings(fresh)["everything_mode"])
+
+    def test_everything_mode_matches_events_without_replacing_curated_rules(self):
+        curated_before = sports.get_rules(self.db_path)
+        self.assertEqual(len(curated_before), 1)
+        sports.update_settings(self.db_path, {"everything_mode": True})
+        result = sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertTrue(result["everything_mode"])
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(sports.get_rules(self.db_path), curated_before)
+
+        sports.update_settings(self.db_path, {"everything_mode": False})
+        self.assertEqual(sports.get_rules(self.db_path), curated_before)
+
+    def test_everything_mode_can_generate_with_zero_curated_rules(self):
+        for rule in sports.get_rules(self.db_path):
+            sports.delete_rule(self.db_path, rule["id"])
+        sports.update_settings(self.db_path, {"everything_mode": True})
+        result = sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(sports.get_rules(self.db_path), [])
+
+    def test_scan_records_supplied_full_update_start_time(self):
+        started = "2026-08-02T14:55:00-04:00"
+        sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+            started_at=started,
+        )
+        self.assertEqual(sports.last_scan(self.db_path)["started_at"], started)
+
+    def test_scan_state_survives_status_reads_and_clears_on_finish(self):
+        started = "2026-08-02T15:00:00-04:00"
+        state = sports.begin_scan_state(
+            self.db_path,
+            trigger="manual",
+            started_at=started,
+            stage="Refreshing provider playlist",
+        )
+        self.assertTrue(state["running"])
+        self.assertEqual(state["started_at"], started)
+        sports.update_scan_stage(self.db_path, "Scanning and matching channels")
+        payload = sports.status_payload(
+            self.db_path,
+            datetime(2026, 8, 2, 15, 2, tzinfo=ZoneInfo("America/New_York")),
+        )
+        self.assertTrue(payload["scan"]["running"])
+        self.assertEqual(payload["scan"]["stage"], "Scanning and matching channels")
+        self.assertEqual(payload["scan"]["elapsed_seconds"], 120)
+        sports.finish_scan_state(self.db_path)
+        self.assertFalse(sports.scan_state(self.db_path)["running"])
+
+    def test_interrupted_scan_is_converted_to_persistent_failure(self):
+        sports.begin_scan_state(
+            self.db_path,
+            trigger="manual",
+            started_at="2026-08-02T15:00:00-04:00",
+            stage="Scanning and matching channels",
+        )
+        self.assertTrue(sports.recover_interrupted_scan(self.db_path))
+        self.assertFalse(sports.scan_state(self.db_path)["running"])
+        last = sports.last_scan(self.db_path)
+        self.assertEqual(last["status"], "failed")
+        self.assertIn("interrupted", last["message"])
 
     def test_removing_last_rule_stays_empty_after_reinitialization(self):
         rules = sports.get_rules(self.db_path)
@@ -618,7 +695,7 @@ http://provider.test/user/pass/milb.ts
             conn.close()
 
         sports.init_db(legacy)
-        row = sports.generated_rows(legacy)[0]
+        row = sports.generated_rows(legacy, include_cached=True)[0]
         self.assertEqual(row["tvg_id"], "m3u-picker-sports-1000")
         self.assertIn('tvg-id="m3u-picker-sports-1000"', row["raw"][0])
 
@@ -690,6 +767,173 @@ http://provider.test/user/pass/milb.ts
             ],
         )
         self.assertEqual({rule["scope_id"] for rule in rules}, {"nfl", "cornhole"})
+
+
+    def test_disabling_sports_hides_generated_rows_but_keeps_24_hour_cache(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
+        self.assertEqual(len(sports.generated_rows(self.db_path)), 3)
+
+        sports.update_settings(self.db_path, {"enabled": False})
+        self.assertEqual(sports.generated_rows(self.db_path), [])
+        self.assertEqual(len(sports.generated_rows(self.db_path, include_cached=True)), 3)
+        cache = sports.disabled_cache_status(self.db_path)
+        self.assertEqual(cache["count"], 3)
+        self.assertIsNotNone(cache["expires_at"])
+
+        sports.update_settings(self.db_path, {"enabled": True})
+        self.assertEqual(len(sports.generated_rows(self.db_path)), 3)
+
+    def test_disabled_sports_exports_hide_cached_channels(self):
+        base_epg = Path(self.temp.name) / "provider-disabled.xml"
+        base_epg.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?><tv>'
+            '<channel id="dateline"><display-name>Dateline</display-name></channel>'
+            '<programme channel="dateline" start="20260802000000 -0400" stop="20260803000000 -0400">'
+            '<title>Dateline</title></programme></tv>',
+            encoding="utf-8",
+        )
+        sports_epg = Path(self.temp.name) / "sports-disabled.xml"
+        combined_epg = Path(self.temp.name) / "combined-disabled.xml"
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(
+            self.db_path, self.channels, base_epg,
+            sports_epg_path=sports_epg, combined_epg_path=combined_epg,
+            now=now, trigger="test",
+        )
+        sports.update_settings(self.db_path, {"enabled": False})
+        sports.rebuild_epg_exports(
+            self.db_path,
+            base_epg_path=base_epg,
+            sports_epg_path=sports_epg,
+            combined_epg_path=combined_epg,
+        )
+
+        sports_root = ElementTree.parse(sports_epg).getroot()
+        self.assertEqual(sports_root.findall("channel"), [])
+        self.assertEqual(sports_root.findall("programme"), [])
+        combined_root = ElementTree.parse(combined_epg).getroot()
+        combined_ids = {node.attrib["id"] for node in combined_root.findall("channel")}
+        self.assertEqual(combined_ids, {"dateline"})
+        self.assertEqual(len(sports.generated_rows(self.db_path, include_cached=True)), 3)
+
+    def test_disabled_cache_purges_after_24_hours(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
+        sports.update_settings(self.db_path, {"enabled": False})
+        with sports.closing(sports._connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (sports.SPORTS_DISABLED_AT_KEY, '"2026-07-31T00:00:00-04:00"'),
+            )
+            conn.commit()
+        self.assertTrue(sports.purge_expired_disabled_cache(
+            self.db_path,
+            datetime(2026, 8, 2, 6, 0, tzinfo=ZoneInfo("America/New_York")),
+        ))
+        self.assertEqual(sports.generated_rows(self.db_path, include_cached=True), [])
+
+    def test_international_sports_are_first_class_catalog_choices(self):
+        sport_ids = {
+            item["id"] for item in sports.catalog_payload(self.db_path, scope_type="sport")
+        }
+        self.assertTrue({
+            "curling", "cricket", "rugby-union", "rugby-league", "darts", "poker"
+        }.issubset(sport_ids))
+        self.assertEqual(sports._detect_sport("ICC Cricket World Cup"), "cricket")
+        self.assertEqual(sports._detect_sport("PDC World Darts Championship"), "darts")
+        self.assertEqual(sports._detect_sport("Six Nations Rugby Union"), "rugby-union")
+        self.assertEqual(sports._detect_sport("World Series of Poker"), "poker")
+
+
+    def test_v21_taxonomy_includes_cycling_racing_combat_and_olympic_sports(self):
+        sport_ids = {
+            item["id"] for item in sports.catalog_payload(self.db_path, scope_type="sport")
+        }
+        self.assertTrue({
+            "cycling", "motorsports", "mma", "pro-wrestling", "golf",
+            "track-field", "swimming", "figure-skating", "olympics",
+            "tennis", "volleyball", "boxing", "biathlon", "rowing",
+        }.issubset(sport_ids))
+        league_ids = {
+            item["id"] for item in sports.catalog_payload(self.db_path, scope_type="league")
+        }
+        self.assertTrue({
+            "tour-de-france", "formula-1", "nascar-cup", "ufc", "wwe",
+            "ncaaf-fbs", "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3",
+            "naia-football", "njcaa-football", "high-school-football",
+        }.issubset(league_ids))
+
+    def test_college_football_divisions_are_classified_separately(self):
+        self.assertEqual(sports._detect_league("NCAA FBS College Football"), "ncaaf-fbs")
+        self.assertEqual(sports._detect_league("FCS College Football"), "ncaaf-fcs")
+        self.assertEqual(sports._detect_league("NCAA Division II Football"), "ncaaf-d2")
+        self.assertEqual(sports._detect_league("NCAA Division III Football"), "ncaaf-d3")
+        self.assertEqual(sports._detect_league("NAIA Football"), "naia-football")
+        self.assertEqual(sports._detect_league("NJCAA Junior College Football"), "njcaa-football")
+        self.assertEqual(sports._detect_league("High School Football All-American Bowl"), "high-school-football")
+        # A cross-division event belongs to the higher subdivision.
+        self.assertEqual(sports._detect_league("FBS vs FCS College Football"), "ncaaf-fbs")
+
+    def test_cycling_and_olympic_event_detection(self):
+        self.assertEqual(sports._detect_league("Tour de France Stage 7"), "tour-de-france")
+        self.assertEqual(sports._detect_sport("Tour de France Stage 7"), "cycling")
+        tags = sports._detect_sport_tags("Olympic Figure Skating Free Skate")
+        self.assertIn("figure-skating", tags)
+        self.assertIn("olympics", tags)
+
+    def test_primary_blocks_are_1000_channels_and_overflow_never_spills(self):
+        plan = sports.numbering_plan(sports.get_settings(self.db_path))
+        first = {block["id"]: block for block in plan["blocks"][:7]}
+        self.assertEqual((first["mlb"]["start"], first["mlb"]["end"]), (1000, 1999))
+        self.assertEqual((first["nhl"]["start"], first["nhl"]["end"]), (2000, 2999))
+        self.assertEqual((first["nba"]["start"], first["nba"]["end"]), (3000, 3999))
+        self.assertEqual((first["nfl"]["start"], first["nfl"]["end"]), (4000, 4999))
+        self.assertEqual(plan["events_per_primary_block"], 100)
+
+        last_primary = sports.assigned_channel_number(
+            "ncaaf-fbs", 99, 9, start_channel=1000, channels_per_event=10
+        )
+        first_overflow = sports.assigned_channel_number(
+            "ncaaf-fbs", 100, 0, start_channel=1000, channels_per_event=10
+        )
+        fcs_start = sports.assigned_channel_number(
+            "ncaaf-fcs", 0, 0, start_channel=1000, channels_per_event=10
+        )
+        self.assertEqual(last_primary, 6999)
+        self.assertNotEqual(first_overflow, fcs_start)
+        self.assertGreater(first_overflow, 1_000_000)
+
+    def test_global_hide_sd_setting_excludes_sports_generated_feeds(self):
+        sd_event = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="LOW BANDWIDTH",NHL | Philadelphia Flyers @ New York Rangers (2026-08-01 20:00:00) SD
+http://provider.test/user/pass/nhl-sd.ts
+"""
+        )
+        sports.add_rule(self.db_path, {"scope_type": "league", "scope_id": "nhl"})
+        sports.update_settings(self.db_path, {"exclude_sd": True})
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, [*self.channels, *sd_event], now=now, trigger="test")
+        self.assertFalse(any(row["league_id"] == "nhl" for row in sports.generated_rows(self.db_path)))
+
+    def test_scan_groups_mlb_and_nhl_into_separate_number_ranges(self):
+        extra = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="NHL",NHL | Philadelphia Flyers @ New York Rangers (2026-08-01 20:00:00)
+http://provider.test/user/pass/nhl-event.ts
+"""
+        )
+        sports.add_rule(self.db_path, {"scope_type": "league", "scope_id": "nhl"})
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, [*self.channels, *extra], now=now, trigger="test")
+        rows = sports.generated_rows(self.db_path)
+        mlb_numbers = [row["assigned_number"] for row in rows if row["league_id"] == "mlb"]
+        nhl_numbers = [row["assigned_number"] for row in rows if row["league_id"] == "nhl"]
+        self.assertTrue(mlb_numbers)
+        self.assertTrue(nhl_numbers)
+        self.assertTrue(all(1000 <= number <= 1999 for number in mlb_numbers))
+        self.assertTrue(all(2000 <= number <= 2999 for number in nhl_numbers))
 
 
 if __name__ == "__main__":

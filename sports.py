@@ -20,6 +20,9 @@ from zoneinfo import ZoneInfo
 DEFAULT_SETTINGS = {
     "enabled": False,
     "auto_update": True,
+    # Deliberately separate from sports_rules. Turning this on temporarily
+    # matches every detected event while preserving the user's curated list.
+    "everything_mode": False,
     "start_channel": 1000,
     "channels_per_event": 10,
     "group_title": "Sports Today",
@@ -30,48 +33,346 @@ DEFAULT_SETTINGS = {
     "include_replays": False,
     "include_pregame": False,
     "use_backup_feeds": True,
+    "exclude_sd": False,
 }
 
 SCOPE_TYPES = {"league", "team", "conference", "sport"}
 RULE_PRIORITY = {"team": 0, "conference": 1, "league": 2, "sport": 3}
 
-LEAGUE_NAMES = {
-    "nfl": "NFL",
-    "mlb": "MLB",
-    "milb": "MiLB",
-    "nba": "NBA",
-    "nhl": "NHL",
-    "wnba": "WNBA",
-    "ncaaf": "College Football",
-    "ncaab": "College Basketball",
-    "mls": "MLS",
-    "nwsl": "NWSL",
-}
+# Sports taxonomy is intentionally data-driven. A "sport" is the broad
+# umbrella users can select, while a "league" also covers tours, series,
+# promotions, divisions, and competition families. Each league/series receives
+# its own 1,000-channel primary block.
+SPORT_DEFINITIONS = [
+    ("baseball", "Baseball", [r"\bbaseball\b", r"world baseball classic"]),
+    ("basketball", "Basketball", [r"\bbasketball\b"]),
+    ("football", "Football", [r"\bfootball\b", r"\bnfl\b", r"\bncaaf\b"]),
+    ("hockey", "Hockey", [r"\bhockey\b"]),
+    ("soccer", "Soccer", [r"\bsoccer\b", r"association football", r"premier league", r"champions league"]),
+    ("cricket", "Cricket", [r"\bcricket\b", r"\bicc\b", r"\bipl\b", r"\bt20\b", r"\bodi\b"]),
+    ("rugby-union", "Rugby Union", [r"rugby union", r"six nations", r"rugby world cup", r"super rugby"]),
+    ("rugby-league", "Rugby League", [r"rugby league", r"\bnrl\b", r"state of origin"]),
+    ("curling", "Curling", [r"\bcurling\b"]),
+    ("golf", "Golf", [r"\bgolf\b", r"\bpga\b", r"\blpga\b"]),
+    ("track-field", "Track & Field", [r"track\s*(?:&|and)\s*field", r"\bathletics\b", r"diamond league"]),
+    ("swimming", "Swimming", [r"\bswimming\b", r"world aquatics"]),
+    ("gymnastics", "Gymnastics", [r"\bgymnastics\b"]),
+    ("figure-skating", "Figure Skating", [r"figure skating"]),
+    ("speed-skating", "Speed Skating", [r"speed skating", r"short track skating", r"long track skating"]),
+    ("skiing", "Skiing", [r"\bskiing\b", r"ski jumping", r"nordic combined", r"cross[- ]country ski"]),
+    ("snowboarding", "Snowboarding", [r"\bsnowboard(?:ing)?\b", r"boardercross"]),
+    ("sliding-sports", "Sliding Sports", [r"\bbobsle(?:d|igh)\b", r"\bskeleton\b", r"\bluge\b"]),
+    ("olympics", "Olympics", [r"\bolympic(?:s)?\b", r"\bparalympic(?:s)?\b"]),
+    ("motorsports", "Motorsports / Racing", [r"\bmotorsports?\b", r"auto racing", r"motor racing", r"monster jam"]),
+    ("mma", "MMA", [r"mixed martial arts", r"\bmma\b", r"\bufc\b", r"fight night"]),
+    ("pro-wrestling", "Pro Wrestling", [r"pro(?:fessional)? wrestling", r"\bwwe\b", r"\baew\b", r"\btna\b", r"\bnjpw\b", r"\broh\b"]),
+    ("wrestling", "Amateur / Olympic Wrestling", [r"collegiate wrestling", r"amateur wrestling", r"freestyle wrestling", r"greco[- ]roman"]),
+    ("darts", "Darts", [r"\bdarts?\b", r"\bpdc\b", r"\bwdf\b"]),
+    ("poker", "Poker", [r"\bpoker\b", r"\bwsop\b", r"\bwpt\b", r"\bept\b"]),
+    ("cornhole", "Cornhole", [r"\bcornhole\b", r"american cornhole", r"bag toss"]),
+    ("cycling", "Cycling", [r"\bcycling\b", r"tour de france", r"giro d['’]?italia", r"vuelta a españa", r"cyclocross", r"\bbmx\b"]),
+    ("tennis", "Tennis", [r"\btennis\b", r"\batp\b", r"\bwta\b"]),
+    ("volleyball", "Volleyball", [r"\bvolleyball\b", r"beach volleyball"]),
+    ("boxing", "Boxing", [r"\bboxing\b", r"fight card"]),
+    ("softball", "Softball", [r"\bsoftball\b"]),
+    ("lacrosse", "Lacrosse", [r"\blacrosse\b"]),
+    ("horse-racing", "Horse Racing", [r"horse racing", r"kentucky derby", r"breeders'? cup"]),
+    ("biathlon", "Biathlon", [r"\bbiathlon\b"]),
+    ("diving", "Diving", [r"\bdiving\b", r"springboard", r"platform diving"]),
+    ("water-polo", "Water Polo", [r"water polo"]),
+    ("artistic-swimming", "Artistic Swimming", [r"artistic swimming", r"synchronized swimming"]),
+    ("rowing", "Rowing", [r"\browing\b", r"world rowing"]),
+    ("canoe-kayak", "Canoe / Kayak", [r"\bcanoe(?:ing)?\b", r"\bkayak(?:ing)?\b"]),
+    ("sailing", "Sailing", [r"\bsailing\b", r"world sailing"]),
+    ("triathlon", "Triathlon", [r"\btriathlon\b", r"ironman"]),
+    ("archery", "Archery", [r"\barchery\b"]),
+    ("shooting", "Shooting Sports", [r"sport shooting", r"shooting championship", r"\bissf\b"]),
+    ("weightlifting", "Weightlifting", [r"weightlifting", r"weight lifting"]),
+    ("equestrian", "Equestrian", [r"equestrian", r"show jumping", r"dressage", r"eventing"]),
+    ("handball", "Handball", [r"\bhandball\b"]),
+    ("field-hockey", "Field Hockey", [r"field hockey"]),
+    ("badminton", "Badminton", [r"\bbadminton\b"]),
+    ("table-tennis", "Table Tennis", [r"table tennis", r"ping pong"]),
+    ("fencing", "Fencing", [r"\bfencing\b"]),
+    ("judo", "Judo", [r"\bjudo\b"]),
+    ("taekwondo", "Taekwondo", [r"tae kwon do", r"taekwondo"]),
+    ("sport-climbing", "Sport Climbing", [r"sport climbing", r"competition climbing"]),
+    ("surfing", "Surfing", [r"\bsurfing\b", r"world surf league"]),
+    ("skateboarding", "Skateboarding", [r"skateboarding", r"skateboard street", r"skateboard park"]),
+    ("modern-pentathlon", "Modern Pentathlon", [r"modern pentathlon"]),
+    ("bowling", "Bowling", [r"\bbowling\b", r"\bpba\b", r"\bpwba\b"]),
+    ("billiards", "Billiards / Cue Sports", [r"\bbilliards?\b", r"\bsnooker\b", r"pool championship"]),
+]
 
-LEAGUE_PATTERNS = {
-    "nfl": [r"\bnfl\b", r"national football league"],
-    "mlb": [r"\bmlb\b", r"major league baseball"],
-    "milb": [r"\bmilb\b", r"minor league baseball"],
-    "nba": [r"\bnba\b", r"national basketball association"],
-    "nhl": [r"\bnhl\b", r"national hockey league"],
-    "wnba": [r"\bwnba\b"],
-    "ncaaf": [r"\bncaaf\b", r"college football", r"ncaa football"],
-    "ncaab": [r"\bncaab\b", r"college basketball", r"ncaa basketball"],
-    "mls": [r"\bmls\b", r"major league soccer"],
-    "nwsl": [r"\bnwsl\b", r"national women'?s soccer league"],
-}
+# Ordered for channel numbering, not detection. The first four preserve the
+# simple mental model discussed in the UI: MLB 1000s, NHL 2000s, NBA 3000s,
+# NFL 4000s. Everything else follows in stable 1,000-channel blocks.
+LEAGUE_DEFINITIONS = [
+    # id, display name, sport id, subtitle, aliases, detection patterns
+    ("mlb", "MLB", "baseball", "Every Major League Baseball game", ["Major League Baseball"], [r"\bmlb\b", r"major league baseball"]),
+    ("nhl", "NHL", "hockey", "Every National Hockey League game", ["National Hockey League"], [r"\bnhl\b", r"national hockey league"]),
+    ("nba", "NBA", "basketball", "Every NBA game", ["National Basketball Association"], [r"\bnba\b", r"national basketball association"]),
+    ("nfl", "NFL", "football", "Every NFL game", ["National Football League"], [r"\bnfl\b", r"national football league"]),
+    ("milb", "MiLB", "baseball", "Every Minor League Baseball game", ["Minor League Baseball"], [r"\bmilb\b", r"minor league baseball"]),
+    ("ncaaf-fbs", "NCAA Football — Division I FBS", "football", "Football Bowl Subdivision games", ["FBS", "College Football", "NCAAF"], [r"\bfbs\b", r"football bowl subdivision", r"division i fbs", r"\bncaaf\b", r"college football", r"ncaa football"]),
+    ("ncaaf-fcs", "NCAA Football — Division I FCS", "football", "Football Championship Subdivision games", ["FCS"], [r"\bfcs\b", r"football championship subdivision", r"division i fcs"]),
+    ("ncaaf-d2", "NCAA Football — Division II", "football", "NCAA Division II football games", ["NCAA D2 Football"], [r"ncaa (?:division )?(?:ii|2) football", r"division (?:ii|2) football", r"d2 football"]),
+    ("ncaaf-d3", "NCAA Football — Division III", "football", "NCAA Division III football games", ["NCAA D3 Football"], [r"ncaa (?:division )?(?:iii|3) football", r"division (?:iii|3) football", r"d3 football"]),
+    ("naia-football", "NAIA Football", "football", "NAIA football games", ["National Association of Intercollegiate Athletics"], [r"\bnaia\b.*football", r"football.*\bnaia\b"]),
+    ("njcaa-football", "NJCAA Football", "football", "Junior-college football games", ["JUCO Football", "Junior College Football"], [r"\bnjcaa\b.*football", r"junior college football", r"juco football"]),
+    ("high-school-football", "High School Football", "football", "Showcases, championships, and all-star games", ["Prep Football", "HS Football"], [r"high school football", r"prep football", r"\bhs football\b", r"all[- ]american (?:football|bowl)", r"under armour all[- ]america"]),
 
-SPORT_PATTERNS = {
-    "cornhole": [
-        r"\bcornhole\b",
-        r"american cornhole",
-        r"\bacl\s+(?:pro|open|teams|shootout|championship)",
-        r"\baco\b",
-        r"bag toss",
-    ],
-    "formula-1": [r"formula\s*1", r"\bf1\b", r"grand prix"],
-    "ufc": [r"\bufc\b", r"ultimate fighting", r"fight night"],
-    "soccer": [r"\bsoccer\b", r"\bmls\b", r"\bnwsl\b", r"premier league", r"la liga", r"champions league"],
+    ("wnba", "WNBA", "basketball", "Every WNBA game", [], [r"\bwnba\b"]),
+    ("nba-g-league", "NBA G League", "basketball", "NBA G League games", ["G League"], [r"nba g league", r"\bg league\b"]),
+    ("ncaab-men", "NCAA Men’s Basketball", "basketball", "NCAA men’s basketball games", ["NCAAB", "College Basketball"], [r"ncaa men'?s basketball", r"men'?s college basketball", r"\bncaab\b", r"college basketball", r"ncaa basketball"]),
+    ("ncaab-women", "NCAA Women’s Basketball", "basketball", "NCAA women’s basketball games", ["NCAAW", "Women’s College Basketball"], [r"ncaa women'?s basketball", r"women'?s college basketball", r"\bncaaw\b", r"\bwbb\b"]),
+    ("international-basketball", "International Basketball", "basketball", "International leagues and tournaments", ["FIBA"], [r"\bfiba\b", r"international basketball"]),
+
+    ("ncaa-baseball", "NCAA Baseball", "baseball", "College baseball games", ["College Baseball"], [r"ncaa baseball", r"college baseball"]),
+    ("international-baseball", "International Baseball", "baseball", "International baseball and tournaments", ["World Baseball Classic", "WBC"], [r"world baseball classic", r"international baseball"]),
+
+    ("ahl", "AHL", "hockey", "American Hockey League games", ["American Hockey League"], [r"\bahl\b", r"american hockey league"]),
+    ("ncaa-hockey", "NCAA Hockey", "hockey", "College hockey games", ["College Hockey"], [r"ncaa hockey", r"college hockey"]),
+    ("international-hockey", "International / Olympic Hockey", "hockey", "International and Olympic hockey", ["IIHF"], [r"\biihf\b", r"international hockey", r"olympic hockey"]),
+
+    ("mls", "MLS", "soccer", "Major League Soccer matches", ["Major League Soccer"], [r"\bmls\b", r"major league soccer"]),
+    ("nwsl", "NWSL", "soccer", "National Women’s Soccer League matches", [], [r"\bnwsl\b", r"national women'?s soccer league"]),
+    ("premier-league", "Premier League", "soccer", "English Premier League matches", ["EPL"], [r"premier league", r"\bepl\b"]),
+    ("la-liga", "La Liga", "soccer", "Spanish La Liga matches", [], [r"la liga"]),
+    ("uefa-champions-league", "UEFA Champions League", "soccer", "UEFA Champions League matches", ["UCL"], [r"uefa champions league", r"\bucl\b"]),
+    ("international-soccer", "International Soccer", "soccer", "National-team competitions and friendlies", ["FIFA", "World Cup"], [r"\bfifa\b", r"fifa world cup", r"(?:soccer|football) world cup", r"international (?:soccer|football)"]),
+
+    ("cricket-test", "Test Cricket", "cricket", "International Test matches", ["Test Match"], [r"test cricket", r"test match", r"ashes series"]),
+    ("cricket-odi", "ODI Cricket", "cricket", "One Day International matches", ["ODI"], [r"one day international", r"\bodi\b"]),
+    ("cricket-t20", "T20 Cricket", "cricket", "T20 matches and competitions", ["Twenty20"], [r"\bt20\b", r"twenty20"]),
+    ("cricket-ipl", "Indian Premier League", "cricket", "IPL cricket", ["IPL"], [r"indian premier league", r"\bipl\b"]),
+    ("cricket-domestic", "Domestic Cricket", "cricket", "Domestic and franchise competitions", ["County Championship"], [r"county championship", r"domestic cricket"]),
+
+    ("rugby-union-international", "International Rugby Union", "rugby-union", "International rugby union", ["Six Nations", "Rugby World Cup"], [r"six nations", r"rugby world cup", r"international rugby union"]),
+    ("rugby-union-club", "Club Rugby Union", "rugby-union", "Club rugby union competitions", ["URC", "Super Rugby", "Premiership Rugby", "Top 14"], [r"united rugby championship", r"\burc\b", r"super rugby", r"premiership rugby", r"top 14"]),
+    ("rugby-league-nrl", "NRL", "rugby-league", "National Rugby League", [], [r"national rugby league", r"\bnrl\b"]),
+    ("rugby-league-super", "Super League Rugby", "rugby-league", "Super League rugby", [], [r"super league rugby"]),
+    ("rugby-league-origin", "State of Origin", "rugby-league", "State of Origin series", [], [r"state of origin"]),
+
+    ("world-curling", "World Curling", "curling", "World Curling events", [], [r"world curling"]),
+    ("grand-slam-curling", "Grand Slam of Curling", "curling", "Grand Slam of Curling events", [], [r"grand slam of curling"]),
+    ("national-curling", "National Curling Championships", "curling", "National curling championships", [], [r"national curling", r"curling championship"]),
+    ("olympic-curling", "Olympic Curling", "curling", "Olympic curling events", [], [r"olympic curling"]),
+
+    ("pga-tour", "PGA Tour", "golf", "PGA Tour events", [], [r"pga tour"]),
+    ("lpga-tour", "LPGA Tour", "golf", "LPGA Tour events", [], [r"lpga tour", r"\blpga\b"]),
+    ("liv-golf", "LIV Golf", "golf", "LIV Golf events", [], [r"liv golf"]),
+    ("dp-world-tour", "DP World Tour", "golf", "DP World Tour events", ["European Tour"], [r"dp world tour", r"european tour golf"]),
+    ("golf-majors", "Golf Majors", "golf", "Major golf championships", ["The Masters", "U.S. Open", "The Open", "PGA Championship"], [r"the masters", r"u\.?s\.? open golf", r"the open championship", r"pga championship"]),
+    ("ncaa-golf", "NCAA Golf", "golf", "College golf", [], [r"ncaa golf", r"college golf"]),
+    ("olympic-golf", "Olympic Golf", "golf", "Olympic golf", [], [r"olympic golf"]),
+
+    ("world-athletics", "World Athletics", "track-field", "World Athletics events", [], [r"world athletics"]),
+    ("diamond-league", "Diamond League", "track-field", "Diamond League meets", [], [r"diamond league"]),
+    ("ncaa-track-field", "NCAA Track & Field", "track-field", "College track and field", [], [r"ncaa track", r"college track"]),
+    ("national-track-field", "National Track & Field Championships", "track-field", "National championships", [], [r"national track.*championship", r"track.*national championship"]),
+    ("olympic-track-field", "Olympic Track & Field", "track-field", "Olympic athletics", ["Olympic Athletics"], [r"olympic (?:track|athletics)"]),
+
+    ("world-aquatics-swimming", "World Aquatics Swimming", "swimming", "World Aquatics swimming", [], [r"world aquatics.*swimming", r"world swimming championship"]),
+    ("ncaa-swimming", "NCAA Swimming", "swimming", "College swimming", [], [r"ncaa swimming", r"college swimming"]),
+    ("national-swimming", "National Swimming Championships", "swimming", "National championships", [], [r"national swimming championship"]),
+    ("olympic-swimming", "Olympic Swimming", "swimming", "Olympic swimming", [], [r"olympic swimming"]),
+
+    ("artistic-gymnastics", "Artistic Gymnastics", "gymnastics", "Artistic gymnastics", [], [r"artistic gymnastics"]),
+    ("rhythmic-gymnastics", "Rhythmic Gymnastics", "gymnastics", "Rhythmic gymnastics", [], [r"rhythmic gymnastics"]),
+    ("trampoline-gymnastics", "Trampoline Gymnastics", "gymnastics", "Trampoline gymnastics", [], [r"trampoline gymnastics"]),
+    ("ncaa-gymnastics", "NCAA Gymnastics", "gymnastics", "College gymnastics", [], [r"ncaa gymnastics", r"college gymnastics"]),
+    ("olympic-gymnastics", "Olympic Gymnastics", "gymnastics", "Olympic gymnastics", [], [r"olympic gymnastics"]),
+
+    ("isu-figure-skating", "ISU Figure Skating", "figure-skating", "ISU competitions", [], [r"isu.*figure skating", r"figure skating grand prix"]),
+    ("national-figure-skating", "National Figure Skating Championships", "figure-skating", "National championships", [], [r"national figure skating championship"]),
+    ("olympic-figure-skating", "Olympic Figure Skating", "figure-skating", "Olympic figure skating", [], [r"olympic figure skating"]),
+    ("long-track-speed-skating", "Long Track Speed Skating", "speed-skating", "Long-track speed skating", [], [r"long track speed skating"]),
+    ("short-track-speed-skating", "Short Track Speed Skating", "speed-skating", "Short-track speed skating", [], [r"short track speed skating"]),
+    ("olympic-speed-skating", "Olympic Speed Skating", "speed-skating", "Olympic speed skating", [], [r"olympic speed skating"]),
+
+    ("alpine-skiing", "Alpine Skiing", "skiing", "Alpine skiing", [], [r"alpine skiing"]),
+    ("cross-country-skiing", "Cross-Country Skiing", "skiing", "Cross-country skiing", [], [r"cross[- ]country skiing"]),
+    ("freestyle-skiing", "Freestyle Skiing", "skiing", "Freestyle skiing", [], [r"freestyle skiing"]),
+    ("ski-jumping", "Ski Jumping", "skiing", "Ski jumping", [], [r"ski jumping"]),
+    ("nordic-combined", "Nordic Combined", "skiing", "Nordic combined", [], [r"nordic combined"]),
+    ("olympic-skiing", "Olympic Skiing", "skiing", "Olympic skiing", [], [r"olympic skiing"]),
+    ("snowboard-slopestyle", "Snowboard Slopestyle / Big Air", "snowboarding", "Slopestyle and big air", [], [r"snowboard.*(?:slopestyle|big air)"]),
+    ("snowboard-halfpipe", "Snowboard Halfpipe", "snowboarding", "Halfpipe", [], [r"snowboard.*halfpipe"]),
+    ("snowboard-cross", "Snowboard Cross", "snowboarding", "Boardercross", [], [r"snowboard cross", r"boardercross"]),
+    ("olympic-snowboarding", "Olympic Snowboarding", "snowboarding", "Olympic snowboarding", [], [r"olympic snowboarding"]),
+    ("bobsleigh", "Bobsleigh", "sliding-sports", "Bobsleigh", ["Bobsled"], [r"\bbobsle(?:d|igh)\b"]),
+    ("skeleton", "Skeleton", "sliding-sports", "Skeleton", [], [r"\bskeleton\b"]),
+    ("luge", "Luge", "sliding-sports", "Luge", [], [r"\bluge\b"]),
+
+    ("formula-1", "Formula 1", "motorsports", "Formula 1 sessions and races", ["F1"], [r"formula\s*(?:1|one)", r"\bf1\b"]),
+    ("formula-2", "Formula 2", "motorsports", "Formula 2 sessions and races", ["F2"], [r"formula\s*2", r"\bf2\b"]),
+    ("formula-3", "Formula 3", "motorsports", "Formula 3 sessions and races", ["F3"], [r"formula\s*3", r"\bf3\b"]),
+    ("formula-e", "Formula E", "motorsports", "Formula E sessions and races", [], [r"formula e"]),
+    ("nascar-cup", "NASCAR Cup Series", "motorsports", "NASCAR Cup events", [], [r"nascar.*cup"]),
+    ("nascar-xfinity", "NASCAR Xfinity Series", "motorsports", "NASCAR Xfinity events", [], [r"nascar.*xfinity"]),
+    ("nascar-trucks", "NASCAR Truck Series", "motorsports", "NASCAR Truck events", ["Craftsman Truck Series"], [r"nascar.*(?:truck|craftsman)"]),
+    ("indycar", "IndyCar", "motorsports", "IndyCar sessions and races", [], [r"indycar"]),
+    ("imsa", "IMSA", "motorsports", "IMSA endurance racing", [], [r"\bimsa\b"]),
+    ("wec", "FIA World Endurance Championship", "motorsports", "WEC endurance racing", ["WEC"], [r"world endurance championship", r"\bwec\b"]),
+    ("motogp", "MotoGP", "motorsports", "MotoGP sessions and races", [], [r"motogp"]),
+    ("superbike", "Superbike", "motorsports", "Superbike racing", ["WorldSBK"], [r"superbike", r"worldsbk"]),
+    ("motocross", "Motocross", "motorsports", "Motocross events", [], [r"motocross"]),
+    ("supercross", "Supercross", "motorsports", "Supercross events", [], [r"supercross"]),
+    ("dirt-bike-racing", "Dirt Bike Racing", "motorsports", "Dirt-bike racing", [], [r"dirt bike racing", r"dirtbikes?"]),
+    ("wrc", "WRC / Rally", "motorsports", "World Rally Championship", ["Rally"], [r"world rally championship", r"\bwrc\b"]),
+    ("off-road-racing", "Off-Road Racing", "motorsports", "Off-road racing", [], [r"off[- ]road racing"]),
+    ("nhra", "NHRA / Drag Racing", "motorsports", "Drag racing", [], [r"\bnhra\b", r"drag racing"]),
+    ("monster-jam", "Monster Jam / Monster Trucks", "motorsports", "Monster-truck events", [], [r"monster jam", r"monster trucks?"]),
+
+    ("ufc", "UFC", "mma", "UFC cards and related coverage", ["Fight Night"], [r"\bufc\b", r"ultimate fighting", r"fight night"]),
+    ("pfl", "PFL / Bellator", "mma", "PFL and legacy Bellator listings", ["Professional Fighters League", "Bellator"], [r"\bpfl\b", r"professional fighters league", r"bellator"]),
+    ("one-championship", "ONE Championship", "mma", "ONE Championship cards", [], [r"one championship"]),
+    ("regional-mma", "Regional MMA", "mma", "Other regional MMA promotions", [], [r"regional mma", r"cage fighting"]),
+
+    ("wwe", "WWE", "pro-wrestling", "WWE events", [], [r"\bwwe\b", r"wrestlemania", r"smackdown", r"monday night raw"]),
+    ("aew", "AEW", "pro-wrestling", "AEW events", [], [r"\baew\b", r"all elite wrestling"]),
+    ("tna", "TNA Wrestling", "pro-wrestling", "TNA events", ["Impact Wrestling"], [r"\btna\b", r"impact wrestling"]),
+    ("njpw", "NJPW", "pro-wrestling", "New Japan Pro-Wrestling", [], [r"\bnjpw\b", r"new japan pro"]),
+    ("roh", "ROH", "pro-wrestling", "Ring of Honor", [], [r"\broh\b", r"ring of honor"]),
+    ("other-pro-wrestling", "Other Pro Wrestling", "pro-wrestling", "Other promotions", [], [r"professional wrestling", r"pro wrestling"]),
+    ("ncaa-wrestling", "NCAA Wrestling", "wrestling", "College wrestling", [], [r"ncaa wrestling", r"college wrestling"]),
+    ("freestyle-wrestling", "Freestyle Wrestling", "wrestling", "Freestyle wrestling", [], [r"freestyle wrestling"]),
+    ("greco-roman-wrestling", "Greco-Roman Wrestling", "wrestling", "Greco-Roman wrestling", [], [r"greco[- ]roman"]),
+    ("olympic-wrestling", "Olympic Wrestling", "wrestling", "Olympic wrestling", [], [r"olympic wrestling"]),
+
+    ("pdc-darts", "PDC Darts", "darts", "Professional Darts Corporation", ["PDC"], [r"professional darts corporation", r"\bpdc\b"]),
+    ("wdf-darts", "WDF Darts", "darts", "World Darts Federation", ["WDF"], [r"world darts federation", r"\bwdf\b"]),
+    ("darts-events", "Darts Tours / Events", "darts", "World Matchplay, Premier League, and other events", [], [r"world matchplay", r"premier league darts"]),
+    ("wsop", "World Series of Poker", "poker", "WSOP coverage", ["WSOP"], [r"world series of poker", r"\bwsop\b"]),
+    ("wpt", "World Poker Tour", "poker", "WPT coverage", ["WPT"], [r"world poker tour", r"\bwpt\b"]),
+    ("ept", "European Poker Tour", "poker", "EPT coverage", ["EPT"], [r"european poker tour", r"\bept\b"]),
+    ("acl-cornhole", "American Cornhole League", "cornhole", "ACL events", ["ACL"], [r"american cornhole league", r"\bacl\b.*(?:cornhole|pro|open|teams|shootout|championship)"]),
+    ("aco-cornhole", "American Cornhole Organization", "cornhole", "ACO events", ["ACO"], [r"american cornhole organization", r"\baco\b.*cornhole"]),
+    ("college-cornhole", "College Cornhole", "cornhole", "College cornhole", [], [r"college cornhole"]),
+    ("international-cornhole", "International Cornhole", "cornhole", "International and championship events", [], [r"international cornhole", r"cornhole championship"]),
+    ("celebrity-cornhole", "Celebrity / TV Cornhole", "cornhole", "Made-for-TV and celebrity tournaments", [], [r"celebrity cornhole", r"cornhole.*(?:challenge|showdown)"]),
+
+    ("tour-de-france", "Tour de France", "cycling", "Tour de France stages", [], [r"tour de france"]),
+    ("giro-ditalia", "Giro d’Italia", "cycling", "Giro d’Italia stages", [], [r"giro d['’]?italia"]),
+    ("vuelta-espana", "Vuelta a España", "cycling", "Vuelta a España stages", [], [r"vuelta a españa", r"vuelta a espana"]),
+    ("tour-california", "Tour of California", "cycling", "Tour of California stages and legacy listings", [], [r"tour of california"]),
+    ("road-cycling-classics", "Road Cycling Classics", "cycling", "One-day road classics", ["Paris-Roubaix", "Tour of Flanders"], [r"paris[- ]roubaix", r"tour of flanders", r"road cycling classic"]),
+    ("cycling-world-championships", "Cycling World Championships", "cycling", "UCI world championships", ["UCI Worlds"], [r"uci.*world championship", r"cycling world championship"]),
+    ("track-cycling", "Track Cycling", "cycling", "Track cycling", [], [r"track cycling"]),
+    ("mountain-biking", "Mountain Biking", "cycling", "Mountain-bike racing", ["MTB"], [r"mountain bik(?:e|ing)", r"\bmtb\b"]),
+    ("cyclocross", "Cyclocross", "cycling", "Cyclocross", [], [r"cyclocross"]),
+    ("bmx-racing", "BMX Racing", "cycling", "BMX racing", [], [r"bmx racing"]),
+    ("bmx-freestyle", "BMX Freestyle", "cycling", "BMX freestyle", [], [r"bmx freestyle"]),
+    ("olympic-cycling", "Olympic Cycling", "cycling", "Olympic cycling disciplines", [], [r"olympic cycling"]),
+
+    ("atp-tennis", "ATP Tour", "tennis", "ATP men’s tennis", [], [r"\batp\b", r"atp tour"]),
+    ("wta-tennis", "WTA Tour", "tennis", "WTA women’s tennis", [], [r"\bwta\b", r"wta tour"]),
+    ("tennis-grand-slams", "Tennis Grand Slams", "tennis", "Australian Open, Roland-Garros, Wimbledon, and US Open", ["Wimbledon", "US Open", "Australian Open", "French Open"], [r"wimbledon", r"australian open", r"roland[- ]garros", r"french open tennis", r"us open tennis"]),
+    ("team-tennis", "International Team Tennis", "tennis", "Davis Cup and Billie Jean King Cup", ["Davis Cup", "BJK Cup"], [r"davis cup", r"billie jean king cup"]),
+    ("ncaa-tennis", "NCAA Tennis", "tennis", "College tennis", [], [r"ncaa tennis", r"college tennis"]),
+    ("olympic-tennis", "Olympic Tennis", "tennis", "Olympic tennis", [], [r"olympic tennis"]),
+
+    ("international-volleyball", "International Volleyball", "volleyball", "International indoor volleyball", ["FIVB", "Volleyball Nations League"], [r"\bfivb\b", r"volleyball nations league", r"international volleyball"]),
+    ("ncaa-volleyball", "NCAA Volleyball", "volleyball", "College volleyball", [], [r"ncaa volleyball", r"college volleyball"]),
+    ("beach-volleyball", "Beach Volleyball", "volleyball", "Beach volleyball tours and events", [], [r"beach volleyball"]),
+    ("olympic-volleyball", "Olympic Volleyball", "volleyball", "Olympic indoor and beach volleyball", [], [r"olympic.*volleyball"]),
+
+    ("professional-boxing", "Professional Boxing", "boxing", "Professional boxing cards", [], [r"professional boxing", r"boxing.*(?:title|fight|card|championship)"]),
+    ("olympic-boxing", "Olympic Boxing", "boxing", "Olympic boxing", [], [r"olympic boxing"]),
+    ("ncaa-softball", "NCAA Softball", "softball", "College softball", [], [r"ncaa softball", r"college softball"]),
+    ("professional-softball", "Professional Softball", "softball", "Professional softball", [], [r"professional softball", r"pro softball"]),
+    ("international-softball", "International Softball", "softball", "International softball", [], [r"international softball", r"world baseball softball confederation", r"\bwbsc\b"]),
+    ("nll", "National Lacrosse League", "lacrosse", "Indoor professional lacrosse", ["NLL"], [r"national lacrosse league", r"\bnll\b"]),
+    ("pll", "Premier Lacrosse League", "lacrosse", "Outdoor professional lacrosse", ["PLL"], [r"premier lacrosse league", r"\bpll\b"]),
+    ("ncaa-lacrosse", "NCAA Lacrosse", "lacrosse", "College lacrosse", [], [r"ncaa lacrosse", r"college lacrosse"]),
+    ("triple-crown-racing", "U.S. Triple Crown", "horse-racing", "Kentucky Derby, Preakness, and Belmont Stakes", [], [r"kentucky derby", r"preakness stakes", r"belmont stakes"]),
+    ("breeders-cup", "Breeders’ Cup", "horse-racing", "Breeders’ Cup racing", [], [r"breeders['’]? cup"]),
+    ("international-horse-racing", "International Horse Racing", "horse-racing", "International racing meets", [], [r"international horse racing", r"royal ascot", r"melbourne cup"]),
+    ("biathlon-world-cup", "Biathlon World Cup", "biathlon", "IBU World Cup events", ["IBU"], [r"biathlon world cup", r"\bibu\b"]),
+    ("olympic-biathlon", "Olympic Biathlon", "biathlon", "Olympic biathlon", [], [r"olympic biathlon"]),
+
+    ("world-aquatics-diving", "World Aquatics Diving", "diving", "International diving", [], [r"world aquatics.*diving", r"world diving"]),
+    ("ncaa-diving", "NCAA Diving", "diving", "College diving", [], [r"ncaa diving", r"college diving"]),
+    ("olympic-diving", "Olympic Diving", "diving", "Olympic diving", [], [r"olympic diving"]),
+    ("world-aquatics-water-polo", "World Aquatics Water Polo", "water-polo", "International water polo", [], [r"world aquatics.*water polo", r"water polo world"]),
+    ("ncaa-water-polo", "NCAA Water Polo", "water-polo", "College water polo", [], [r"ncaa water polo", r"college water polo"]),
+    ("olympic-water-polo", "Olympic Water Polo", "water-polo", "Olympic water polo", [], [r"olympic water polo"]),
+    ("world-artistic-swimming", "World Artistic Swimming", "artistic-swimming", "World Aquatics artistic swimming", [], [r"world aquatics.*artistic swimming", r"world artistic swimming"]),
+    ("olympic-artistic-swimming", "Olympic Artistic Swimming", "artistic-swimming", "Olympic artistic swimming", [], [r"olympic artistic swimming"]),
+    ("world-rowing", "World Rowing", "rowing", "World Rowing events", [], [r"world rowing"]),
+    ("ncaa-rowing", "NCAA Rowing", "rowing", "College rowing", [], [r"ncaa rowing", r"college rowing"]),
+    ("olympic-rowing", "Olympic Rowing", "rowing", "Olympic rowing", [], [r"olympic rowing"]),
+    ("canoe-sprint", "Canoe Sprint", "canoe-kayak", "Canoe and kayak sprint", [], [r"canoe sprint", r"kayak sprint"]),
+    ("canoe-slalom", "Canoe Slalom", "canoe-kayak", "Canoe and kayak slalom", [], [r"canoe slalom", r"kayak slalom"]),
+    ("olympic-canoe-kayak", "Olympic Canoe / Kayak", "canoe-kayak", "Olympic paddle sports", [], [r"olympic.*(?:canoe|kayak)"]),
+    ("world-sailing", "World Sailing", "sailing", "World Sailing events", [], [r"world sailing"]),
+    ("olympic-sailing", "Olympic Sailing", "sailing", "Olympic sailing", [], [r"olympic sailing"]),
+    ("world-triathlon", "World Triathlon", "triathlon", "World Triathlon series", [], [r"world triathlon"]),
+    ("ironman-triathlon", "IRONMAN", "triathlon", "IRONMAN triathlon events", [], [r"ironman.*triathlon", r"ironman world championship"]),
+    ("olympic-triathlon", "Olympic Triathlon", "triathlon", "Olympic triathlon", [], [r"olympic triathlon"]),
+    ("world-archery", "World Archery", "archery", "World Archery events", [], [r"world archery"]),
+    ("olympic-archery", "Olympic Archery", "archery", "Olympic archery", [], [r"olympic archery"]),
+    ("issf-shooting", "ISSF Shooting", "shooting", "International sport shooting", ["ISSF"], [r"\bissf\b", r"world shooting championship"]),
+    ("olympic-shooting", "Olympic Shooting", "shooting", "Olympic shooting", [], [r"olympic shooting"]),
+    ("iwf-weightlifting", "IWF Weightlifting", "weightlifting", "International weightlifting", ["IWF"], [r"\biwf\b", r"world weightlifting"]),
+    ("olympic-weightlifting", "Olympic Weightlifting", "weightlifting", "Olympic weightlifting", [], [r"olympic weightlifting"]),
+    ("fei-equestrian", "FEI Equestrian", "equestrian", "International equestrian events", ["FEI"], [r"\bfei\b", r"equestrian.*(?:world|championship)"]),
+    ("olympic-equestrian", "Olympic Equestrian", "equestrian", "Olympic equestrian", [], [r"olympic equestrian"]),
+    ("international-handball", "International Handball", "handball", "IHF and EHF competitions", ["IHF", "EHF"], [r"\bihf\b", r"\behf\b", r"international handball"]),
+    ("olympic-handball", "Olympic Handball", "handball", "Olympic handball", [], [r"olympic handball"]),
+    ("international-field-hockey", "International Field Hockey", "field-hockey", "FIH competitions", ["FIH"], [r"\bfih\b", r"international field hockey"]),
+    ("ncaa-field-hockey", "NCAA Field Hockey", "field-hockey", "College field hockey", [], [r"ncaa field hockey", r"college field hockey"]),
+    ("olympic-field-hockey", "Olympic Field Hockey", "field-hockey", "Olympic field hockey", [], [r"olympic field hockey"]),
+    ("bwf-badminton", "BWF Badminton", "badminton", "International badminton", ["BWF"], [r"\bbwf\b", r"world badminton"]),
+    ("olympic-badminton", "Olympic Badminton", "badminton", "Olympic badminton", [], [r"olympic badminton"]),
+    ("ittf-table-tennis", "ITTF / WTT Table Tennis", "table-tennis", "International table tennis", ["ITTF", "WTT"], [r"\bittf\b", r"world table tennis", r"\bwtt\b"]),
+    ("olympic-table-tennis", "Olympic Table Tennis", "table-tennis", "Olympic table tennis", [], [r"olympic table tennis"]),
+    ("fie-fencing", "FIE Fencing", "fencing", "International fencing", ["FIE"], [r"\bfie\b", r"world fencing"]),
+    ("ncaa-fencing", "NCAA Fencing", "fencing", "College fencing", [], [r"ncaa fencing", r"college fencing"]),
+    ("olympic-fencing", "Olympic Fencing", "fencing", "Olympic fencing", [], [r"olympic fencing"]),
+    ("ijf-judo", "IJF Judo", "judo", "International judo", ["IJF"], [r"\bijf\b", r"world judo"]),
+    ("olympic-judo", "Olympic Judo", "judo", "Olympic judo", [], [r"olympic judo"]),
+    ("world-taekwondo", "World Taekwondo", "taekwondo", "International taekwondo", ["WT"], [r"world taekwondo"]),
+    ("olympic-taekwondo", "Olympic Taekwondo", "taekwondo", "Olympic taekwondo", [], [r"olympic taekwondo"]),
+    ("ifsc-climbing", "IFSC Sport Climbing", "sport-climbing", "International sport climbing", ["IFSC"], [r"\bifsc\b", r"world climbing"]),
+    ("olympic-sport-climbing", "Olympic Sport Climbing", "sport-climbing", "Olympic sport climbing", [], [r"olympic sport climbing"]),
+    ("wsl-surfing", "World Surf League", "surfing", "WSL surfing", ["WSL"], [r"world surf league", r"\bwsl\b.*surf"]),
+    ("olympic-surfing", "Olympic Surfing", "surfing", "Olympic surfing", [], [r"olympic surfing"]),
+    ("skateboard-street", "Skateboarding — Street", "skateboarding", "Street skateboarding", [], [r"skateboard.*street"]),
+    ("skateboard-park", "Skateboarding — Park", "skateboarding", "Park skateboarding", [], [r"skateboard.*park"]),
+    ("olympic-skateboarding", "Olympic Skateboarding", "skateboarding", "Olympic skateboarding", [], [r"olympic skateboarding"]),
+    ("uipm-modern-pentathlon", "UIPM Modern Pentathlon", "modern-pentathlon", "International modern pentathlon", ["UIPM"], [r"\buipm\b", r"world modern pentathlon"]),
+    ("olympic-modern-pentathlon", "Olympic Modern Pentathlon", "modern-pentathlon", "Olympic modern pentathlon", [], [r"olympic modern pentathlon"]),
+    ("pba-bowling", "PBA Bowling", "bowling", "Professional Bowlers Association", ["PBA"], [r"professional bowlers association", r"\bpba\b.*bowling"]),
+    ("pwba-bowling", "PWBA Bowling", "bowling", "Professional Women’s Bowling Association", ["PWBA"], [r"\bpwba\b"]),
+    ("ncaa-bowling", "NCAA Bowling", "bowling", "College bowling", [], [r"ncaa bowling", r"college bowling"]),
+    ("professional-pool", "Professional Pool", "billiards", "Professional pool tournaments", [], [r"professional pool", r"pool championship", r"nine[- ]ball"]),
+    ("snooker", "Snooker", "billiards", "Professional snooker", [], [r"\bsnooker\b"]),
+]
+
+SPORT_NAMES = {sport_id: name for sport_id, name, _patterns in SPORT_DEFINITIONS}
+SPORT_PATTERNS = {sport_id: patterns for sport_id, _name, patterns in SPORT_DEFINITIONS}
+LEAGUE_NAMES = {league_id: name for league_id, name, _sport, _subtitle, _aliases, _patterns in LEAGUE_DEFINITIONS}
+LEAGUE_SPORTS = {league_id: sport_id for league_id, _name, sport_id, _subtitle, _aliases, _patterns in LEAGUE_DEFINITIONS}
+LEAGUE_PATTERNS = {league_id: patterns for league_id, _name, _sport, _subtitle, _aliases, patterns in LEAGUE_DEFINITIONS}
+LEAGUE_BLOCK_ORDER = [league_id for league_id, *_rest in LEAGUE_DEFINITIONS]
+LEAGUE_BLOCK_INDEX = {league_id: index for index, league_id in enumerate(LEAGUE_BLOCK_ORDER)}
+LEAGUE_BLOCK_SIZE = 1000
+OVERFLOW_BLOCK_OFFSET = 1_000_000
+
+COLLEGE_FOOTBALL_LEAGUES = {
+    "ncaaf-fbs", "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3",
+    "naia-football", "njcaa-football", "high-school-football",
+}
+TEAM_MATCHUP_LEAGUES = {
+    "nfl", "mlb", "milb", "nba", "wnba", "nba-g-league",
+    "nhl", "ahl", "ncaaf-fbs", "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3",
+    "naia-football", "njcaa-football", "high-school-football",
+    "ncaab-men", "ncaab-women", "mls", "nwsl", "premier-league",
+    "la-liga", "uefa-champions-league", "international-soccer",
+    "ncaa-baseball", "international-baseball", "ncaa-hockey",
+    "international-hockey", "international-basketball",
 }
 
 REPLAY_RE = re.compile(r"\b(replay|encore|classic|rewind|repeat)\b", re.I)
@@ -147,52 +448,75 @@ CONFERENCE_TEAMS = {
     ],
 }
 
-SEED_CATALOG = [
-    ("league", "nfl", "NFL", "Every NFL game", "nfl", [], "", {}),
-    ("league", "mlb", "MLB", "Every MLB game", "mlb", [], "", {}),
-    ("league", "milb", "MiLB", "Every Minor League Baseball game", "milb", ["Minor League Baseball"], "", {}),
-    ("league", "nba", "NBA", "Every NBA game", "nba", [], "", {}),
-    ("league", "nhl", "NHL", "Every NHL game", "nhl", [], "", {}),
-    ("league", "wnba", "WNBA", "Every WNBA game", "wnba", [], "", {}),
-    ("league", "ncaaf", "College Football", "Every college football game", "ncaaf", [], "", {}),
-    ("league", "ncaab", "College Basketball", "Every college basketball game", "ncaab", [], "", {}),
-    ("league", "mls", "MLS", "Every MLS match", "mls", [], "", {}),
-    ("league", "nwsl", "NWSL", "Every NWSL match", "nwsl", [], "", {}),
-    (
-        "conference",
-        "ncaaf:big-ten",
-        "Big Ten Football",
-        "Games with at least one Big Ten team",
-        "ncaaf",
-        ["Big Ten", "B1G"],
-        "",
-        {"teams": CONFERENCE_TEAMS["ncaaf:big-ten"]},
-    ),
-    (
-        "conference",
-        "ncaaf:acc",
-        "ACC Football",
-        "Games with at least one ACC team",
-        "ncaaf",
-        ["ACC", "Atlantic Coast Conference"],
-        "",
-        {"teams": CONFERENCE_TEAMS["ncaaf:acc"]},
-    ),
-    (
-        "conference",
-        "ncaaf:sec",
-        "SEC Football",
-        "Games with at least one SEC team",
-        "ncaaf",
-        ["SEC", "Southeastern Conference"],
-        "",
-        {"teams": CONFERENCE_TEAMS["ncaaf:sec"]},
-    ),
-    ("sport", "cornhole", "Cornhole", "ACL and ACO events", "", ["ACL", "ACO", "bag toss"], "", {}),
-    ("sport", "formula-1", "Formula 1", "Formula 1 and Grand Prix events", "", ["F1", "Grand Prix"], "", {}),
-    ("sport", "ufc", "UFC", "UFC and Fight Night events", "", ["Fight Night"], "", {}),
-    ("sport", "soccer", "Soccer", "Soccer matches from any competition", "", ["football"], "", {}),
-]
+SEED_CATALOG = []
+
+for sport_id, sport_name, _patterns in SPORT_DEFINITIONS:
+    SEED_CATALOG.append(
+        (
+            "sport",
+            sport_id,
+            sport_name,
+            f"All {sport_name.lower()} events across child leagues, series, tours, and promotions",
+            "",
+            [],
+            "",
+            {"sport_id": sport_id, "family": sport_name, "kind": "sport"},
+        )
+    )
+
+for league_id, name, sport_id, subtitle, aliases, _patterns in LEAGUE_DEFINITIONS:
+    SEED_CATALOG.append(
+        (
+            "league",
+            league_id,
+            name,
+            subtitle,
+            league_id,
+            aliases,
+            "",
+            {
+                "sport_id": sport_id,
+                "family": SPORT_NAMES.get(sport_id, sport_id),
+                "kind": "league",
+                "block_index": LEAGUE_BLOCK_INDEX[league_id],
+            },
+        )
+    )
+
+SEED_CATALOG.extend(
+    [
+        (
+            "conference",
+            "ncaaf-fbs:big-ten",
+            "Big Ten Football",
+            "FBS games with at least one Big Ten team",
+            "ncaaf-fbs",
+            ["Big Ten", "B1G"],
+            "",
+            {"teams": CONFERENCE_TEAMS["ncaaf:big-ten"], "sport_id": "football", "family": "Football"},
+        ),
+        (
+            "conference",
+            "ncaaf-fbs:acc",
+            "ACC Football",
+            "FBS games with at least one ACC team",
+            "ncaaf-fbs",
+            ["ACC", "Atlantic Coast Conference"],
+            "",
+            {"teams": CONFERENCE_TEAMS["ncaaf:acc"], "sport_id": "football", "family": "Football"},
+        ),
+        (
+            "conference",
+            "ncaaf-fbs:sec",
+            "SEC Football",
+            "FBS games with at least one SEC team",
+            "ncaaf-fbs",
+            ["SEC", "Southeastern Conference"],
+            "",
+            {"teams": CONFERENCE_TEAMS["ncaaf:sec"], "sport_id": "football", "family": "Football"},
+        ),
+    ]
+)
 
 SEED_CATALOG.extend(
     (
@@ -203,7 +527,7 @@ SEED_CATALOG.extend(
         "mlb",
         [display_name, *aliases],
         "",
-        {},
+        {"sport_id": "baseball", "family": "Baseball"},
     )
     for slug, display_name, aliases in MLB_TEAMS
 )
@@ -234,18 +558,29 @@ MAX_MALFORMED_SAMPLES = 10
 XMLTV_GENERATOR_NAME = "M3U Web Picker Sports Automation"
 GUIDE_PREGAME_HOURS = 24
 GUIDE_POSTGAME_HOURS = 2
+SPORTS_DISABLED_CACHE_HOURS = 24
+SPORTS_DISABLED_AT_KEY = "__sports_disabled_at"
 ESTIMATED_EVENT_HOURS = {
-    "mlb": 4,
-    "milb": 4,
-    "nfl": 4,
-    "ncaaf": 4,
-    "nba": 3,
-    "wnba": 3,
-    "nhl": 3,
-    "ncaab": 3,
-    "mls": 3,
-    "nwsl": 3,
+    "mlb": 4, "milb": 4, "ncaa-baseball": 4, "international-baseball": 4,
+    "nfl": 4, "ncaaf-fbs": 4, "ncaaf-fcs": 4, "ncaaf-d2": 4,
+    "ncaaf-d3": 4, "naia-football": 4, "njcaa-football": 4,
+    "high-school-football": 4,
+    "nba": 3, "wnba": 3, "nba-g-league": 3, "ncaab-men": 3,
+    "ncaab-women": 3, "international-basketball": 3,
+    "nhl": 3, "ahl": 3, "ncaa-hockey": 3, "international-hockey": 3,
+    "mls": 3, "nwsl": 3, "premier-league": 3, "la-liga": 3,
+    "uefa-champions-league": 3, "international-soccer": 3,
+    "cricket-test": 8, "cricket-odi": 8, "cricket-t20": 5,
+    "cricket-ipl": 5, "cricket-domestic": 8,
+    "rugby-union-international": 3, "rugby-union-club": 3,
+    "rugby-league-nrl": 3, "rugby-league-super": 3, "rugby-league-origin": 3,
+    "poker": 8, "wsop": 8, "wpt": 8, "ept": 8,
+    "golf": 8, "pga-tour": 8, "lpga-tour": 8, "liv-golf": 8,
+    "dp-world-tour": 8, "golf-majors": 8,
+    "cycling": 6, "tour-de-france": 6, "giro-ditalia": 6,
+    "vuelta-espana": 6, "tour-california": 6,
 }
+
 
 
 class MalformedSportsEntry(ValueError):
@@ -590,6 +925,18 @@ def init_db(db_path: Path | str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sports_scan_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                running INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT,
+                updated_at TEXT,
+                stage TEXT NOT NULL DEFAULT '',
+                trigger TEXT NOT NULL DEFAULT 'manual'
+            )
+            """
+        )
 
         # Migrate the old split hour/minute settings before inserting defaults.
         refresh_row = conn.execute(
@@ -615,6 +962,28 @@ def init_db(db_path: Path | str) -> None:
                 (key, json.dumps(value)),
             )
 
+        # An upgrade may already contain generated rows while the master switch
+        # is off. Start the same 24-hour recovery window instead of retaining
+        # that hidden cache forever.
+        enabled_row = conn.execute(
+            "SELECT value FROM sports_settings WHERE key = 'enabled'"
+        ).fetchone()
+        disabled_at_row = conn.execute(
+            "SELECT 1 FROM sports_settings WHERE key = ?",
+            (SPORTS_DISABLED_AT_KEY,),
+        ).fetchone()
+        generated_count = int(
+            conn.execute("SELECT COUNT(*) FROM sports_generated").fetchone()[0]
+        )
+        enabled_value = bool(
+            _json_load(enabled_row["value"], False) if enabled_row else False
+        )
+        if not enabled_value and generated_count and not disabled_at_row:
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (SPORTS_DISABLED_AT_KEY, json.dumps(_now_iso())),
+            )
+
         now = _now_iso()
         for scope_type, scope_id, name, subtitle, league_id, aliases, logo, metadata in SEED_CATALOG:
             conn.execute(
@@ -623,7 +992,18 @@ def init_db(db_path: Path | str) -> None:
                     (scope_type, scope_id, display_name, subtitle, league_id,
                      aliases_json, logo_url, metadata_json, source, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'seed', ?)
-                ON CONFLICT(scope_type, scope_id) DO NOTHING
+                ON CONFLICT(scope_type, scope_id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    subtitle = excluded.subtitle,
+                    league_id = excluded.league_id,
+                    aliases_json = excluded.aliases_json,
+                    logo_url = CASE
+                        WHEN sports_catalog.logo_url = '' THEN excluded.logo_url
+                        ELSE sports_catalog.logo_url
+                    END,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                WHERE sports_catalog.source = 'seed'
                 """,
                 (
                     scope_type,
@@ -636,6 +1016,70 @@ def init_db(db_path: Path | str) -> None:
                     json.dumps(metadata),
                     now,
                 ),
+            )
+
+        # Remove seed choices retired or renamed by the v21 taxonomy while
+        # leaving provider-discovered catalog entries untouched.
+        valid_seed_keys = {(row[0], row[1]) for row in SEED_CATALOG}
+        stale_seed_rows = conn.execute(
+            "SELECT scope_type, scope_id FROM sports_catalog WHERE source = 'seed'"
+        ).fetchall()
+        for stale_row in stale_seed_rows:
+            key = (stale_row["scope_type"], stale_row["scope_id"])
+            if key not in valid_seed_keys:
+                conn.execute(
+                    "DELETE FROM sports_catalog WHERE scope_type = ? AND scope_id = ? AND source = 'seed'",
+                    key,
+                )
+
+        # Preserve older user selections while moving them onto the expanded
+        # sport/league model. This migration is idempotent and never adds a
+        # selection the user did not already have.
+        taxonomy_migration_key = "migration_sports_taxonomy_v21"
+        taxonomy_migrated = conn.execute(
+            "SELECT 1 FROM sports_settings WHERE key = ?",
+            (taxonomy_migration_key,),
+        ).fetchone()
+        if not taxonomy_migrated:
+            legacy_rule_moves = {
+                ("sport", "formula-1"): ("league", "formula-1"),
+                ("sport", "ufc"): ("league", "ufc"),
+                ("league", "ncaaf"): ("league", "ncaaf-fbs"),
+                ("league", "ncaab"): ("league", "ncaab-men"),
+                ("conference", "ncaaf:big-ten"): ("conference", "ncaaf-fbs:big-ten"),
+                ("conference", "ncaaf:acc"): ("conference", "ncaaf-fbs:acc"),
+                ("conference", "ncaaf:sec"): ("conference", "ncaaf-fbs:sec"),
+            }
+            for old_key, new_key in legacy_rule_moves.items():
+                row = conn.execute(
+                    """
+                    SELECT display_name, feed_preference, enabled, created_at, updated_at
+                    FROM sports_rules WHERE scope_type = ? AND scope_id = ?
+                    """,
+                    old_key,
+                ).fetchone()
+                if not row:
+                    continue
+                catalog_row = conn.execute(
+                    "SELECT display_name FROM sports_catalog WHERE scope_type = ? AND scope_id = ?",
+                    new_key,
+                ).fetchone()
+                display_name = catalog_row["display_name"] if catalog_row else row["display_name"]
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO sports_rules
+                        (scope_type, scope_id, display_name, feed_preference, enabled, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (*new_key, display_name, row["feed_preference"], row["enabled"], row["created_at"], row["updated_at"]),
+                )
+                conn.execute(
+                    "DELETE FROM sports_rules WHERE scope_type = ? AND scope_id = ?",
+                    old_key,
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (taxonomy_migration_key, json.dumps(True)),
             )
 
         # v20.1 inserted four demonstration rules. Remove that exact untouched
@@ -670,6 +1114,8 @@ def get_settings(db_path: Path | str) -> dict:
     output = dict(DEFAULT_SETTINGS)
     with closing(_connect(db_path)) as conn:
         for row in conn.execute("SELECT key, value FROM sports_settings"):
+            if str(row["key"]).startswith("__"):
+                continue
             output[row["key"]] = _json_load(row["value"], row["value"])
 
     hour, minute = _refresh_time_parts(output)
@@ -680,11 +1126,77 @@ def get_settings(db_path: Path | str) -> dict:
     return output
 
 
+def _disabled_at_from_conn(conn: sqlite3.Connection) -> datetime | None:
+    row = conn.execute(
+        "SELECT value FROM sports_settings WHERE key = ?",
+        (SPORTS_DISABLED_AT_KEY,),
+    ).fetchone()
+    if not row:
+        return None
+    value = _json_load(row["value"], row["value"])
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return parsed
+
+
+def disabled_cache_status(db_path: Path | str, now: datetime | None = None) -> dict:
+    """Return credential-free state for the 24-hour disabled sports cache."""
+    init_db(db_path)
+    current = (now or datetime.now().astimezone()).astimezone()
+    with closing(_connect(db_path)) as conn:
+        count = int(conn.execute("SELECT COUNT(*) FROM sports_generated").fetchone()[0])
+        disabled_at = _disabled_at_from_conn(conn)
+    settings = get_settings(db_path)
+    if settings.get("enabled") or not disabled_at:
+        return {
+            "count": count,
+            "disabled_at": None,
+            "expires_at": None,
+            "expired": False,
+        }
+    expires_at = disabled_at + timedelta(hours=SPORTS_DISABLED_CACHE_HOURS)
+    return {
+        "count": count,
+        "disabled_at": disabled_at.isoformat(timespec="seconds"),
+        "expires_at": expires_at.isoformat(timespec="seconds"),
+        "expired": current >= expires_at,
+    }
+
+
+def purge_expired_disabled_cache(db_path: Path | str, now: datetime | None = None) -> bool:
+    """Purge cached generated rows after sports has been disabled for 24 hours."""
+    init_db(db_path)
+    current = (now or datetime.now().astimezone()).astimezone()
+    settings = get_settings(db_path)
+    if settings.get("enabled"):
+        return False
+    with closing(_connect(db_path)) as conn:
+        disabled_at = _disabled_at_from_conn(conn)
+        if not disabled_at or current < disabled_at + timedelta(hours=SPORTS_DISABLED_CACHE_HOURS):
+            return False
+        deleted = conn.execute("DELETE FROM sports_generated").rowcount
+        conn.commit()
+    return bool(deleted)
+
+
 def update_settings(db_path: Path | str, changes: dict) -> dict:
+    previous_enabled = bool(get_settings(db_path).get("enabled"))
     allowed = set(DEFAULT_SETTINGS)
     clean = {key: value for key, value in changes.items() if key in allowed}
 
-    for key in ("enabled", "auto_update", "include_replays", "include_pregame", "use_backup_feeds"):
+    for key in (
+        "enabled",
+        "auto_update",
+        "everything_mode",
+        "include_replays",
+        "include_pregame",
+        "use_backup_feeds",
+        "exclude_sd",
+    ):
         if key in clean:
             clean[key] = bool(clean[key])
     if "start_channel" in clean:
@@ -730,6 +1242,22 @@ def update_settings(db_path: Path | str, changes: dict) -> dict:
                 "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
                 (key, json.dumps(value)),
             )
+
+        if "enabled" in clean and bool(clean["enabled"]) != previous_enabled:
+            if clean["enabled"]:
+                disabled_at = _disabled_at_from_conn(conn)
+                if disabled_at and datetime.now().astimezone() >= disabled_at + timedelta(hours=SPORTS_DISABLED_CACHE_HOURS):
+                    conn.execute("DELETE FROM sports_generated")
+                conn.execute(
+                    "DELETE FROM sports_settings WHERE key = ?",
+                    (SPORTS_DISABLED_AT_KEY,),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                    (SPORTS_DISABLED_AT_KEY, json.dumps(_now_iso())),
+                )
+
         # Retire the legacy split values after any successful write.
         conn.execute("DELETE FROM sports_settings WHERE key IN ('refresh_hour', 'refresh_minute')")
         conn.commit()
@@ -757,6 +1285,13 @@ def _catalog_rows(db_path: Path | str, scope_type: str = "") -> list[dict]:
         item["name"] = item.pop("display_name")
         item["aliases"] = _json_load(item.pop("aliases_json"), [])
         item["metadata"] = _json_load(item.pop("metadata_json"), {})
+        league_id = str(item.get("league_id", "") or "")
+        sport_id = LEAGUE_SPORTS.get(league_id, "")
+        if sport_id:
+            item["metadata"].setdefault("sport_id", sport_id)
+            item["metadata"].setdefault("family", SPORT_NAMES.get(sport_id, sport_id))
+        if league_id in LEAGUE_BLOCK_INDEX:
+            item["metadata"].setdefault("block_index", LEAGUE_BLOCK_INDEX[league_id])
         output.append(item)
     return output
 
@@ -877,7 +1412,10 @@ def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]
                 league_id=league_id,
                 aliases=aliases,
                 logo_url=logo,
-                metadata={},
+                metadata={
+                    "sport_id": LEAGUE_SPORTS.get(league_id, ""),
+                    "family": SPORT_NAMES.get(LEAGUE_SPORTS.get(league_id, ""), league_id.upper()),
+                },
                 source="provider",
             )
         conn.commit()
@@ -1162,41 +1700,60 @@ def _league_matches(text: str) -> list[str]:
     ]
 
 
-def _detect_league(primary_text: str, fallback_text: str = "") -> str:
-    """Detect a league without letting shared provider groups blur MLB and MiLB.
+def _college_football_match(text: str, matches: list[str]) -> str:
+    """Resolve college subdivisions without generic "college football" leakage."""
+    lowered = str(text or "").lower()
+    if "ncaaf-fbs" in matches and re.search(r"\bfbs\b|football bowl subdivision|division i fbs", lowered, re.I):
+        return "ncaaf-fbs"
+    for league_id in (
+        "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3", "naia-football",
+        "njcaa-football", "high-school-football",
+    ):
+        if league_id in matches:
+            return league_id
+    if "ncaaf-fbs" in matches:
+        return "ncaaf-fbs"
+    return ""
 
-    Event titles and XMLTV categories are authoritative. Provider group/title
-    metadata is only a fallback, and an ambiguous ``MLB / MiLB`` fallback is
-    deliberately left unclassified rather than guessed.
-    """
+
+def _detect_league(primary_text: str, fallback_text: str = "") -> str:
+    """Detect a league/series while keeping shared provider groups isolated."""
     primary_matches = _league_matches(primary_text)
     if primary_matches:
-        # A title should normally contain only one league. If both baseball
-        # tokens appear, the more specific MiLB token wins only when MLB is not
-        # also explicitly present in the same title/category text.
+        college_match = _college_football_match(primary_text, primary_matches)
+        if college_match:
+            return college_match
         if "milb" in primary_matches and "mlb" not in primary_matches:
             return "milb"
         if "mlb" in primary_matches and "milb" not in primary_matches:
             return "mlb"
         if len(primary_matches) == 1:
             return primary_matches[0]
-        for league_id in LEAGUE_PATTERNS:
-            if league_id in primary_matches and league_id not in {"mlb", "milb"}:
-                return league_id
-        return ""
+        # Patterns are defined from specific competitions to broader fallbacks;
+        # the first match therefore wins for non-baseball classifications.
+        return primary_matches[0]
 
     fallback_matches = _league_matches(fallback_text)
     if {"mlb", "milb"}.issubset(fallback_matches):
         return ""
-    return fallback_matches[0] if len(fallback_matches) == 1 else ""
+    college_match = _college_football_match(fallback_text, fallback_matches)
+    if college_match:
+        return college_match
+    return fallback_matches[0] if fallback_matches else ""
+
+
+def _detect_sport_tags(text: str) -> list[str]:
+    normalized = str(text or "").lower()
+    return [
+        sport_id
+        for sport_id, patterns in SPORT_PATTERNS.items()
+        if any(re.search(pattern, normalized, re.I) for pattern in patterns)
+    ]
 
 
 def _detect_sport(text: str) -> str:
-    normalized = text.lower()
-    for sport_id, patterns in SPORT_PATTERNS.items():
-        if any(re.search(pattern, normalized, re.I) for pattern in patterns):
-            return sport_id
-    return ""
+    matches = _detect_sport_tags(text)
+    return matches[0] if matches else ""
 
 
 def _strip_provider_prefix(value: str) -> str:
@@ -1322,7 +1879,11 @@ def _event_from_text(
         league_id = _detect_league(extra_text)
     if not league_id:
         league_id = _detect_league("", _channel_text(channel))
-    sport_id = _detect_sport(full_text)
+    sport_tags = _detect_sport_tags(full_text)
+    mapped_sport = LEAGUE_SPORTS.get(league_id, "")
+    if mapped_sport and mapped_sport not in sport_tags:
+        sport_tags.insert(0, mapped_sport)
+    sport_id = mapped_sport or next((tag for tag in sport_tags if tag != "olympics"), "") or (sport_tags[0] if sport_tags else "")
     cleaned, parsed_start = _extract_event_datetime(_strip_provider_prefix(text), settings, now)
     start = forced_start or parsed_start
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" |:-")
@@ -1330,7 +1891,7 @@ def _event_from_text(
     match = MATCHUP_RE.search(cleaned)
     # Team-sport league rules are intended to add games, not static networks,
     # studio shows, RedZone channels, or numbered empty event slots.
-    if league_id in {"nfl", "mlb", "milb", "nba", "nhl", "wnba", "ncaaf", "ncaab", "mls", "nwsl"} and not match:
+    if league_id in TEAM_MATCHUP_LEAGUES and not match:
         return None
     teams = _team_catalog(db_path)
     away_id = home_id = ""
@@ -1368,6 +1929,7 @@ def _event_from_text(
         "event_key": event_key,
         "league_id": league_id,
         "sport_id": sport_id,
+        "sport_tags": sport_tags,
         "display_name": display_name,
         "away_team_id": away_id,
         "away_team_name": away_name,
@@ -1538,9 +2100,10 @@ def _merge_events(events: Iterable[dict]) -> list[dict]:
 
 
 def _conference_matches(event: dict, conference_id: str) -> bool:
-    if event.get("league_id") != "ncaaf":
+    if event.get("league_id") != "ncaaf-fbs":
         return False
-    team_names = CONFERENCE_TEAMS.get(conference_id, [])
+    legacy_id = conference_id.replace("ncaaf-fbs:", "ncaaf:")
+    team_names = CONFERENCE_TEAMS.get(legacy_id, [])
     participant_text = _normalize(
         f"{event.get('away_team_name', '')} {event.get('home_team_name', '')}"
     )
@@ -1562,7 +2125,7 @@ def _matching_rules(event: dict, rules: list[dict]) -> list[dict]:
         elif scope_type == "conference" and _conference_matches(event, scope_id):
             matched.append(rule)
         elif scope_type == "sport":
-            if event.get("sport_id") == scope_id:
+            if scope_id in set(event.get("sport_tags", [])) | {event.get("sport_id", "")}:
                 matched.append(rule)
             elif any(re.search(pattern, event.get("source_text", ""), re.I) for pattern in SPORT_PATTERNS.get(scope_id, [])):
                 matched.append(rule)
@@ -2222,12 +2785,131 @@ def _record_scan(
         conn.commit()
 
 
-def record_scan_failure(db_path: Path | str, message: str, trigger: str = "scheduled") -> None:
+def begin_scan_state(
+    db_path: Path | str,
+    *,
+    trigger: str = "manual",
+    started_at: str | None = None,
+    stage: str = "Starting sports update",
+) -> dict:
+    """Persist the active scan so reopening the browser keeps its status."""
+    init_db(db_path)
+    started = started_at or _now_iso()
+    updated = _now_iso()
+    with closing(_connect(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO sports_scan_state
+                (id, running, started_at, updated_at, stage, trigger)
+            VALUES (1, 1, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                running = 1,
+                started_at = excluded.started_at,
+                updated_at = excluded.updated_at,
+                stage = excluded.stage,
+                trigger = excluded.trigger
+            """,
+            (started, updated, str(stage).strip()[:160], str(trigger).strip()[:40] or "manual"),
+        )
+        conn.commit()
+    return scan_state(db_path)
+
+
+def update_scan_stage(db_path: Path | str, stage: str) -> dict:
+    """Update the human-readable stage for an active scan."""
+    init_db(db_path)
+    with closing(_connect(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE sports_scan_state
+            SET updated_at = ?, stage = ?
+            WHERE id = 1 AND running = 1
+            """,
+            (_now_iso(), str(stage).strip()[:160]),
+        )
+        conn.commit()
+    return scan_state(db_path)
+
+
+def finish_scan_state(db_path: Path | str) -> None:
+    """Mark the active scan complete without deleting its start metadata."""
+    init_db(db_path)
+    with closing(_connect(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE sports_scan_state
+            SET running = 0, updated_at = ?, stage = ''
+            WHERE id = 1
+            """,
+            (_now_iso(),),
+        )
+        conn.commit()
+
+
+def scan_state(db_path: Path | str, now: datetime | None = None) -> dict:
+    """Return credential-free persistent scan activity for the browser."""
+    init_db(db_path)
+    with closing(_connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT running, started_at, updated_at, stage, trigger
+            FROM sports_scan_state
+            WHERE id = 1
+            """
+        ).fetchone()
+    if not row:
+        return {
+            "running": False,
+            "started_at": None,
+            "updated_at": None,
+            "stage": "",
+            "trigger": "manual",
+            "elapsed_seconds": 0,
+        }
+
+    payload = dict(row)
+    payload["running"] = bool(payload.get("running"))
+    elapsed = 0
+    if payload["running"] and payload.get("started_at"):
+        try:
+            started = datetime.fromisoformat(str(payload["started_at"]))
+            current = now or datetime.now().astimezone()
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=current.tzinfo)
+            elapsed = max(0, int((current - started).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            elapsed = 0
+    payload["elapsed_seconds"] = elapsed
+    return payload
+
+
+def recover_interrupted_scan(db_path: Path | str) -> bool:
+    """Convert a stale running state left by a process restart into a failure."""
+    state = scan_state(db_path)
+    if not state.get("running"):
+        return False
+    record_scan_failure(
+        db_path,
+        "The previous sports update was interrupted by an app restart.",
+        trigger=str(state.get("trigger") or "manual"),
+        started_at=str(state.get("started_at") or _now_iso()),
+    )
+    finish_scan_state(db_path)
+    return True
+
+
+def record_scan_failure(
+    db_path: Path | str,
+    message: str,
+    trigger: str = "scheduled",
+    *,
+    started_at: str | None = None,
+) -> None:
     settings = get_settings(db_path)
     now = datetime.now().astimezone()
     _record_scan(
         db_path,
-        started_at=_now_iso(),
+        started_at=started_at or _now_iso(),
         status="failed",
         message=message,
         event_count=0,
@@ -2235,6 +2917,102 @@ def record_scan_failure(db_path: Path | str, message: str, trigger: str = "sched
         target_date=_sports_day(now, settings).isoformat(),
         trigger=trigger,
     )
+
+
+def _is_sd_channel(channel: dict) -> bool:
+    group = str(channel.get("group", "") or "").strip().upper()
+    name = str(channel.get("name", "") or "").strip()
+    return group == "LOW BANDWIDTH" or bool(re.search(r"(?:^|[ |_-])SD(?:$|[ |_-])", name, re.I))
+
+
+def _classification_id(event: dict) -> str:
+    return str(event.get("league_id") or event.get("sport_id") or "sports")
+
+
+def _classification_label(classification_id: str) -> str:
+    return LEAGUE_NAMES.get(
+        classification_id,
+        SPORT_NAMES.get(classification_id, classification_id.replace("-", " ").title() or "Sports"),
+    )
+
+
+def _block_index_map(classification_ids: Iterable[str]) -> dict[str, int]:
+    """Return stable primary block indexes, including provider-only classes."""
+    mapping = dict(LEAGUE_BLOCK_INDEX)
+    unknown = sorted(
+        {str(value) for value in classification_ids if value and value not in mapping}
+    )
+    next_index = len(mapping)
+    for classification_id in unknown:
+        mapping[classification_id] = next_index
+        next_index += 1
+    return mapping
+
+
+def assigned_channel_number(
+    classification_id: str,
+    event_index: int,
+    feed_index: int,
+    *,
+    start_channel: int = 1000,
+    channels_per_event: int = 10,
+    block_index: int | None = None,
+) -> int:
+    """Assign one feed inside a league's 1,000-channel block.
+
+    A 10-feed event size yields 100 normal event slots. Overflow is moved to a
+    distant continuation block instead of spilling into the next league.
+    """
+    per_event = max(1, int(channels_per_event))
+    capacity = max(1, LEAGUE_BLOCK_SIZE // per_event)
+    resolved_index = (
+        int(block_index)
+        if block_index is not None
+        else LEAGUE_BLOCK_INDEX.get(classification_id, len(LEAGUE_BLOCK_ORDER))
+    )
+    event_index = max(0, int(event_index))
+    feed_index = max(0, int(feed_index))
+    block_number = event_index // capacity
+    slot_index = event_index % capacity
+    if block_number == 0:
+        block_start = int(start_channel) + resolved_index * LEAGUE_BLOCK_SIZE
+    else:
+        block_start = (
+            int(start_channel)
+            + OVERFLOW_BLOCK_OFFSET
+            + resolved_index * 10_000
+            + (block_number - 1) * LEAGUE_BLOCK_SIZE
+        )
+    return block_start + slot_index * per_event + feed_index
+
+
+def numbering_plan(settings: dict) -> dict:
+    start = int(settings.get("start_channel", 1000))
+    per_event = int(settings.get("channels_per_event", 10))
+    capacity = max(1, LEAGUE_BLOCK_SIZE // max(1, per_event))
+    blocks = []
+    for league_id, name, sport_id, _subtitle, _aliases, _patterns in LEAGUE_DEFINITIONS:
+        index = LEAGUE_BLOCK_INDEX[league_id]
+        block_start = start + index * LEAGUE_BLOCK_SIZE
+        blocks.append(
+            {
+                "id": league_id,
+                "name": name,
+                "sport_id": sport_id,
+                "sport": SPORT_NAMES.get(sport_id, sport_id),
+                "index": index,
+                "start": block_start,
+                "end": block_start + LEAGUE_BLOCK_SIZE - 1,
+            }
+        )
+    return {
+        "start_channel": start,
+        "league_block_size": LEAGUE_BLOCK_SIZE,
+        "channels_per_event": per_event,
+        "events_per_primary_block": capacity,
+        "overflow_start_offset": OVERFLOW_BLOCK_OFFSET,
+        "blocks": blocks,
+    }
 
 
 def scan_channels(
@@ -2246,9 +3024,10 @@ def scan_channels(
     combined_epg_path: Path | None = None,
     trigger: str = "manual",
     now: datetime | None = None,
+    started_at: str | None = None,
 ) -> dict:
     init_db(db_path)
-    started_at = _now_iso()
+    started_at = started_at or _now_iso()
     settings = get_settings(db_path)
     current = now or datetime.now().astimezone()
     target_date = _sports_day(current, settings).isoformat()
@@ -2256,9 +3035,9 @@ def scan_channels(
     if not settings.get("enabled"):
         result = {
             "ok": True,
-            "count": len(generated_rows(db_path)),
+            "count": len(generated_rows(db_path, include_cached=True)),
             "events": 0,
-            "message": "Sports automation is disabled; existing generated channels were left unchanged.",
+            "message": "Sports Automation is disabled; cached generated channels remain hidden for up to 24 hours.",
             "target_date": target_date,
         }
         _record_scan(
@@ -2273,7 +3052,11 @@ def scan_channels(
         )
         return result
 
+    if settings.get("exclude_sd"):
+        channels = [channel for channel in channels if not _is_sd_channel(channel)]
+
     rules = [rule for rule in get_rules(db_path) if rule["enabled"]]
+    everything_mode = bool(settings.get("everything_mode"))
     diagnostics = _new_scan_diagnostics()
     events = _merge_events(
         [
@@ -2291,16 +3074,28 @@ def scan_channels(
 
     selected_events = []
     for event in events:
-        matched = _matching_rules(event, rules)
-        if not matched:
-            continue
-        event["matched_rule"] = matched[0]
+        if everything_mode:
+            event["matched_rule"] = {
+                "id": 0,
+                "scope_type": "sport",
+                "scope_id": event.get("sport_id") or event.get("league_id") or "sports",
+                "display_name": "Everything Mode",
+                "feed_preference": "best",
+                "enabled": 1,
+            }
+        else:
+            matched = _matching_rules(event, rules)
+            if not matched:
+                continue
+            event["matched_rule"] = matched[0]
         selected_events.append(event)
 
+    classification_ids = {_classification_id(event) for event in selected_events}
+    classification_blocks = _block_index_map(classification_ids)
     selected_events.sort(
         key=lambda event: (
+            classification_blocks[_classification_id(event)],
             event.get("start") or datetime.max.replace(tzinfo=ZoneInfo("UTC")),
-            event.get("league_id", ""),
             event.get("display_name", "").lower(),
         )
     )
@@ -2309,9 +3104,13 @@ def scan_channels(
     block_size = int(settings.get("channels_per_event", 10))
     group_title = str(settings.get("group_title", "Sports Today"))
     generated = []
+    event_positions: dict[str, int] = defaultdict(int)
 
     team_catalog = {item["id"]: item for item in _team_catalog(db_path)}
-    for event_index, event in enumerate(selected_events):
+    for event in selected_events:
+        classification_id = _classification_id(event)
+        classification_event_index = event_positions[classification_id]
+        event_positions[classification_id] += 1
         rule = event["matched_rule"]
         feeds = _build_feeds(event, channels, rule, settings)[:block_size]
         for feed_index, feed in enumerate(feeds):
@@ -2325,9 +3124,16 @@ def scan_channels(
                 ).strftime("%-I:%M %p")
             if start_text:
                 subtitle = f"{subtitle} • {start_text}"
-            league_label = LEAGUE_NAMES.get(event.get("league_id", ""), "Sports")
+            league_label = _classification_label(classification_id)
             display_name = f"{league_label} • {event['display_name']} — {feed_label}"
-            assigned = start_number + event_index * block_size + feed_index
+            assigned = assigned_channel_number(
+                classification_id,
+                classification_event_index,
+                feed_index,
+                start_channel=start_number,
+                channels_per_event=block_size,
+                block_index=classification_blocks[classification_id],
+            )
             logo = str(channel.get("tvg_logo", "") or "")
             if not logo:
                 preferred_team = team_catalog.get(feed.get("team_id", ""))
@@ -2336,7 +3142,7 @@ def scan_channels(
             source_channel_key = str(channel.get("url", "") or "")
             event_start = event.get("start")
             event_end = (
-                event_start + _event_duration(event.get("league_id", ""))
+                event_start + _event_duration(classification_id)
                 if event_start
                 else None
             )
@@ -2344,7 +3150,7 @@ def scan_channels(
                 "channel_key": f"sports:{event['event_key']}:{feed_type}:{source_channel_key}",
                 "source_channel_key": source_channel_key,
                 "event_key": event["event_key"],
-                "league_id": event.get("league_id", ""),
+                "league_id": classification_id,
                 "display_name": display_name,
                 "subtitle": subtitle,
                 "feed_type": feed_type,
@@ -2442,7 +3248,8 @@ def scan_channels(
                     backup_path.unlink(missing_ok=True)
 
     malformed_count = _malformed_count(diagnostics)
-    message = f"Generated {len(generated)} channels for {len(selected_events)} matching events."
+    mode_text = " detected" if everything_mode else " matching"
+    message = f"Generated {len(generated)} channels for {len(selected_events)}{mode_text} events."
     if malformed_count:
         message += (
             f" Skipped {malformed_count} malformed provider "
@@ -2470,11 +3277,36 @@ def scan_channels(
         "malformed_m3u": diagnostics.get("malformed_m3u", 0),
         "malformed_epg": diagnostics.get("malformed_epg", 0),
         "guide_channels": len(generated),
+        "everything_mode": everything_mode,
+        "numbering": {
+            "league_block_size": LEAGUE_BLOCK_SIZE,
+            "events_per_primary_block": max(1, LEAGUE_BLOCK_SIZE // max(1, block_size)),
+            "used_blocks": [
+                {
+                    "id": classification_id,
+                    "name": _classification_label(classification_id),
+                    "index": classification_blocks[classification_id],
+                    "events": event_positions[classification_id],
+                    "start": start_number + classification_blocks[classification_id] * LEAGUE_BLOCK_SIZE,
+                    "end": start_number + (classification_blocks[classification_id] + 1) * LEAGUE_BLOCK_SIZE - 1,
+                }
+                for classification_id in sorted(classification_ids, key=lambda value: classification_blocks[value])
+            ],
+        },
     }
 
 
-def generated_rows(db_path: Path | str) -> list[dict]:
+def generated_rows(
+    db_path: Path | str,
+    *,
+    include_cached: bool = False,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Return generated rows visible to clients, or the disabled cache when requested."""
     init_db(db_path)
+    purge_expired_disabled_cache(db_path, now)
+    if not include_cached and not get_settings(db_path).get("enabled"):
+        return []
     with closing(_connect(db_path)) as conn:
         rows = conn.execute(
             """
@@ -2534,7 +3366,8 @@ def last_scan(db_path: Path | str) -> dict | None:
 
 def status_payload(db_path: Path | str, now: datetime | None = None) -> dict:
     settings = get_settings(db_path)
-    generated = generated_rows(db_path)
+    generated = generated_rows(db_path, now=now)
+    cache = disabled_cache_status(db_path, now)
     next_run = next_update_at(db_path, now)
     return {
         "settings": settings,
@@ -2553,5 +3386,8 @@ def status_payload(db_path: Path | str, now: datetime | None = None) -> dict:
             for row in generated
         ],
         "last_scan": last_scan(db_path),
+        "scan": scan_state(db_path, now),
         "next_update": next_run.isoformat(),
+        "disabled_cache": cache,
+        "numbering": numbering_plan(settings),
     }

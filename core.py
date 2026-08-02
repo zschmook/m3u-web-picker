@@ -602,11 +602,28 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         raise SportsScanError("Load an M3U source before updating sports channels.")
     if not scan_lock.acquire(blocking=False):
         raise SportsScanError("A sports update is already running.")
+    scan_started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    failure_recorded = False
+    scan_state_started = False
     try:
+        sports.begin_scan_state(
+            DB_PATH,
+            trigger=trigger,
+            started_at=scan_started_at,
+            stage="Starting sports update",
+        )
+        scan_state_started = True
         if refresh_source and source_mode == "url" and last_source_url:
+            sports.update_scan_stage(DB_PATH, "Refreshing provider playlist")
             refreshed, message = refresh_master_from_url()
             if not refreshed:
-                sports.record_scan_failure(DB_PATH, "Provider playlist refresh failed.", trigger)
+                sports.record_scan_failure(
+                    DB_PATH,
+                    "Provider playlist refresh failed.",
+                    trigger,
+                    started_at=scan_started_at,
+                )
+                failure_recorded = True
                 print("Provider refresh failed during sports update.")
                 raise SportsScanError(
                     "Could not refresh the provider playlist. Existing sports channels were kept."
@@ -615,9 +632,12 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         # EPG is enrichment. A failed XMLTV refresh falls back to the cached EPG
         # and then to M3U-only matching; it does not delete yesterday's channels.
         if last_source_url:
+            sports.update_scan_stage(DB_PATH, "Refreshing guide data")
             sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH)
 
+        sports.update_scan_stage(DB_PATH, "Discovering sports catalog")
         sports.discover_catalog_from_channels(DB_PATH, channels)
+        sports.update_scan_stage(DB_PATH, "Scanning and matching channels")
         result = sports.scan_channels(
             DB_PATH,
             list(channels),
@@ -625,7 +645,9 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             sports_epg_path=SPORTS_EPG_PATH,
             combined_epg_path=COMBINED_EPG_PATH,
             trigger=trigger,
+            started_at=scan_started_at,
         )
+        sports.update_scan_stage(DB_PATH, "Writing playlist and validating guide")
         write_current_playlist()
         guide_check = sports.validate_guide_exports(
             DB_PATH,
@@ -659,11 +681,25 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             traceback.print_exc()
         else:
             print(f"Sports update failed ({type(exc).__name__}).")
+        if not failure_recorded:
+            sports.record_scan_failure(
+                DB_PATH,
+                "Sports update failed. Existing sports channels were kept.",
+                trigger,
+                started_at=scan_started_at,
+            )
+            failure_recorded = True
         raise SportsScanError(
             "Sports update failed. Existing sports channels were kept."
         ) from exc
     finally:
-        scan_lock.release()
+        try:
+            if scan_state_started:
+                sports.finish_scan_state(DB_PATH)
+        except Exception as exc:
+            print(f"Could not finalize persistent sports scan status: {type(exc).__name__}.")
+        finally:
+            scan_lock.release()
 
 
 def sports_number_conflicts() -> int:
@@ -688,6 +724,15 @@ def scheduler_loop() -> None:
         try:
             now = datetime.now().astimezone()
             today = now.date().isoformat()
+
+            if sports.purge_expired_disabled_cache(DB_PATH, now):
+                sports.rebuild_epg_exports(
+                    DB_PATH,
+                    base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+                    sports_epg_path=SPORTS_EPG_PATH,
+                    combined_epg_path=COMBINED_EPG_PATH,
+                )
+                write_current_playlist()
 
             master_refreshed = False
             if (
@@ -753,6 +798,8 @@ restore_config()
 def load_cached_master_playlist_on_startup() -> None:
     global channels
     db_connect().close()
+    if sports.recover_interrupted_scan(DB_PATH):
+        print("Recovered an interrupted sports scan state from the previous app process.")
     if not MASTER_CACHE_PATH.exists():
         write_current_playlist()
         try:

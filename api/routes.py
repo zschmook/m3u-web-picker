@@ -171,8 +171,23 @@ def register_routes(app):
     @app.patch("/api/sports/settings")
     def api_update_sports_settings():
         data = request.get_json(force=True, silent=True) or {}
+        previous_enabled = bool(sports.get_settings(core.DB_PATH).get("enabled"))
         try:
             settings = sports.update_settings(core.DB_PATH, data)
+            enabled_changed = (
+                "enabled" in data
+                and bool(settings.get("enabled")) != previous_enabled
+            )
+            if enabled_changed:
+                # The master switch changes the served outputs immediately.
+                # Generated rows remain cached internally for 24 hours while off.
+                sports.rebuild_epg_exports(
+                    core.DB_PATH,
+                    base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
+                    sports_epg_path=core.SPORTS_EPG_PATH,
+                    combined_epg_path=core.COMBINED_EPG_PATH,
+                )
+                core.write_current_playlist()
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except Exception as exc:
@@ -228,10 +243,13 @@ def register_routes(app):
         try:
             result = core.run_sports_scan(trigger="manual", refresh_source=True)
         except core.SportsScanError as exc:
-            return jsonify(error=str(exc)), 409
+            return jsonify(error=str(exc), sports=sports.status_payload(core.DB_PATH)), 409
         except Exception as exc:
             print(f"Unexpected sports update error: {exc}")
-            return jsonify(error="Sports update failed. Existing sports channels were kept."), 500
+            return jsonify(
+                error="Sports update failed. Existing sports channels were kept.",
+                sports=sports.status_payload(core.DB_PATH),
+            ), 500
         return jsonify(
             result=result,
             sports=sports.status_payload(core.DB_PATH),

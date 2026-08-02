@@ -1,40 +1,36 @@
 # M3U Web Picker
 
-**Sports build v20.8:** the exact served M3U and XMLTV exports are now validated after every sports scan, generated XMLTV channels include a numeric mapping alias, and live/replay programme markers are emitted. The v20.7 stable slot IDs and channel-before-programme ordering remain included.
+**Sports build v21.1** adds a non-destructive Everything Mode, persistent scan progress/results that survive closing the browser tab, and an explicit Channel Range heading in the selection picker. It retains the v21.0 sport → league/series/tour/promotion taxonomy and fixed 1,000-channel ranges for each child competition.
 
-A single-page Flask application for loading an M3U playlist, selecting channels, ordering the custom playlist, and automatically generating a daily sports channel block.
+This is a single-page Flask application for loading an M3U playlist, manually selecting channels, ordering the custom playlist, and automatically generating temporary daily sports channels with matching XMLTV guide data.
+
+## Jellyfin URLs
+
+The M3U creates the channels. Jellyfin still needs an XMLTV guide source.
+
+```text
+http://YOUR-SERVER-IP:10000/playlist/custom.m3u
+http://YOUR-SERVER-IP:10000/epg/combined.xml
+```
+
+Use `combined.xml` for the provider guide plus generated sports programmes. Use the sports-only guide when the provider XMLTV source is already configured separately:
+
+```text
+http://YOUR-SERVER-IP:10000/epg/sports.xml
+```
+
+The examples use the sports debug port `10000`; the normal Compose instance uses `9999`. The custom M3U advertises `combined.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
 
 ## Run the separate sports test container
 
-This is the easiest way to test without touching an existing instance:
-
 ```bash
-docker compose -f docker-compose.sports-debug.yml up -d --build
+docker compose -f docker-compose.sports-debug.yml up -d --build --force-recreate
 ```
 
-Open:
-
-```text
-http://localhost:10000
-```
-
-Docker Desktop shows it separately as:
-
-```text
-m3u-picker-sports-test
-```
-
-Source files are bind-mounted into the debug container, so Flask reloads after local code edits while the debug database remains inside the container.
-
-View logs:
+Open `http://localhost:10000`. Docker Desktop lists the test container as `m3u-picker-sports-test`.
 
 ```bash
 docker compose -f docker-compose.sports-debug.yml logs -f
-```
-
-Stop only the test instance:
-
-```bash
 docker compose -f docker-compose.sports-debug.yml down
 ```
 
@@ -48,126 +44,110 @@ docker compose up -d --build
 
 Open `http://localhost:9999`.
 
-The normal Compose file runs Waitress and creates a verified SQLite backup each night at the configured `BACKUP_TIME` and `BACKUP_TIMEZONE`, without a host cron job. The live database stays inside the container at `/app/m3u_picker.db`; only backup copies are written through the `/backups` bind mount.
+## Channel numbering
 
-## Sports automation behavior
+Sports are grouped by a stable 1,000-channel primary block for each league, series, tour, promotion, or division. With the default 10 channels per event, a primary block holds 100 events.
 
-The Sports Automation section sits directly below the existing Channel Manager. It is not a tab and does not add a sidebar.
+```text
+MLB                          1000–1999
+NHL                          2000–2999
+NBA                          3000–3999
+NFL                          4000–4999
+MiLB                         5000–5999
+NCAA Football — FBS          6000–6999
+NCAA Football — FCS          7000–7999
+NCAA Football — Division II  8000–8999
+NCAA Football — Division III 9000–9999
+```
 
-Settings auto-save silently to SQLite. There is no Save button. The interface only displays an error when a setting cannot be saved. Refresh time is stored as a canonical 24-hour `HH:MM` value and formatted by the browser for display.
+The complete map is visible inside Sports Automation under **View league / series channel blocks**, with a Sport filter. A competition never spills into the next competition’s range. The rare 101st event is moved into a separate high-number continuation block and logged instead of being silently truncated.
 
-Fresh installs start with **zero sports selections**. The cached catalog contains available choices, but the application never assumes which teams, leagues, conferences, or sports the user follows.
+Changing **First league block** shifts the complete map while preserving the 1,000-channel spacing. Changing **Channels per event** changes the number of event slots available inside each range.
 
-Use **Add selection** to filter by type and sport, search the cached catalog, select one or more items, and add them to the nightly rules. Team names and logos are also discovered from permanent provider team feeds and cached in SQLite. Removing the final rule leaves the list empty after refreshes and container restarts.
+## Sports taxonomy
 
-The top **Enable sports** switch is the master control. **Auto update** controls the nightly schedule, while **Update now** performs the same refresh immediately even when Auto update is off. Update now is disabled only when the master switch is off.
+The Add Sports Selection dialog supports four levels:
 
-At the configured update time, the application:
+```text
+Sport
+League / series / tour / promotion / division
+Conference
+Team / competitor
+```
+
+Broad sport selections pull matching events from their child competitions, but generated channels remain numbered inside the child competition’s range.
+
+Included first-class areas include:
+
+- Major team sports: baseball, basketball, American football, hockey, and soccer.
+- College football split into FBS, FCS, Division II, Division III, NAIA, NJCAA, and High School Football.
+- International sports: cricket, rugby union, rugby league, curling, handball, field hockey, and international competitions.
+- Golf, tennis, volleyball, softball, lacrosse, horse racing, bowling, billiards, darts, poker, and cornhole.
+- Track and field, swimming, diving, water polo, artistic swimming, gymnastics, figure skating, speed skating, skiing, snowboarding, biathlon, and sliding sports.
+- Cycling: Tour de France, Giro d’Italia, Vuelta a España, Tour of California, road classics, track cycling, mountain biking, cyclocross, BMX, world championships, and Olympic cycling.
+- Motorsports: Formula 1/2/3/E, NASCAR Cup/Xfinity/Trucks, IndyCar, IMSA, WEC, MotoGP, superbikes, motocross, supercross, dirt bikes, rally, off-road, drag racing, and monster trucks.
+- Combat and sports entertainment: UFC, PFL/Bellator, ONE Championship, regional MMA, WWE, AEW, TNA, NJPW, ROH, amateur wrestling, boxing, judo, taekwondo, and fencing.
+- Olympic umbrella matching plus individual Olympic disciplines such as rowing, canoe/kayak, sailing, triathlon, archery, shooting, weightlifting, equestrian, badminton, table tennis, climbing, surfing, skateboarding, and modern pentathlon.
+
+Pro wrestling is deliberately separate from collegiate/Olympic wrestling. Rugby union and rugby league remain separate. MLB and MiLB remain separate even when the provider uses a shared `MLB / MiLB` group.
+
+## Sports Automation behavior
+
+Sports Automation sits below Channel Manager and does not add a sidebar or second application surface. Both sections are collapsible and remember their browser state. Turning Sports Automation on always expands its controls; turning it off collapses them.
+
+Settings save silently to SQLite. There is no Save button. Fresh installations start with zero sports selections.
+
+**Everything Mode** is deliberately stored as its own SQLite setting rather than creating hundreds of normal rules. It is off by default. Turning it on scans every detected event while preserving the curated sport, league, conference, and team selections exactly as they were. Turning it off returns the next successful scan to the curated list. Broad-scope feed preferences and the backup-feed setting still control which variants are generated.
+
+Manual scan activity is persisted in SQLite. Closing or reopening the browser tab does not lose the running state. The UI polls the backend, displays the current stage and elapsed time, and leaves a dismissible success or failure result after completion. An app restart converts an interrupted running state into a visible failure instead of leaving a permanent “already running” message.
+
+The master **Enable sports** switch controls both automatic and manual generation. **Auto update** controls the nightly schedule. **Update now** still works when Auto update is off, disables duplicate clicks, and shows a looping `.` → `..` → `...` activity indicator while the backend works.
+
+Turning Sports Automation off immediately removes generated sports rows from the served M3U and XMLTV files. The generated data remains privately cached for 24 hours so an accidental toggle can be reversed immediately. Saved sport, league, conference, and team rules are never deleted.
+
+The global **Hide SD / LOW BANDWIDTH channels** control now also excludes SD feeds from sports generation.
+
+At update time the application:
 
 1. Refreshes the provider M3U when a URL source is configured.
-2. Tries to derive and cache the provider's Xtream XMLTV feed.
-3. Matches the current sports day's events against saved rules.
-4. Builds home, away, national, event, Spanish, and backup feed variants when the provider data makes them identifiable.
-5. Replaces the previous generated sports rows in one SQLite transaction.
-6. Generates matching XMLTV guide data for every temporary sports channel.
-7. Rewrites `custom.m3u`, `sports.xml`, and `combined.xml` as one replacement operation.
+2. Tries to derive and cache the provider XMLTV endpoint.
+3. Parses M3U and XMLTV events without aborting on a single malformed entry.
+4. Matches events against saved rules and deduplicates duplicate M3U/XMLTV descriptions.
+5. Builds identifiable home, away, national, event, alternate-language, and backup feeds.
+6. Assigns channels inside the event’s league/series range.
+7. Replaces generated database rows and XMLTV exports atomically.
+8. Rewrites the served custom playlist.
 
-A failed provider refresh or failed scan leaves the previous generated sports channels intact. A successful scan with zero matches removes stale sports channels.
+A failed refresh or scan preserves the previous working sports lineup. A successful scan with zero matches clears stale sports output.
 
-Generated sports channels begin at the user-selected channel number, default `1000`. Each event reserves a configurable block, default `10`, so late-added alternate feeds do not renumber every following event.
+## Generated guide behavior
 
-The Channel Manager displays generated sports entries automatically. Those rows are checked and locked because they are controlled by Sports Automation rather than manual selection. Manually selected channels keep their normal ordering and numbering.
+Every generated feed receives a credential-free ID based on its assigned numbered slot, for example:
 
-## Current matching strategy
+```text
+m3u-picker-sports-1000
+```
 
-This MVP uses provider data first:
+The same ID appears in the M3U and XMLTV `<channel>` and `<programme>` records. Scheduled events receive upcoming, live/event, and post-event guide coverage. Replay programmes are marked separately.
 
-- M3U channel names and groups
-- M3U `tvg-id`, `tvg-name`, and `tvg-logo`
-- Dynamic event dates embedded in provider channel names
-- Permanent team streams for home/away feed association
-- XMLTV programme data when the Xtream XMLTV endpoint is available
-
-It does not require an external sports API. The cached catalog is designed so external metadata enrichment can be added later without changing the UI or rule model.
-
-
-
-
-## v20.8 served-guide validation and Jellyfin mapping
-
-After every successful sports scan, the application validates the actual `custom.m3u`, `sports.xml`, and `combined.xml` files that Jellyfin receives. The scan response includes a credential-free `guide_check` object, and the same report is available at:
+The credential-free guide validation report is available at:
 
 ```text
 http://HOST:PORT/api/sports/guide-check
 ```
 
-For every generated sports slot, the check confirms that the M3U contains the expected `tvg-id`, both XMLTV exports contain the matching `<channel>`, at least one valid `<programme>` exists, and the scheduled event start is covered by a programme interval. No stream URLs are returned by the diagnostic.
+It verifies the actual served playlist and both XMLTV exports without returning provider stream URLs.
 
-Generated XMLTV channels now include the friendly event name plus a purely numeric display-name alias such as `1000`, improving Jellyfin channel-number mapping. Live event programmes include `<live />`; replay programmes include `<previously-shown />`.
+## Provider-first matching
 
-Jellyfin keeps a local XMLTV download cache for up to one hour. During rapid testing, a tuner refresh can show newly generated channels while the guide task still reads the previous cached XMLTV file. Restarting Jellyfin or clearing its XMLTV cache forces an immediate re-download; normal scheduled operation naturally ages past that cache window.
+The application uses provider data as its primary source:
 
-## v20.7 Jellyfin guide mapping fix
+- M3U channel names and groups
+- `tvg-id`, `tvg-name`, `tvg-logo`, and embedded event dates
+- permanent team feeds for feed association
+- XMLTV programme titles, categories, and start times
 
-Temporary sports channels now use durable XMLTV IDs based on their assigned channel slots, such as `m3u-picker-sports-1000`. Event names and provider stream URLs change from scan to scan, but the numbered slot remains stable, allowing Jellyfin to retain the correct guide mapping while the event occupying the slot changes.
-
-The combined XMLTV writer now inserts generated `<channel>` records before the provider's first `<programme>` record and inserts generated `<programme>` records before `</tv>`. This preserves XMLTV's channel-first document order. Previous builds appended both kinds of records at the end, which produced parseable XML but could cause Jellyfin to ignore the generated channel definitions and leave the guide blank.
-
-Each generated channel is tested to have exactly one programme covering its scheduled first-pitch time. Existing v20.4-v20.6 database rows are migrated to the stable slot IDs automatically.
-
-Team-priority ordering remains a planned feature and is not implemented in this build.
-
-## v20.6 baseball classification fix
-
-- Shared provider groups named `MLB / MiLB` are not treated as a league by themselves.
-- Explicit `MLB` or `MiLB` event metadata wins when present.
-- Otherwise, both matchup participants must resolve inside the same league catalog before the event is classified.
-- Standard abbreviations for all 30 MLB teams map to canonical full team names, so XMLTV titles such as `CHW at TB` render as `Chicago White Sox at Tampa Bay Rays`.
-- MLB and MiLB rules remain independent, and duplicate M3U/XMLTV versions of the same matchup converge on the same event identity when their date matches.
-
-## v20.4 generated sports guide data
-
-Every generated sports feed now receives a unique, credential-free `tvg-id`. The same ID appears in the M3U and in generated XMLTV `<channel>` and `<programme>` records.
-
-The app exposes two guide endpoints:
-
-```text
-http://HOST:PORT/epg/sports.xml
-http://HOST:PORT/epg/combined.xml
-```
-
-- `sports.xml` contains only the temporary sports channels. Add this as a second XMLTV guide source when the existing provider guide is already configured in Jellyfin.
-- `combined.xml` contains the cached provider XMLTV guide plus the generated sports channels. Use this as the single Jellyfin guide source when you want the app to provide both normal and sports guide data.
-
-The custom M3U response also advertises `combined.xml` in its `url-tvg` and `x-tvg-url` header attributes. Jellyfin may still require adding the XMLTV guide URL explicitly in Live TV settings.
-
-For scheduled events, each feed receives:
-
-- an **Upcoming** programme beginning 24 hours before the event,
-- a live event programme using a league-specific estimated duration, and
-- a two-hour post-event channel window.
-
-When an exact event time is unavailable, the generated guide supplies a broad placeholder programme instead of leaving the Jellyfin guide row blank. Logos and feed-specific subtitles are included. The **Update now** button is disabled and replaced by a spinner while scanning.
-
-## v20.3 parser resilience hotfix
-
-- A malformed timestamp in one M3U event no longer aborts the entire sports update.
-- Invalid XMLTV programme timestamps are skipped independently.
-- Successful scans report how many malformed provider entries were skipped.
-- Docker logs identify a limited set of offending channel/programme names without printing stream URLs.
-- Debug containers print a complete traceback for unexpected system-level failures.
-- Existing generated sports channels are still replaced only after the new scan completes successfully.
-
-## v20.2 QA fixes
-
-- No demo sports rules are inserted into new databases; the untouched v20.1 demo set is removed once during upgrade.
-- Removing every rule no longer causes demo selections to return.
-- The Add Selection dialog is compact, searchable, sport-filtered, logo-aware, and supports adding several choices at once.
-- Dark-theme labels and headings remain readable.
-- Successful URL/file loads clear the visible source field and show `Source loaded.`
-- Invalid refresh times cannot corrupt the scheduler or break a manual update.
-- User-facing update failures no longer expose Python exceptions or credential-bearing URLs.
-- Stream URLs shown in the channel table mask both Xtream path credentials.
+No external sports API is required. Provider terminology varies, so the taxonomy includes common aliases while avoiding broad fuzzy matches that would mix unrelated sports.
 
 ## Manual backup
 

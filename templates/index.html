@@ -83,6 +83,18 @@
       </div>
     </div>
 
+    <div class="section-collapse-bar mb-3" id="channelManagerHeader">
+      <div>
+        <div class="d-flex align-items-center gap-2">
+          <h2 class="h6 mb-0">Channel Manager</h2>
+          <span class="badge text-bg-secondary">Manual channels</span>
+        </div>
+        <div class="small-muted mt-1">Search, select, and order provider channels.</div>
+      </div>
+      <button id="channelManagerCollapseBtn" class="btn btn-outline-light btn-sm section-collapse-btn" type="button" aria-expanded="true">Collapse</button>
+    </div>
+
+    <div id="channelManagerBody">
     <div class="card mb-3">
       <div class="card-body">
         <div class="filter-panel">
@@ -150,6 +162,8 @@
       </table>
     </div>
 
+    </div>
+
     <!-- Sports lives directly below the Channel Manager. It is not a tab and
          does not introduce a separate navigation surface. -->
     <section class="card mt-3 mb-3 sports-card" aria-labelledby="sportsSectionTitle">
@@ -165,9 +179,12 @@
               <div id="sportsHeaderSummary" class="small-muted mt-1">Automatically build a daily sports channel block.</div>
             </div>
           </div>
-          <div class="form-check form-switch mb-0">
-            <input id="sportsEnabled" class="form-check-input" type="checkbox" role="switch">
-            <label class="form-check-label" for="sportsEnabled">Enable sports</label>
+          <div class="sports-header-actions">
+            <div class="form-check form-switch mb-0">
+              <input id="sportsEnabled" class="form-check-input" type="checkbox" role="switch">
+              <label class="form-check-label" for="sportsEnabled">Enable sports</label>
+            </div>
+            <button id="sportsCollapseBtn" class="btn btn-outline-light btn-sm section-collapse-btn" type="button" aria-expanded="false" disabled>Expand</button>
           </div>
         </div>
 
@@ -178,7 +195,7 @@
 
             <div class="sports-settings-grid">
               <div>
-                <label class="form-label" for="sportsStartChannel">Starting channel</label>
+                <label class="form-label" for="sportsStartChannel">First league block</label>
                 <input id="sportsStartChannel" class="form-control" type="number" min="1" value="1000">
               </div>
               <div>
@@ -212,16 +229,30 @@
                 </select>
               </div>
             </div>
+            <div id="sportsBlockCapacity" class="small-muted mt-2"></div>
             <div id="sportsNumberWarning" class="small text-warning mt-2 d-none"></div>
+
+            <details class="sports-block-details mt-3">
+              <summary>View league / series channel blocks</summary>
+              <div class="d-flex align-items-end gap-3 flex-wrap mt-3 mb-3">
+                <div>
+                  <label class="form-label" for="sportsBlockSportFilter">Sport</label>
+                  <select id="sportsBlockSportFilter" class="form-select form-select-sm">
+                    <option value="">All sports</option>
+                  </select>
+                </div>
+                <div class="small-muted">Each league, series, tour, promotion, or division receives a separate 1,000-channel range.</div>
+              </div>
+              <div id="sportsBlockMap" class="sports-block-map"></div>
+            </details>
           </div>
 
           <div class="sports-subsection">
             <div class="mb-3">
-              <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
-                <h3 class="h6 mb-0">What do you want to watch?</h3>
-                <button id="sportsAddSelectionBtn" class="btn btn-outline-primary btn-sm" type="button">+ Add selection</button>
-              </div>
-              <p class="small-muted mb-0">Mix leagues, teams, conferences, and individual sports.</p>
+              <h3 class="h6 mb-2">What do you want to watch?</h3>
+              <button id="sportsAddSelectionBtn" class="btn btn-success btn-sm mb-2" type="button">+ Add sports selection</button>
+              <p class="small-muted mb-0">Choose broad sports or drill into leagues, series, tours, promotions, conferences, and teams.</p>
+              <div id="sportsEverythingModeNotice" class="sports-everything-notice d-none mt-3" role="status"></div>
             </div>
             <div id="sportsRules" class="sports-rules"></div>
           </div>
@@ -255,8 +286,15 @@
           </div>
 
           <div class="sports-footer">
-            <div>
+            <div class="sports-footer-status">
               <div id="sportsSaveError" class="sports-error d-none" role="alert"></div>
+              <div id="sportsScanStatus" class="sports-scan-status d-none" role="status" aria-live="polite">
+                <div class="sports-scan-status-heading">
+                  <strong id="sportsScanStatusTitle"></strong>
+                  <button id="sportsScanStatusDismiss" class="sports-scan-status-dismiss" type="button" aria-label="Dismiss scan result">×</button>
+                </div>
+                <div id="sportsScanStatusDetails" class="small-muted"></div>
+              </div>
               <div id="sportsNextUpdate" class="small-muted">Next update: —</div>
               <div id="sportsLastScan" class="small-muted"></div>
             </div>
@@ -326,8 +364,15 @@
       <div class="modal-content bg-dark text-light border-secondary">
         <div class="modal-header border-secondary">
           <div>
-            <h5 class="modal-title">Add selection</h5>
-            <div class="small-muted">Filter the cached sports catalog, then add one or more choices.</div>
+            <h5 class="modal-title">Add sports selection</h5>
+            <div class="small-muted">Choose a broad sport or drill into a league, series, tour, promotion, conference, or team.</div>
+            <div class="sports-everything-option mt-3">
+              <div class="form-check">
+                <input id="sportsEverythingMode" class="form-check-input" type="checkbox">
+                <label class="form-check-label fw-bold" for="sportsEverythingMode">I’M INSANE, ADD EVERYTHING!!!!</label>
+              </div>
+              <div class="small-muted mt-1">This is off by default and saves immediately. Turning it on preserves your curated selections, but updates may take for-fucking-ever to scan and match.</div>
+            </div>
           </div>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
@@ -336,10 +381,10 @@
             <div>
               <label class="form-label" for="sportsSelectionType">Type</label>
               <select id="sportsSelectionType" class="form-select">
-                <option value="team">Team</option>
-                <option value="league">League</option>
-                <option value="conference">Conference</option>
+                <option value="league">League / series / tour</option>
                 <option value="sport">Sport</option>
+                <option value="conference">Conference</option>
+                <option value="team">Team</option>
               </select>
             </div>
             <div>

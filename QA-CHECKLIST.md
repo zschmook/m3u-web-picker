@@ -1,61 +1,73 @@
-# Sports v20.7 test checklist
+# Sports v21.1 QA checklist
+
+## Startup and layout
 
 1. Start the debug container and open `http://localhost:10000`.
-2. Confirm Sports Automation starts with zero selections.
-3. Add several selections through **Add selection** using Type, Search, and Sport filters.
-4. Remove every selection, reload the page, and restart the container. The list must remain empty.
-5. Load an M3U URL. The visible URL field should clear and the page should say **Source loaded.**
-6. Confirm all Sports headings, checkbox labels, and **Auto update** text are readable in dark mode.
-7. Set a refresh time and reload. It should survive as the same time without an `hour must be in 0..23` error.
-8. Turn Sports Automation on and Auto update off. **Update now** should still work.
-9. Turn Sports Automation off. **Update now** and scheduled updates should be unavailable.
-10. Run **Update now** twice on different source data and confirm previously generated sports channels are replaced rather than accumulated.
-11. Simulate a failed source refresh and confirm the existing generated sports channels remain.
-12. Confirm stream URLs shown in Channel Manager mask both credential path segments.
+2. Confirm a fresh database has zero sports selections.
+3. Collapse and expand Channel Manager. Reload and confirm the browser remembers the state.
+4. Turn Sports Automation on and confirm it expands automatically.
+5. Turn Sports Automation off and confirm it collapses and generated rows disappear immediately.
 
-## Malformed provider data
+## Taxonomy and picker
 
-- Add an M3U event with an impossible embedded time such as `99:99:00`.
-- Click **Update now**.
-- Confirm valid events are still generated and the malformed entry is only reported in Docker logs.
-- Repeat with an invalid XMLTV programme timestamp and confirm later programmes still process.
+1. Open **Add sports selection**. It should default to **League / series / tour**.
+2. Filter the list by Sport and confirm results are grouped under sport headings.
+3. Confirm Cycling includes Tour de France, Giro d’Italia, Vuelta a España, Tour of California, track cycling, mountain biking, cyclocross, BMX, and Olympic cycling.
+4. Confirm Motorsports includes F1/F2/F3/Formula E, NASCAR series, IndyCar, endurance racing, motorcycle racing, rally, drag racing, and monster trucks.
+5. Confirm MMA and Pro Wrestling are separate from amateur/Olympic wrestling.
+6. Confirm College Football offers FBS, FCS, Division II, Division III, NAIA, NJCAA, and High School Football separately.
+7. Confirm Golf, Track & Field, Swimming, Figure Skating, Speed Skating, Gymnastics, and other Olympic disciplines appear as first-class choices.
+8. Confirm Cornhole includes ACL, ACO, college, international, and made-for-TV choices.
+9. Add and remove multiple selections. Reload and restart the container; the final rule list must persist exactly.
+10. Confirm the league/series list shows a **Channel Range** heading over the right-hand ranges.
+11. Confirm **I’M INSANE, ADD EVERYTHING!!!!** is unchecked on a fresh database.
+12. Add a curated rule, enable Everything Mode, and confirm the curated rule remains unchanged. Disable Everything Mode and confirm the curated rule is still present.
+13. Confirm Everything Mode is one persisted setting and does not create a row for every catalog item.
 
+## Channel block map
 
-## Generated XMLTV guide
+1. Expand **View league / series channel blocks**.
+2. Confirm MLB is `1000–1999`, NHL `2000–2999`, NBA `3000–3999`, NFL `4000–4999`, and MiLB `5000–5999` with default settings.
+3. Confirm FBS, FCS, Division II, and Division III each have separate 1,000-channel ranges.
+4. Change **First league block** and confirm every displayed range shifts by the same amount.
+5. Change **Channels per event** and confirm the capacity message updates.
+6. Run a scan containing MLB and NHL events. Confirm MLB channels remain in the 1000s and NHL channels remain in the 2000s.
+7. Confirm no competition silently spills into the next competition’s range.
 
-- Run **Update now** and confirm the button becomes a disabled spinner until the request completes.
-- Open `/epg/sports.xml` and confirm every generated M3U `tvg-id` has a matching XMLTV `<channel id>` and at least one `<programme>`.
-- Confirm a scheduled game has an **Upcoming** guide entry beginning 24 hours before start, a game entry, and a post-event entry.
-- Open `/epg/combined.xml` and confirm existing provider guide entries remain present alongside the generated sports entries.
-- Configure Jellyfin with `/epg/sports.xml` as an additional guide source, or replace the existing guide URL with `/epg/combined.xml`, then refresh guide data.
-- Confirm generated channels show titles, feed subtitles, start times, and logos in Jellyfin.
+## Scan behavior
 
+1. Turn Auto update off while Sports Automation remains enabled. **Update now** must still work.
+2. Click Update now and confirm the button becomes disabled while a persistent status card cycles `.` → `..` → `...` and shows stage plus elapsed time.
+3. Run twice with different source data and confirm sports rows are replaced rather than accumulated.
+4. Simulate a failed provider refresh and confirm the previous generated lineup remains.
+5. Perform a successful scan with zero matches and confirm stale sports output is cleared.
+6. Add an impossible M3U time such as `99:99:00`; valid events must continue processing.
+7. Repeat with an invalid XMLTV timestamp; later valid programmes must still process.
+8. Close the browser tab during a long scan, reopen the UI, and confirm the running status returns from the backend.
+9. Wait for completion and confirm a persistent success result shows channels, events, completion time, and duration.
+10. Start a scan and attempt another manual update; confirm the duplicate request reports the already-running scan and clears automatically when finished.
+11. Restart the app during a scan and confirm the stale running state becomes a visible interrupted-scan failure.
 
+## SD filtering
 
-## Jellyfin guide mapping regression
+1. Add a sports event under provider group `LOW BANDWIDTH` or with an SD label.
+2. Enable **Hide SD / LOW BANDWIDTH channels** and run Update now.
+3. Confirm the SD event/feed is not generated.
+4. Disable the filter and confirm the feed may be generated on the next successful scan.
 
-- Run **Update now**, then confirm generated M3U IDs are fixed numbered slots such as `m3u-picker-sports-1000`.
-- Open `/epg/combined.xml` and confirm no `<channel>` element appears after the first `<programme>` element.
-- Refresh the Jellyfin tuner and guide data.
-- At each scheduled game time, confirm every generated feed has one visible programme tile rather than a blank row.
-- Run another sports update with different events occupying the same channel numbers and confirm the guide remains mapped without recreating the XMLTV source.
+## XMLTV and Jellyfin
 
-## MLB / MiLB separation
+1. Configure Jellyfin with `/playlist/custom.m3u`.
+2. Add `/epg/combined.xml` as the XMLTV guide source, or add `/epg/sports.xml` when the provider guide is configured separately.
+3. Confirm every generated M3U `tvg-id` has a matching XMLTV `<channel>` and at least one `<programme>`.
+4. Confirm generated XMLTV `<channel>` elements appear before the first `<programme>` in `combined.xml`.
+5. Open `/api/sports/guide-check` and confirm `ok` is true after a successful populated scan.
+6. Run another update with different events occupying the same numbered slots and confirm Jellyfin keeps guide mapping.
 
-- Select MLB only and confirm no MiLB matchup is generated from a shared `MLB / MiLB` provider group.
-- Select MiLB only and confirm no MLB matchup is generated.
-- Confirm both league choices appear independently in Add selection.
+## Disabled recovery cache
 
-## Generated guide continuity
-
-- At the scheduled first-pitch time, every generated feed has exactly one XMLTV programme.
-- Restart with persisted generated rows and confirm stale provider timestamps produce fallback guide coverage rather than a blank Jellyfin grid.
-
-## Full MLB abbreviation regression
-
-- Select the MLB league rule with provider channels grouped under `MLB / MiLB`.
-- Confirm abbreviation-only XMLTV matchups for all 30 teams are included.
-- Confirm `CHW at TB` displays as `Chicago White Sox at Tampa Bay Rays`.
-- Confirm the same game is generated once when both M3U and XMLTV describe it.
-- Confirm a clearly marked MiLB event remains excluded from the MLB rule.
-
+1. Generate sports channels, then turn Sports Automation off.
+2. Confirm generated rows disappear from Channel Manager, `/playlist/custom.m3u`, `/epg/sports.xml`, and `/epg/combined.xml`.
+3. Turn Sports Automation back on within 24 hours and confirm cached channels return immediately.
+4. Confirm saved selection rules were never removed.
+5. Simulate more than 24 hours disabled and confirm only generated cache rows are purged.

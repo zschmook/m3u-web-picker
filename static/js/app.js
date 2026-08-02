@@ -24,6 +24,25 @@ const els = {
 els.playlistUrl.value = `${location.origin}/playlist/custom.m3u`;
 els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
 
+const CHANNEL_MANAGER_COLLAPSE_KEY = "m3u-picker.channel-manager-collapsed";
+let channelManagerCollapsed = localStorage.getItem(CHANNEL_MANAGER_COLLAPSE_KEY) === "true";
+
+function applyChannelManagerCollapse() {
+  const body = document.getElementById("channelManagerBody");
+  const button = document.getElementById("channelManagerCollapseBtn");
+  if (!body || !button) return;
+  body.classList.toggle("d-none", channelManagerCollapsed);
+  button.textContent = channelManagerCollapsed ? "Expand" : "Collapse";
+  button.setAttribute("aria-expanded", String(!channelManagerCollapsed));
+}
+
+document.getElementById("channelManagerCollapseBtn")?.addEventListener("click", () => {
+  channelManagerCollapsed = !channelManagerCollapsed;
+  localStorage.setItem(CHANNEL_MANAGER_COLLAPSE_KEY, String(channelManagerCollapsed));
+  applyChannelManagerCollapse();
+});
+applyChannelManagerCollapse();
+
 function setStatus(message) {
   els.status.textContent = message || "";
 }
@@ -474,8 +493,9 @@ els.groupFilter.addEventListener("change", render);
 els.selectedOnly.addEventListener("change", render);
 els.excludeSdChannels?.addEventListener("change", () => {
   render();
+  scheduleSportsSave({exclude_sd: els.excludeSdChannels.checked});
   setStatus(els.excludeSdChannels.checked
-    ? "SD / LOW BANDWIDTH channels hidden."
+    ? "SD / LOW BANDWIDTH channels hidden, including sports-generated feeds."
     : "SD / LOW BANDWIDTH channels visible.");
 });
 
@@ -544,9 +564,15 @@ document.getElementById("moveOrderDownBtn").addEventListener("click", () => move
 document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
 
 // Sports automation ---------------------------------------------------------
-let sportsState = {settings: {}, rules: [], catalog: [], generated: [], last_scan: null, next_update: null};
+let sportsState = {settings: {}, rules: [], catalog: [], generated: [], last_scan: null, scan: {running: false}, next_update: null, numbering: {blocks: []}};
+const SPORTS_COLLAPSE_KEY = "m3u-picker.sports-collapsed";
+const SPORTS_SCAN_DISMISSED_KEY = "m3u-picker.sports-scan-dismissed";
+let sportsCollapsed = localStorage.getItem(SPORTS_COLLAPSE_KEY) === "true";
 let sportsModal = null;
 let sportsSaveTimer = null;
+let sportsStatusPollTimer = null;
+let sportsScanPulseTimer = null;
+let sportsScanDotCount = 1;
 let pendingSportsChanges = {};
 let sportsGeneratedSignature = "";
 let pendingSportsSelections = new Set();
@@ -622,11 +648,109 @@ function formatNextUpdate(value) {
   return date.toLocaleString([], {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
 }
 
+function formatScanDuration(startedAt, finishedAt = null) {
+  const started = new Date(startedAt || "");
+  const finished = finishedAt ? new Date(finishedAt) : new Date();
+  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) return "";
+  const seconds = Math.max(0, Math.floor((finished.getTime() - started.getTime()) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (!minutes) return `${remainder}s`;
+  return `${minutes}m ${remainder}s`;
+}
+
+function scanResultSignature(scan) {
+  return scan?.id ? String(scan.id) : "";
+}
+
+function renderSportsScanStatus() {
+  const panel = sportsElement("sportsScanStatus");
+  const title = sportsElement("sportsScanStatusTitle");
+  const details = sportsElement("sportsScanStatusDetails");
+  const dismiss = sportsElement("sportsScanStatusDismiss");
+  if (!panel || !title || !details || !dismiss) return;
+
+  const scan = sportsState.scan || {running: false};
+  const lastScan = sportsState.last_scan;
+  panel.classList.remove("is-running", "is-success", "is-failed", "is-neutral");
+
+  if (scan.running) {
+    panel.classList.remove("d-none");
+    panel.classList.add("is-running");
+    dismiss.classList.add("d-none");
+    title.textContent = `Scanning and matching channels${".".repeat(sportsScanDotCount)}`;
+    const stage = scan.stage || "Scanning and matching channels";
+    const started = scan.started_at ? `Started ${formatNextUpdate(scan.started_at)}` : "";
+    const elapsed = scan.started_at ? `Elapsed ${formatScanDuration(scan.started_at)}` : "";
+    details.textContent = [stage, started, elapsed].filter(Boolean).join(" • ");
+    return;
+  }
+
+  if (!lastScan) {
+    panel.classList.add("d-none");
+    return;
+  }
+
+  const dismissed = localStorage.getItem(SPORTS_SCAN_DISMISSED_KEY) || "";
+  if (dismissed && dismissed === scanResultSignature(lastScan)) {
+    panel.classList.add("d-none");
+    return;
+  }
+
+  const status = String(lastScan.status || "").toLowerCase();
+  panel.classList.remove("d-none");
+  dismiss.classList.remove("d-none");
+  if (status === "success") {
+    panel.classList.add("is-success");
+    title.textContent = "Sports update complete";
+    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
+    details.textContent = [
+      `${lastScan.channel_count || 0} channels generated`,
+      `${lastScan.event_count || 0} events matched`,
+      `Completed ${formatNextUpdate(lastScan.finished_at)}`,
+      duration ? `Duration ${duration}` : ""
+    ].filter(Boolean).join(" • ");
+  } else if (status === "failed") {
+    panel.classList.add("is-failed");
+    title.textContent = "Sports update failed";
+    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
+    details.textContent = [
+      lastScan.message || "Existing sports channels were kept.",
+      `Finished ${formatNextUpdate(lastScan.finished_at)}`,
+      duration ? `Duration ${duration}` : ""
+    ].filter(Boolean).join(" • ");
+  } else {
+    panel.classList.add("is-neutral");
+    title.textContent = "Sports update finished";
+    details.textContent = [lastScan.message, formatNextUpdate(lastScan.finished_at)].filter(Boolean).join(" • ");
+  }
+}
+
+function updateSportsScanPulse() {
+  const running = Boolean(sportsState.scan?.running);
+  if (running && !sportsScanPulseTimer) {
+    sportsScanPulseTimer = setInterval(() => {
+      sportsScanDotCount = sportsScanDotCount >= 3 ? 1 : sportsScanDotCount + 1;
+      renderSportsScanStatus();
+    }, 550);
+  } else if (!running && sportsScanPulseTimer) {
+    clearInterval(sportsScanPulseTimer);
+    sportsScanPulseTimer = null;
+    sportsScanDotCount = 1;
+  }
+  renderSportsScanStatus();
+}
+
 function applySportsState() {
   const settings = sportsState.settings || {};
   const enabled = Boolean(settings.enabled);
   sportsElement("sportsEnabled").checked = enabled;
-  sportsElement("sportsBody").classList.toggle("d-none", !enabled);
+  const sportsBodyHidden = !enabled || sportsCollapsed;
+  sportsElement("sportsBody").classList.toggle("d-none", sportsBodyHidden);
+  const collapseButton = sportsElement("sportsCollapseBtn");
+  collapseButton.disabled = !enabled;
+  collapseButton.textContent = sportsBodyHidden ? "Expand" : "Collapse";
+  collapseButton.setAttribute("aria-expanded", String(enabled && !sportsCollapsed));
   sportsElement("sportsEnabledBadge").textContent = enabled ? "Enabled" : "Off";
   sportsElement("sportsEnabledBadge").classList.toggle("text-bg-success", enabled);
   sportsElement("sportsEnabledBadge").classList.toggle("text-bg-secondary", !enabled);
@@ -640,9 +764,22 @@ function applySportsState() {
   sportsElement("sportsIncludeReplays").checked = Boolean(settings.include_replays);
   sportsElement("sportsIncludePregame").checked = Boolean(settings.include_pregame);
   sportsElement("sportsUseBackups").checked = Boolean(settings.use_backup_feeds);
+  sportsElement("sportsEverythingMode").checked = Boolean(settings.everything_mode);
+  if (els.excludeSdChannels) els.excludeSdChannels.checked = Boolean(settings.exclude_sd);
   sportsElement("sportsAutoUpdate").checked = Boolean(settings.auto_update);
   sportsElement("sportsAutoUpdate").disabled = !enabled;
-  sportsElement("sportsRunScanBtn").disabled = !enabled;
+  const scanRunning = Boolean(sportsState.scan?.running);
+  const scanButton = sportsElement("sportsRunScanBtn");
+  scanButton.disabled = !enabled || scanRunning;
+  scanButton.setAttribute("aria-busy", String(scanRunning));
+  scanButton.textContent = scanRunning ? "Scanning…" : "Update now";
+
+  const numbering = sportsState.numbering || {};
+  const capacity = Number(numbering.events_per_primary_block || 0);
+  sportsElement("sportsBlockCapacity").textContent = capacity
+    ? `Each league/series gets 1,000 channels: ${capacity} event slots at ${settings.channels_per_event || 10} channels per event. Overflow uses a separate continuation block.`
+    : "Each league/series gets its own 1,000-channel block.";
+  renderSportsBlockMap();
 
   const conflictCount = Number(sportsState.number_conflicts || 0);
   const warning = sportsElement("sportsNumberWarning");
@@ -652,9 +789,18 @@ function applySportsState() {
     : "";
 
   const generatedCount = (sportsState.generated || []).length;
+  const cachedCount = Number(sportsState.disabled_cache?.count || 0);
   sportsElement("sportsHeaderSummary").textContent = enabled
-    ? `${sportsState.rules.length} selection${sportsState.rules.length === 1 ? "" : "s"} • ${generatedCount} generated channel${generatedCount === 1 ? "" : "s"}`
-    : "Automatically build a daily sports channel block.";
+    ? `${settings.everything_mode ? "Everything mode" : `${sportsState.rules.length} selection${sportsState.rules.length === 1 ? "" : "s"}`} • ${generatedCount} generated channel${generatedCount === 1 ? "" : "s"}`
+    : cachedCount
+      ? `Sports channels hidden • ${cachedCount} cached for 24-hour recovery`
+      : "Automatically build a daily sports channel block.";
+
+  const everythingNotice = sportsElement("sportsEverythingModeNotice");
+  everythingNotice.classList.toggle("d-none", !settings.everything_mode);
+  everythingNotice.textContent = settings.everything_mode
+    ? `Everything Mode is active. Your ${sportsState.rules.length} curated selection${sportsState.rules.length === 1 ? " is" : "s are"} safely preserved. Scans may take for-fucking-ever.`
+    : "";
 
   sportsElement("sportsNextUpdate").textContent = !enabled
     ? "Sports automation disabled"
@@ -669,6 +815,7 @@ function applySportsState() {
 
   renderSportsRules();
   renderSportsPreview();
+  updateSportsScanPulse();
   sportsGeneratedSignature = JSON.stringify((sportsState.generated || []).map(row => [row.id, row.generated_at, row.assigned_number]));
 }
 
@@ -707,6 +854,9 @@ async function saveSportsSettings() {
     sportsState = data;
     setSportsError("");
     applySportsState();
+    if (Object.prototype.hasOwnProperty.call(changes, "enabled")) {
+      await loadInitialChannels({quiet: true});
+    }
     return true;
   } catch (error) {
     Object.assign(pendingSportsChanges, changes);
@@ -716,25 +866,50 @@ async function saveSportsSettings() {
 }
 
 function sportsFamily(item) {
-  const league = String(item.league_id || item.id || "").toLowerCase();
-  const families = {
-    mlb: "Baseball",
-    milb: "Baseball",
-    nfl: "Football",
-    ncaaf: "Football",
-    nba: "Basketball",
-    wnba: "Basketball",
-    ncaab: "Basketball",
-    nhl: "Hockey",
-    mls: "Soccer",
-    nwsl: "Soccer",
-    cornhole: "Cornhole",
-    "formula-1": "Motorsports",
-    ufc: "Combat sports",
-    soccer: "Soccer"
-  };
-  return families[league] || "Other";
+  const metadata = item?.metadata || {};
+  if (metadata.family) return String(metadata.family);
+  const sportId = metadata.sport_id || item?.sport_id || "";
+  const sportItem = sportsState.catalog.find(entry => entry.scope_type === "sport" && entry.id === sportId);
+  if (sportItem?.name) return sportItem.name;
+  if (item?.scope_type === "sport") return item.name || "Other";
+  return "Other";
 }
+
+function sportsBlockForId(scopeId) {
+  return (sportsState.numbering?.blocks || []).find(block => block.id === scopeId) || null;
+}
+
+function sportsBlockRange(scopeId) {
+  const block = sportsBlockForId(scopeId);
+  return block ? `${block.start}–${block.end}` : "";
+}
+
+function renderSportsBlockMap() {
+  const filter = sportsElement("sportsBlockSportFilter");
+  const target = sportsElement("sportsBlockMap");
+  if (!filter || !target) return;
+  const blocks = sportsState.numbering?.blocks || [];
+  const families = [...new Set(blocks.map(block => block.sport).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const current = filter.value;
+  filter.innerHTML = `<option value="">All sports</option>` +
+    families.map(family => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join("");
+  if (families.includes(current)) filter.value = current;
+
+  const selectedFamily = filter.value;
+  const visible = blocks.filter(block => !selectedFamily || block.sport === selectedFamily);
+  let lastFamily = "";
+  target.innerHTML = visible.map(block => {
+    const familyHeader = block.sport !== lastFamily
+      ? `<div class="sports-block-family">${escapeHtml(block.sport)}</div>`
+      : "";
+    lastFamily = block.sport;
+    return `${familyHeader}<div class="sports-block-item">
+      <span class="sports-block-item-name" title="${escapeHtml(block.name)}">${escapeHtml(block.name)}</span>
+      <span class="sports-block-range">${escapeHtml(block.start)}–${escapeHtml(block.end)}</span>
+    </div>`;
+  }).join("") || `<div class="small-muted">No channel blocks match this sport.</div>`;
+}
+
 
 function updateSportsSelectionSportOptions() {
   const type = sportsElement("sportsSelectionType").value;
@@ -767,38 +942,55 @@ function renderSportsSelectionResults() {
     if (family && sportsFamily(item) !== family) return false;
     const haystack = `${item.name} ${item.subtitle} ${item.league_id || ""} ${(item.aliases || []).join(" ")}`.toLowerCase();
     return !query || haystack.includes(query);
+  }).sort((a, b) => {
+    const familyCompare = sportsFamily(a).localeCompare(sportsFamily(b));
+    return familyCompare || String(a.name).localeCompare(String(b.name));
   });
 
   const placeholder = type === "team"
     ? "Search teams…"
     : type === "league"
-      ? "Search leagues…"
+      ? "Search leagues, series, tours…"
       : type === "conference"
         ? "Search conferences…"
         : "Search sports…";
   sportsElement("sportsSelectionSearch").placeholder = placeholder;
 
-  sportsElement("sportsSelectionResults").innerHTML = items.map(item => {
+  let lastFamily = "";
+  const results = sportsElement("sportsSelectionResults");
+  results.classList.toggle("has-range-header", type === "league");
+  const rangeHeader = type === "league"
+    ? `<div class="sports-selection-column-header"><span>Channel Range</span></div>`
+    : "";
+  const resultRows = items.map(item => {
     const key = `${item.scope_type}:${item.id}`;
     const added = existing.has(key);
     const checked = pendingSportsSelections.has(key);
+    const itemFamily = sportsFamily(item);
+    const familyHeader = itemFamily !== lastFamily
+      ? `<div class="sports-selection-family">${escapeHtml(itemFamily)}</div>`
+      : "";
+    lastFamily = itemFamily;
     const logo = item.logo_url
       ? `<img class="sports-selection-logo" src="${escapeHtml(item.logo_url)}" alt="" loading="lazy">`
       : `<span class="sports-selection-logo sports-selection-logo-fallback" aria-hidden="true">${escapeHtml((item.name || "?").slice(0, 1).toUpperCase())}</span>`;
-    return `
+    const range = item.scope_type === "league" ? sportsBlockRange(item.id) : "";
+    return `${familyHeader}
       <label class="sports-selection-result ${added ? "is-added" : ""}" role="listitem">
         <input class="form-check-input sports-selection-check" type="checkbox"
           data-key="${escapeHtml(key)}" ${checked ? "checked" : ""} ${added ? "disabled" : ""}>
         ${logo}
         <span class="sports-selection-copy">
           <strong>${escapeHtml(item.name)}</strong>
-          <span class="small-muted">${escapeHtml(item.subtitle || sportsFamily(item))}</span>
+          <span class="small-muted">${escapeHtml(item.subtitle || itemFamily)}</span>
         </span>
-        ${added ? '<span class="badge text-bg-secondary">Added</span>' : '<span class="sports-selection-plus" aria-hidden="true">+</span>'}
+        ${range ? `<span class="sports-selection-range">${escapeHtml(range)}</span>` : added ? '<span class="badge text-bg-secondary">Added</span>' : '<span class="sports-selection-plus" aria-hidden="true">+</span>'}
       </label>`;
-  }).join("") || `<div class="small-muted p-3">No matches.</div>`;
+  }).join("");
+  results.innerHTML = rangeHeader + (resultRows || `<div class="small-muted p-3">No matches.</div>`);
   updateSportsAddSelectedButton();
 }
+
 
 async function addSelectedSportsRules() {
   const selectedItems = [...pendingSportsSelections].map(key => {
@@ -864,29 +1056,45 @@ async function runSportsScan() {
   const settingsSaved = await saveSportsSettings();
   if (!settingsSaved) return;
 
-  const button = sportsElement("sportsRunScanBtn");
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
-  button.innerHTML = '<span class="sports-scan-spinner" aria-hidden="true"></span><span>Scanning…</span>';
+  sportsState.scan = {
+    running: true,
+    started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    stage: "Starting sports update",
+    trigger: "manual"
+  };
+  applySportsState();
+  scheduleSportsStatusPoll(1000);
   setSportsError("");
   try {
     const response = await fetch("/api/sports/scan", {method: "POST"});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Sports scan failed.");
+    if (!response.ok) {
+      if (data.sports) {
+        sportsState = data.sports;
+        applySportsState();
+      }
+      throw new Error(data.error || "Sports scan failed.");
+    }
     sportsState = data.sports;
     applyChannelPayload(data);
     applySportsState();
     setStatus(data.result.message || `Generated ${data.result.count} sports channels.`);
   } catch (error) {
-    setSportsError(error.message);
+    await pollSportsStatus({reschedule: false});
+    if (!sportsState.scan?.running) setSportsError(error.message);
   } finally {
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    button.textContent = "Update now";
+    scheduleSportsStatusPoll();
   }
 }
 
-async function pollSportsStatus() {
+function scheduleSportsStatusPoll(delay = null) {
+  clearTimeout(sportsStatusPollTimer);
+  const resolvedDelay = delay ?? (sportsState.scan?.running ? 3000 : 30000);
+  sportsStatusPollTimer = setTimeout(() => pollSportsStatus(), resolvedDelay);
+}
+
+async function pollSportsStatus({reschedule = true} = {}) {
   try {
     const response = await fetch("/api/sports/status");
     const data = await response.json();
@@ -898,6 +1106,8 @@ async function pollSportsStatus() {
     if (changed) await loadInitialChannels({quiet: true});
   } catch {
     // Silent polling failure. User-facing errors are reserved for explicit actions.
+  } finally {
+    if (reschedule) scheduleSportsStatusPoll();
   }
 }
 
@@ -907,11 +1117,20 @@ function bindSports() {
 
   sportsElement("sportsEnabled").addEventListener("change", event => {
     const enabled = event.target.checked;
+    sportsCollapsed = !enabled;
+    localStorage.setItem(SPORTS_COLLAPSE_KEY, String(sportsCollapsed));
     sportsElement("sportsBody").classList.toggle("d-none", !enabled);
     sportsElement("sportsAutoUpdate").disabled = !enabled;
-    sportsElement("sportsRunScanBtn").disabled = !enabled;
+    sportsElement("sportsRunScanBtn").disabled = !enabled || Boolean(sportsState.scan?.running);
     scheduleSportsSave({enabled});
   });
+  sportsElement("sportsCollapseBtn").addEventListener("click", () => {
+    if (!sportsState.settings?.enabled) return;
+    sportsCollapsed = !sportsCollapsed;
+    localStorage.setItem(SPORTS_COLLAPSE_KEY, String(sportsCollapsed));
+    applySportsState();
+  });
+  sportsElement("sportsBlockSportFilter").addEventListener("change", renderSportsBlockMap);
   sportsElement("sportsAutoUpdate").addEventListener("change", event => scheduleSportsSave({auto_update: event.target.checked}));
   sportsElement("sportsStartChannel").addEventListener("input", event => scheduleSportsSave({start_channel: Number(event.target.value)}));
   sportsElement("sportsBlockSize").addEventListener("input", event => scheduleSportsSave({channels_per_event: Number(event.target.value)}));
@@ -924,10 +1143,19 @@ function bindSports() {
   sportsElement("sportsRefreshTime").addEventListener("change", event => {
     if (event.target.value) scheduleSportsSave({refresh_time: event.target.value});
   });
+  sportsElement("sportsEverythingMode").addEventListener("change", event => {
+    scheduleSportsSave({everything_mode: event.target.checked});
+  });
+  sportsElement("sportsScanStatusDismiss").addEventListener("click", () => {
+    const signature = scanResultSignature(sportsState.last_scan);
+    if (signature) localStorage.setItem(SPORTS_SCAN_DISMISSED_KEY, signature);
+    renderSportsScanStatus();
+  });
 
   sportsElement("sportsAddSelectionBtn").addEventListener("click", () => {
     pendingSportsSelections.clear();
-    sportsElement("sportsSelectionType").value = "team";
+    sportsElement("sportsEverythingMode").checked = Boolean(sportsState.settings?.everything_mode);
+    sportsElement("sportsSelectionType").value = "league";
     sportsElement("sportsSelectionSearch").value = "";
     updateSportsSelectionSportOptions();
     renderSportsSelectionResults();
@@ -971,7 +1199,7 @@ async function initialize() {
   await Promise.all([loadInitialChannels(), loadGroups(), loadSports()]);
   render();
   updateClearSearchButton();
-  setInterval(pollSportsStatus, 60000);
+  scheduleSportsStatusPoll();
 }
 
 bindSports();
