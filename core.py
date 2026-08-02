@@ -409,10 +409,10 @@ def channel_by_key_map() -> dict[str, dict]:
 
 
 def combined_channels_for_api() -> list[dict]:
-    # Generated sports channels are displayed first so the Channel Manager visibly
-    # changes after a scan. Their negative IDs prevent them from being treated as
-    # manual selections by the existing selection endpoint.
-    return [*sports.generated_channel_payloads(DB_PATH), *channels]
+    # Keep provider/manual channels above generated sports and event channels in
+    # the Channel Manager. Generated rows retain negative IDs so the existing
+    # selection endpoint never treats them as editable manual selections.
+    return [*channels, *sports.generated_channel_payloads(DB_PATH)]
 
 
 def selected_ids_payload() -> list[int]:

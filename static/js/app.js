@@ -64,25 +64,38 @@ function isGeneratedSportsChannel(channel) {
   return Boolean(channel.is_sports_generated || Number(channel.id) < 0);
 }
 
-function maskUrl(value) {
-  const raw = String(value || "");
+const PROVIDER_SOURCE_LABELS = [
+  {pattern: /(^|\.)astranettv\./i, label: "AstraNet"},
+  {pattern: /(^|\.)astranet\./i, label: "AstraNet"},
+];
+
+function titleCaseSource(value) {
+  return String(value || "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, letter => letter.toUpperCase())
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function providerSourceLabel(channel) {
+  if (isGeneratedSportsChannel(channel)) return "Sports Automation";
+
+  const raw = String(channel.url || "").trim();
   try {
-    const url = new URL(raw);
-    const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length >= 3) {
-      const tail = parts.at(-1);
-      url.pathname = `/••••••/••••••/${tail}`;
-    } else if (parts.length) {
-      url.pathname = "/••••••";
-    }
-    if (url.search) {
-      for (const key of ["username", "password", "user", "pass", "token"]) {
-        if (url.searchParams.has(key)) url.searchParams.set(key, "••••••");
-      }
-    }
-    return url.toString();
+    const hostname = new URL(raw).hostname.toLowerCase().replace(/^www\./, "");
+    if (!hostname || /^[\d.:]+$/.test(hostname)) return "Provider";
+
+    const known = PROVIDER_SOURCE_LABELS.find(entry => entry.pattern.test(hostname));
+    if (known) return known.label;
+
+    const parts = hostname.split(".").filter(Boolean);
+    const commonSubdomains = new Set(["api", "cdn", "edge", "live", "media", "stream", "streams", "tv"]);
+    while (parts.length > 2 && commonSubdomains.has(parts[0])) parts.shift();
+
+    const candidate = parts.length >= 2 ? parts.at(-2) : parts[0];
+    return titleCaseSource(candidate) || "Provider";
   } catch {
-    return raw.length > 72 ? `${raw.slice(0, 56)}…` : raw;
+    return "Provider";
   }
 }
 
@@ -192,7 +205,7 @@ function render() {
       ? `<div class="sports-channel-subtitle">${escapeHtml(channel.sports_subtitle)}</div>`
       : "";
     const badge = generated ? `<span class="badge text-bg-primary ms-2">Auto sports</span>` : "";
-    const masked = maskUrl(channel.url);
+    const sourceLabel = providerSourceLabel(channel);
     return `
       <tr data-id="${id}" class="${generated ? "sports-generated-row" : ""}">
         <td>
@@ -204,7 +217,7 @@ function render() {
           ${subtitle}
         </td>
         <td>${escapeHtml(channel.group)}</td>
-        <td class="url-cell" title="Sensitive stream URL hidden">${escapeHtml(masked)}</td>
+        <td class="source-cell"><span class="source-badge">${escapeHtml(sourceLabel)}</span></td>
       </tr>`;
   }).join("");
 

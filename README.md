@@ -1,12 +1,19 @@
 # M3U Web Picker
 
+**Version 21.3**
+
 **Sports build v21.1** adds a non-destructive Everything Mode, persistent scan progress/results that survive closing the browser tab, and an explicit Channel Range heading in the selection picker. It retains the v21.0 sport → league/series/tour/promotion taxonomy and fixed 1,000-channel ranges for each child competition.
 
 This is a single-page Flask application for loading an M3U playlist, manually selecting channels, ordering the custom playlist, and automatically generating temporary daily sports channels with matching XMLTV guide data.
 
-## Supported sports and live events
 
-![Supported sports and event categories](docs/images/info.png)
+## Channel Manager ordering
+
+Manually saved/provider channels are always listed before generated sports and event channels. Generated entries remain read-only and retain their assigned automation channel numbers.
+
+## Channel source privacy
+
+The Channel Manager displays a short source badge such as `AstraNet` or `Sports Automation`. Stream URLs, paths, query strings, tokens, and credentials are never rendered in the channel table.
 
 ## Jellyfin URLs
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -54,6 +55,25 @@ class SportsTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+
+    def test_channel_manager_lists_manual_channels_before_generated_channels(self):
+        manual = [
+            {"id": 1, "name": "Local News", "url": "http://provider.test/news"},
+            {"id": 2, "name": "Weather", "url": "http://provider.test/weather"},
+        ]
+        generated = [
+            {"id": -1, "name": "Generated Game", "is_sports_generated": True},
+        ]
+        original_channels = core.channels
+        try:
+            core.channels = manual
+            with patch("core.sports.generated_channel_payloads", return_value=generated):
+                combined = core.combined_channels_for_api()
+        finally:
+            core.channels = original_channels
+
+        self.assertEqual([row["id"] for row in combined], [1, 2, -1])
 
     def test_before_refresh_uses_previous_sports_day(self):
         now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
