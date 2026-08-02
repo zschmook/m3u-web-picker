@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import Response, jsonify, request, send_file
 
 import core
+import sports
 
 
 def register_routes(app):
@@ -10,27 +11,29 @@ def register_routes(app):
     def api_load_url():
         data = request.get_json(force=True, silent=True) or {}
         url = str(data.get("url", "")).strip()
-
         if not url.startswith(("http://", "https://")):
             return jsonify(error="URL must start with http:// or https://"), 400
 
         try:
             text = core.download_m3u_text(url)
-            core.MASTER_CACHE_PATH.write_text(text, encoding="utf-8")
-            core.channels = core.parse_m3u_text(text)
-            core.last_source_url = url
-            core.source_mode = "url"
-            core.apply_saved_selections_to_loaded_channels()
-            core.write_current_playlist()
-            core.last_refresh = datetime.now().isoformat(timespec="seconds")
-            core.save_config()
+            parsed = core.parse_m3u_text(text)
+            with core.state_lock:
+                core.atomic_write_text(core.MASTER_CACHE_PATH, text)
+                core.channels = parsed
+                core.last_source_url = url
+                core.source_mode = "url"
+                sports.discover_catalog_from_channels(core.DB_PATH, core.channels)
+                core.apply_saved_selections_to_loaded_channels()
+                core.last_refresh = datetime.now().astimezone().isoformat(timespec="seconds")
+                core.save_config()
+                core.write_current_playlist()
         except Exception as exc:
             return jsonify(error=str(exc)), 500
 
         return jsonify(
-            count=len(core.channels),
-            channels=core.channels,
-            selected_ids=sorted(core.selected_ids),
+            count=len(core.combined_channels_for_api()),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
         )
 
     @app.post("/api/upload")
@@ -38,41 +41,43 @@ def register_routes(app):
         uploaded = request.files.get("file")
         if not uploaded:
             return jsonify(error="No file uploaded."), 400
-
         try:
             raw = uploaded.read()
             text = raw.decode("utf-8-sig", errors="replace")
-            core.MASTER_CACHE_PATH.write_text(text, encoding="utf-8")
-            core.channels = core.parse_m3u_text(text)
-            core.source_mode = "file"
-            core.apply_saved_selections_to_loaded_channels()
-            core.write_current_playlist()
-            core.last_refresh = datetime.now().isoformat(timespec="seconds")
-            core.save_config()
+            parsed = core.parse_m3u_text(text)
+            with core.state_lock:
+                core.atomic_write_text(core.MASTER_CACHE_PATH, text)
+                core.channels = parsed
+                core.source_mode = "file"
+                sports.discover_catalog_from_channels(core.DB_PATH, core.channels)
+                core.apply_saved_selections_to_loaded_channels()
+                core.last_refresh = datetime.now().astimezone().isoformat(timespec="seconds")
+                core.save_config()
+                core.write_current_playlist()
         except Exception as exc:
             return jsonify(error=str(exc)), 500
 
         return jsonify(
-            count=len(core.channels),
-            channels=core.channels,
-            selected_ids=sorted(core.selected_ids),
+            count=len(core.combined_channels_for_api()),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
         )
 
     @app.post("/api/selection")
     def api_selection():
         data = request.get_json(force=True, silent=True) or {}
         ids = data.get("ids", [])
-
-        core.selected_ids = set(int(i) for i in ids)
+        valid_provider_ids = {int(channel["id"]) for channel in core.channels}
+        core.selected_ids = {
+            int(value)
+            for value in ids
+            if str(value).lstrip("-").isdigit()
+            and int(value) >= 0
+            and int(value) in valid_provider_ids
+        }
         count = core.write_current_playlist()
         core.save_config()
-
-        return jsonify(
-            count=count,
-            path=str(core.PLAYLIST_PATH),
-            url="/playlist/custom.m3u",
-        )
-
+        return jsonify(count=count, path=str(core.PLAYLIST_PATH), url="/playlist/custom.m3u")
 
     @app.get("/api/selection/order")
     def api_selection_order():
@@ -82,67 +87,31 @@ def register_routes(app):
     @app.post("/api/selection/order")
     def api_save_selection_order():
         data = request.get_json(force=True, silent=True) or {}
-        keys = [str(k).strip() for k in data.get("keys", []) if str(k).strip()]
-
+        keys = [str(key).strip() for key in data.get("keys", []) if str(key).strip()]
         count = core.save_channel_order(keys)
         core.write_current_playlist()
         core.save_config()
-
         return jsonify(count=count, url="/playlist/custom.m3u")
 
     @app.get("/api/channels")
     def api_channels():
+        combined = core.combined_channels_for_api()
         return jsonify(
-            count=len(core.channels),
-            channels=core.channels,
-            selected_ids=sorted(core.selected_ids),
+            count=len(combined),
+            channels=combined,
+            selected_ids=core.selected_ids_payload(),
             source_mode=core.source_mode,
             source_url_configured=bool(core.last_source_url),
         )
 
-    @app.get("/api/epg")
-    def api_epg_sources():
-        return jsonify(
-            sources=core.epg_sources_payload(),
-            schedule={
-                "after_m3u_minutes": core.EPG_REFRESH_OFFSET_MINUTES,
-                "hour": core.SCHEDULE_HOUR,
-                "minute": core.SCHEDULE_MINUTE + core.EPG_REFRESH_OFFSET_MINUTES,
-            },
-        )
-
-    @app.post("/api/epg")
-    def api_add_epg_source():
-        data = request.get_json(force=True, silent=True) or {}
-        name = str(data.get("name", "")).strip()
-        url = str(data.get("url", "")).strip()
-
-        try:
-            source = core.add_epg_source(name, url)
-        except ValueError as exc:
-            return jsonify(error=str(exc)), 400
-
-        # Keep EPG cache separate from the M3U playlist/export cache.
-        # Fetch once now so the served /epg/<name>.xml link can work immediately;
-        # if it fails, the source is still saved and the scheduled 3:15 refresh retries.
-        ok, message = core.refresh_epg_source(source["id"])
-        payload = next((item for item in core.epg_sources_payload() if item["id"] == source["id"]), None)
-        return jsonify(source=payload, refreshed=ok, message=message)
-
-    @app.delete("/api/epg/<source_id>")
-    def api_delete_epg_source(source_id: str):
-        deleted = core.delete_epg_source(source_id)
-        if not deleted:
-            return jsonify(error="EPG source not found."), 404
-        return jsonify(deleted=True, sources=core.epg_sources_payload())
-
-
-
     @app.get("/api/status")
     def api_status():
+        generated_count = len(sports.generated_rows(core.DB_PATH))
         return jsonify(
             loaded=len(core.channels),
-            selected=len(core.selected_ids),
+            selected=len(core.selected_ids) + generated_count,
+            manual_selected=len(core.selected_ids),
+            generated_sports=generated_count,
             saved_selections=len(core.load_selected_keys_from_db()),
             playlist_exists=core.PLAYLIST_PATH.exists(),
             playlist_url="/playlist/custom.m3u",
@@ -152,25 +121,132 @@ def register_routes(app):
             source_mode=core.source_mode,
             last_refresh=core.last_refresh,
             schedule={"hour": core.SCHEDULE_HOUR, "minute": core.SCHEDULE_MINUTE},
-            epg_sources=core.epg_sources_payload(),
-            epg_schedule={"offset_minutes_after_m3u": core.EPG_REFRESH_OFFSET_MINUTES},
         )
 
-    
-    @app.get("/export")
-    def export_playlist():
-        return send_file(
-            core.PLAYLIST_PATH,
-            as_attachment=True,
-            download_name="download.m3u",
-            mimetype="audio/x-mpegurl",
+    @app.get("/api/groups")
+    def api_groups():
+        return jsonify(groups=core.list_custom_groups())
+
+    @app.post("/api/groups")
+    def api_create_group():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            group = core.create_custom_group(str(data.get("name", "")))
+        except Exception as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(group=group), 201
+
+    @app.get("/api/groups/<slug>/channels")
+    def api_group_channels(slug: str):
+        return jsonify(channel_keys=core.group_member_keys(slug))
+
+    @app.post("/api/groups/<slug>/channels")
+    def api_add_group_channels(slug: str):
+        data = request.get_json(force=True, silent=True) or {}
+        keys = [str(key).strip() for key in data.get("channel_keys", []) if str(key).strip()]
+        try:
+            added = core.add_channels_to_group(slug, keys)
+        except Exception as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(added=added)
+
+    @app.delete("/api/groups/<slug>/channels")
+    def api_remove_group_channels(slug: str):
+        data = request.get_json(force=True, silent=True) or {}
+        keys = [str(key).strip() for key in data.get("channel_keys", []) if str(key).strip()]
+        try:
+            removed = core.remove_channels_from_group(slug, keys)
+        except Exception as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(removed=removed)
+
+    @app.get("/api/sports/settings")
+    def api_sports_settings():
+        payload = sports.status_payload(core.DB_PATH)
+        payload["number_conflicts"] = core.sports_number_conflicts()
+        return jsonify(payload)
+
+    @app.patch("/api/sports/settings")
+    def api_update_sports_settings():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            settings = sports.update_settings(core.DB_PATH, data)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not save sports settings: {exc}")
+            return jsonify(error="Could not save sports settings."), 500
+        payload = sports.status_payload(core.DB_PATH)
+        payload["settings"] = settings
+        payload["number_conflicts"] = core.sports_number_conflicts()
+        return jsonify(payload)
+
+    @app.get("/api/sports/catalog")
+    def api_sports_catalog():
+        return jsonify(
+            items=sports.catalog_payload(
+                core.DB_PATH,
+                query=str(request.args.get("q", "")),
+                scope_type=str(request.args.get("type", "")),
+            )
         )
+
+    @app.post("/api/sports/rules")
+    def api_add_sports_rule():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            if isinstance(data.get("items"), list):
+                rules = sports.add_rules(core.DB_PATH, data["items"])
+            else:
+                sports.add_rule(core.DB_PATH, data)
+                rules = sports.get_rules(core.DB_PATH)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not add sports selection: {exc}")
+            return jsonify(error="Could not add the sports selection."), 500
+        return jsonify(rules=rules)
+
+    @app.patch("/api/sports/rules/<int:rule_id>")
+    def api_update_sports_rule(rule_id: int):
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            sports.update_rule(core.DB_PATH, rule_id, data)
+        except Exception as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(rules=sports.get_rules(core.DB_PATH))
+
+    @app.delete("/api/sports/rules/<int:rule_id>")
+    def api_delete_sports_rule(rule_id: int):
+        sports.delete_rule(core.DB_PATH, rule_id)
+        return jsonify(rules=sports.get_rules(core.DB_PATH))
+
+    @app.post("/api/sports/scan")
+    def api_sports_scan():
+        try:
+            result = core.run_sports_scan(trigger="manual", refresh_source=True)
+        except core.SportsScanError as exc:
+            return jsonify(error=str(exc)), 409
+        except Exception as exc:
+            print(f"Unexpected sports update error: {exc}")
+            return jsonify(error="Sports update failed. Existing sports channels were kept."), 500
+        return jsonify(
+            result=result,
+            sports=sports.status_payload(core.DB_PATH),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
+        )
+
+    @app.get("/api/sports/status")
+    def api_sports_status():
+        payload = sports.status_payload(core.DB_PATH)
+        payload["number_conflicts"] = core.sports_number_conflicts()
+        return jsonify(payload)
 
     @app.get("/playlist/custom.m3u")
     def playlist():
         if not core.PLAYLIST_PATH.exists():
             return Response("#EXTM3U\n", mimetype="audio/x-mpegurl")
-
         return send_file(
             core.PLAYLIST_PATH,
             mimetype="audio/x-mpegurl",
@@ -189,36 +265,3 @@ def register_routes(app):
     def playlist_group(slug: str):
         _, items = core.group_channels_for_slug(slug)
         return Response(core.m3u_from_channels(items), mimetype="audio/x-mpegurl")
-
-
-    def serve_epg_xml(source_id: str):
-        source_id = core.normalize_epg_id(source_id)
-        path = core.epg_cache_path(source_id)
-        source = core.find_epg_source(source_id)
-
-        if not source:
-            return Response("EPG source not found.\n", content_type="text/plain; charset=utf-8", status=404)
-
-        # Generate the cache on first request if startup has not finished it yet.
-        # This keeps the /epg/<name>.xml URL usable after a fresh install/rebuild.
-        if not path.exists():
-            ok, message = core.refresh_epg_source(source_id)
-            if not ok or not path.exists():
-                return Response(
-                    f"EPG cache could not be generated: {message}\n",
-                    content_type="text/plain; charset=utf-8",
-                    status=502,
-                )
-
-        response = Response(path.read_bytes(), mimetype="application/xml")
-        response.headers["Content-Disposition"] = f'inline; filename="{source_id}.xml"'
-        response.headers["Cache-Control"] = "no-cache"
-        return response
-
-    @app.get("/epg/<source_id>.xml")
-    def epg_xml(source_id: str):
-        return serve_epg_xml(source_id)
-
-    @app.get("/epg/<source_id>")
-    def epg_xml_without_suffix(source_id: str):
-        return serve_epg_xml(source_id)

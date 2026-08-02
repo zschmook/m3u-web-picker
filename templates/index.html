@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,36 +5,31 @@
   <title>M3U Web Picker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body>
-  <div class="container-fluid pt-1 pb-3">
-    <div class="d-flex align-items-center justify-content-between mb-2 gap-3">
+  <div class="container-fluid py-3">
+    <div class="d-flex align-items-center justify-content-between mb-3 gap-3 flex-wrap">
       <div>
         <h1 class="h3 mb-1">M3U Web Picker</h1>
-        <div class="small-muted">Load, select, group, auto-save, and serve M3U playlists.</div>
+        <div class="small-muted">Load, select, auto-save, and serve M3U playlists.</div>
       </div>
 
-      <div class="text-end" style="min-width: 560px;">
-        <!--<div class="small-muted">Selected Playlist URL</div>-->
+      <div class="playlist-toolbar">
         <div class="input-group mb-2">
           <input id="playlistUrl" class="form-control" readonly>
           <button class="btn btn-success" id="copyPlaylistBtn" type="button">Copy</button>
-<a class="btn btn-outline-light ms-2" id="exportPlaylistBtn" href="/export">Export</a>
+          <button class="btn btn-outline-light" id="manageOrderBtn" type="button">Manage Order</button>
         </div>
       </div>
     </div>
 
     <div class="card mb-3">
-      <div class="card-body py-2">
-        <div class="manager-heading mb-2">
-          <div class="manager-title"><span class="manager-icon">▦</span><span>SOURCE MANAGER</span></div>
-          <div class="small-muted">Manage the master playlist source and refresh schedule.</div>
-        </div>
+      <div class="card-body">
+        <h2 class="h6 mb-3">Load Master Playlist</h2>
 
         <div class="mb-3">
-          <label class="form-label">M3U URL</label>
+          <label class="form-label" for="m3uUrl">M3U URL</label>
           <div class="input-group">
             <input id="m3uUrl" class="form-control" placeholder="https://example.com/playlist.m3u">
             <button id="loadUrlBtn" class="btn btn-primary" type="button">Load URL</button>
@@ -43,9 +37,8 @@
           <div class="small-muted mt-1">Provider M3U link. Saved and refreshed daily at 3:00 AM.</div>
         </div>
 
-
         <div>
-          <label class="form-label">M3U File</label>
+          <label class="form-label" for="m3uFile">M3U File</label>
           <div class="input-group">
             <input id="m3uFile" type="file" class="form-control" accept=".m3u,.m3u8,text/plain">
             <button id="uploadBtn" class="btn btn-secondary" type="button">Load File</button>
@@ -53,36 +46,9 @@
         </div>
 
         <div class="mt-3">
-          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm d-none" type="button">Change Source</button>
+          <button id="changeSourceBtn" class="btn btn-outline-warning btn-sm" type="button">Change Source</button>
           <span id="sourceModeLabel" class="small-muted ms-2"></span>
         </div>
-      </div>
-    </div>
-
-
-
-    <div class="card mb-3">
-      <div class="card-body py-2">
-        <div class="manager-heading mb-2">
-          <div class="manager-title"><span class="manager-icon">▰</span><span>EPG MANAGER</span></div>
-          <div class="small-muted">Manage XMLTV guide sources served by the application.</div>
-        </div>
-
-        <div class="epg-add-row mb-2">
-          <div>
-            <label class="form-label mb-1">Name</label>
-            <input id="epgName" class="form-control form-control-sm" placeholder="Pluto">
-          </div>
-          <div>
-            <label class="form-label mb-1">URL</label>
-            <input id="epgUrl" class="form-control form-control-sm" placeholder="https://example.com/epg.xml">
-          </div>
-          <div class="d-grid">
-            <button id="addEpgBtn" class="btn btn-primary btn-sm" type="button">Add</button>
-          </div>
-        </div>
-
-        <div id="epgSources" class="epg-list mt-2"></div>
       </div>
     </div>
 
@@ -96,18 +62,15 @@
               <button id="createGroupBtn" class="btn btn-outline-success" type="button">Create</button>
             </div>
           </div>
-
           <div>
             <label class="form-label">Active Group</label>
             <select id="activeGroup" class="form-select" style="min-width:220px;">
               <option value="">No group selected</option>
             </select>
           </div>
-
           <button id="addVisibleToGroupBtn" class="btn btn-outline-light" type="button">Add visible to group</button>
           <button id="removeVisibleFromGroupBtn" class="btn btn-outline-warning" type="button">Remove visible from group</button>
           <button id="showGroupOnlyBtn" class="btn btn-outline-info" type="button">Show group only</button>
-
           <div class="ms-auto" style="min-width:420px;">
             <label class="form-label">Active Group Playlist URL</label>
             <div class="input-group">
@@ -116,135 +79,291 @@
             </div>
           </div>
         </div>
-
         <div id="groupPills" class="mt-3 d-flex flex-wrap gap-2"></div>
       </div>
     </div>
 
-    <div class="card mb-3"><div class="card-body">
-      <div class="manager-heading mb-2">
-        <div class="manager-title"><span class="manager-icon">▶</span><span>CHANNEL MANAGER</span></div>
-        <div class="small-muted">Select channels and build your custom playlist.</div>
-      </div>
-      <div class="filter-panel">
-        <div class="status-line"><strong>Status:</strong> <span id="status"></span></div>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="filter-panel">
+          <div class="status-line"><strong>Status:</strong> <span id="status"></span></div>
 
-        <div class="filter-option sd-filter-row">
-          <input id="excludeSdChannels" class="form-check-input" type="checkbox">
-          <label class="form-check-label" for="excludeSdChannels">Hide SD / LOW BANDWIDTH channels</label>
-        </div>
+          <div class="filter-option sd-filter-row">
+            <input id="excludeSdChannels" class="form-check-input" type="checkbox">
+            <label class="form-check-label" for="excludeSdChannels">Hide SD / LOW BANDWIDTH channels</label>
+          </div>
 
-        <div class="filter-toolbar">
-          <div class="filter-search">
-            <label class="form-label mb-1">Search</label>
-            <div class="search-input-wrap">
-              <input id="search" class="form-control pe-5" placeholder="channel, group, or URL">
-              <button id="clearSearchBtn" class="search-clear-btn d-none" type="button" aria-label="Clear search">×</button>
+          <div class="filter-toolbar">
+            <div class="filter-search">
+              <label class="form-label mb-1" for="search">Search</label>
+              <div class="search-input-wrap">
+                <input id="search" class="form-control pe-5" placeholder="channel, group, or URL">
+                <button id="clearSearchBtn" class="search-clear-btn d-none" type="button" aria-label="Clear search">×</button>
+              </div>
+            </div>
+
+            <div class="filter-provider">
+              <label class="form-label mb-1" for="groupFilter">Provider Group</label>
+              <select id="groupFilter" class="form-select">
+                <option value="">All provider groups</option>
+              </select>
+            </div>
+
+            <div class="filter-autosave">
+              <span class="badge text-bg-success p-2" title="Selections are saved automatically">Auto-save enabled</span>
             </div>
           </div>
 
-          <div class="filter-provider">
-            <label class="form-label mb-1">Provider Group</label>
-            <select id="groupFilter" class="form-select"><option value="">All provider groups</option></select>
+          <div class="search-actions">
+            <button id="selectVisibleBtn" class="btn btn-primary" type="button">Add all</button>
+            <button id="clearVisibleBtn" class="btn btn-outline-light" type="button">Remove all</button>
+            <button id="showSelectedBtn" class="btn btn-outline-success" type="button">Show selected</button>
           </div>
 
-          <div class="filter-autosave">
-            <span class="badge text-bg-success p-2" title="Selections are saved automatically">Auto-save enabled</span>
-              <div class="mt-2">
-                <button class="btn btn-outline-light btn-sm" id="manageOrderBtn" type="button">Manage Order</button>
-              </div>
+          <div class="col-auto d-none">
+            <div class="form-check mt-4">
+              <input id="selectedOnly" class="form-check-input" type="checkbox">
+              <label class="form-check-label" for="selectedOnly">Show selected only</label>
+            </div>
           </div>
         </div>
 
-        <div class="search-actions">
-          <button id="selectVisibleBtn" class="btn btn-primary" type="button">Add all</button>
-          <button id="clearVisibleBtn" class="btn btn-outline-light" type="button">Remove all</button>
-          <button id="showSelectedBtn" class="btn btn-outline-success" type="button">Show selected</button>
-        </div>
-
-        <div class="col-auto d-none">
-          <div class="form-check mt-4">
-            <input id="selectedOnly" class="form-check-input" type="checkbox">
-            <label class="form-check-label" for="selectedOnly">Show selected only</label>
-          </div>
+        <div class="mt-3 d-flex gap-4 flex-wrap">
+          <div><strong id="selectedCount">0</strong> selected</div>
+          <div><strong id="visibleCount">0</strong> visible</div>
+          <div><strong id="totalCount">0</strong> total</div>
         </div>
       </div>
-      <div class="mt-3 d-flex gap-4 flex-wrap">
-        <div><strong id="selectedCount">0</strong> selected</div>
-        <div><strong id="visibleCount">0</strong> visible</div>
-        <div><strong id="totalCount">0</strong> total</div>
-        
-      </div>
-    </div></div>
+    </div>
 
     <div class="table-wrap">
       <table class="table table-hover table-sm align-middle mb-0">
-        <thead><tr><th style="width:50px;">✓</th><th>Channel</th><th>Provider Group</th><th>URL</th></tr></thead>
+        <thead>
+          <tr>
+            <th style="width:50px;">✓</th>
+            <th>Channel</th>
+            <th>Provider Group</th>
+            <th>URL</th>
+          </tr>
+        </thead>
         <tbody id="channelTable"></tbody>
       </table>
     </div>
+
+    <!-- Sports lives directly below the Channel Manager. It is not a tab and
+         does not introduce a separate navigation surface. -->
+    <section class="card mt-3 mb-3 sports-card" aria-labelledby="sportsSectionTitle">
+      <div class="card-body">
+        <div class="sports-header">
+          <div class="d-flex align-items-center gap-3">
+            <div class="sports-icon" aria-hidden="true">🏟</div>
+            <div>
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h2 id="sportsSectionTitle" class="h6 mb-0">Sports automation</h2>
+                <span id="sportsEnabledBadge" class="badge text-bg-secondary">Off</span>
+              </div>
+              <div id="sportsHeaderSummary" class="small-muted mt-1">Automatically build a daily sports channel block.</div>
+            </div>
+          </div>
+          <div class="form-check form-switch mb-0">
+            <input id="sportsEnabled" class="form-check-input" type="checkbox" role="switch">
+            <label class="form-check-label" for="sportsEnabled">Enable sports</label>
+          </div>
+        </div>
+
+        <div id="sportsBody" class="d-none mt-4 pt-4 border-top border-secondary">
+          <div class="sports-subsection">
+            <h3 class="h6 mb-1">Daily channel block</h3>
+            <p class="small-muted mb-3">Generated channels stay separate from normal channel numbering.</p>
+
+            <div class="sports-settings-grid">
+              <div>
+                <label class="form-label" for="sportsStartChannel">Starting channel</label>
+                <input id="sportsStartChannel" class="form-control" type="number" min="1" value="1000">
+              </div>
+              <div>
+                <label class="form-label" for="sportsBlockSize">Channels per event</label>
+                <input id="sportsBlockSize" class="form-control" type="number" min="1" max="50" value="10">
+              </div>
+              <div class="sports-wide-field">
+                <label class="form-label" for="sportsGroupTitle">Group title</label>
+                <input id="sportsGroupTitle" class="form-control" value="Sports Today">
+              </div>
+              <div>
+                <label class="form-label" for="sportsTimezone">Timezone</label>
+                <select id="sportsTimezone" class="form-select">
+                  <option value="America/New_York">America/New_York</option>
+                  <option value="America/Chicago">America/Chicago</option>
+                  <option value="America/Denver">America/Denver</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" for="sportsRefreshTime">Refresh time</label>
+                <input id="sportsRefreshTime" class="form-control" type="time" value="03:00">
+              </div>
+              <div>
+                <label class="form-label" for="sportsEventWindow">Event window</label>
+                <select id="sportsEventWindow" class="form-select">
+                  <option value="today">Current sports day</option>
+                  <option value="today_tomorrow">Current day and next day</option>
+                  <option value="next_24_hours">Next 24 hours</option>
+                </select>
+              </div>
+            </div>
+            <div id="sportsNumberWarning" class="small text-warning mt-2 d-none"></div>
+          </div>
+
+          <div class="sports-subsection">
+            <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3">
+              <div>
+                <h3 class="h6 mb-1">What do you want to watch?</h3>
+                <p class="small-muted mb-0">Mix leagues, teams, conferences, and individual sports.</p>
+              </div>
+              <button id="sportsAddSelectionBtn" class="btn btn-outline-primary btn-sm" type="button">+ Add selection</button>
+            </div>
+            <div id="sportsRules" class="sports-rules"></div>
+          </div>
+
+          <div class="sports-subsection">
+            <div class="sports-options">
+              <div class="form-check">
+                <input id="sportsIncludeReplays" class="form-check-input" type="checkbox">
+                <label class="form-check-label" for="sportsIncludeReplays">Include replays and encore broadcasts</label>
+              </div>
+              <div class="form-check">
+                <input id="sportsIncludePregame" class="form-check-input" type="checkbox">
+                <label class="form-check-label" for="sportsIncludePregame">Include pregame and postgame shows</label>
+              </div>
+              <div class="form-check">
+                <input id="sportsUseBackups" class="form-check-input" type="checkbox">
+                <label class="form-check-label" for="sportsUseBackups">Use backup feeds when primary feeds are missing</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="sports-subsection">
+            <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3">
+              <div>
+                <h3 class="h6 mb-1">Generated sports channels</h3>
+                <p class="small-muted mb-0">The Channel Manager above updates after each successful scan.</p>
+              </div>
+              <span id="sportsPreviewCount" class="badge text-bg-secondary">0 channels</span>
+            </div>
+            <div id="sportsPreview" class="sports-preview"></div>
+          </div>
+
+          <div class="sports-footer">
+            <div>
+              <div id="sportsSaveError" class="sports-error d-none" role="alert"></div>
+              <div id="sportsNextUpdate" class="small-muted">Next update: —</div>
+              <div id="sportsLastScan" class="small-muted"></div>
+            </div>
+            <div class="sports-footer-actions">
+              <div class="form-check form-switch mb-0">
+                <input id="sportsAutoUpdate" class="form-check-input" type="checkbox" role="switch">
+                <label class="form-check-label" for="sportsAutoUpdate">Auto update</label>
+              </div>
+              <button id="sportsRunScanBtn" class="btn btn-primary" type="button">Update now</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-<div class="modal fade" id="urlModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title">Enter M3U URL</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input id="modalUrlInput" class="form-control" placeholder="https://provider.com/playlist.m3u">
-      </div>
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="modalLoadBtn">Load Playlist</button>
+  <div class="modal fade" id="urlModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title">Enter M3U URL</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input id="modalUrlInput" class="form-control" placeholder="https://provider.com/playlist.m3u">
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="modalLoadBtn">Load Playlist</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<div class="modal fade" id="orderModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-xl">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header border-secondary">
-        <h5 class="modal-title">Custom Playlist Order</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-
-      <div class="modal-body">
-        <div class="d-flex gap-2 mb-3">
-          <button id="moveOrderUpBtn" class="btn btn-outline-light" type="button">Move Up</button>
-          <button id="moveOrderDownBtn" class="btn btn-outline-light" type="button">Move Down</button>
+  <div class="modal fade" id="orderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+      <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title">Custom Playlist Order</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
-
-        <div class="order-list-wrap">
-          <table class="table table-hover table-sm align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="width:60px;">#</th>
-                <th>Channel</th>
-                <th>Provider Group</th>
-              </tr>
-            </thead>
-            <tbody id="orderTable"></tbody>
-          </table>
+        <div class="modal-body">
+          <div class="d-flex gap-2 mb-3">
+            <button id="moveOrderUpBtn" class="btn btn-outline-light" type="button">Move Up</button>
+            <button id="moveOrderDownBtn" class="btn btn-outline-light" type="button">Move Down</button>
+          </div>
+          <div class="order-list-wrap">
+            <table class="table table-hover table-sm align-middle mb-0">
+              <thead>
+                <tr><th style="width:60px;">#</th><th>Channel</th><th>Provider Group</th></tr>
+              </thead>
+              <tbody id="orderTable"></tbody>
+            </table>
+          </div>
+          <div class="small-muted mt-2">Select a row, move it, and save the manual channel order.</div>
         </div>
-
-        <div class="small-muted mt-2">
-          Select a row, then use Move Up / Move Down. Save Order rewrites custom.m3u.
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-success" id="saveOrderBtn">Save Order</button>
         </div>
-      </div>
-
-      <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-success" id="saveOrderBtn">Save Order</button>
       </div>
     </div>
   </div>
-</div>
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <div class="modal fade" id="sportsSelectionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered sports-selection-dialog">
+      <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-header border-secondary">
+          <div>
+            <h5 class="modal-title">Add selection</h5>
+            <div class="small-muted">Filter the cached sports catalog, then add one or more choices.</div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="sports-selection-toolbar mb-3">
+            <div>
+              <label class="form-label" for="sportsSelectionType">Type</label>
+              <select id="sportsSelectionType" class="form-select">
+                <option value="team">Team</option>
+                <option value="league">League</option>
+                <option value="conference">Conference</option>
+                <option value="sport">Sport</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" for="sportsSelectionSearch">Search</label>
+              <input id="sportsSelectionSearch" class="form-control" placeholder="Search teams…" autocomplete="off">
+            </div>
+            <div>
+              <label class="form-label" for="sportsSelectionSport">Sport</label>
+              <select id="sportsSelectionSport" class="form-select">
+                <option value="">All sports</option>
+              </select>
+            </div>
+          </div>
+          <div id="sportsSelectionResults" class="sports-selection-results" role="list"></div>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="sportsAddSelectedBtn" disabled>Add selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

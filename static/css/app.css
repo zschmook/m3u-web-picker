@@ -1,47 +1,84 @@
-body { background: #111827; color: #e5e7eb; }
-    .card { background: #1f2937; border-color: #374151; }
-    .form-control, .form-select { background: #111827; color: #e5e7eb; border-color: #4b5563; }
-    .form-control:focus, .form-select:focus { background: #111827; color: #e5e7eb; }
-    .form-control:disabled { background: #374151; color: #9ca3af; }
-    .table {
-      --bs-table-bg: #111827;
-      --bs-table-color: #e5e7eb;
-      --bs-table-border-color: #374151;
-      --bs-table-hover-bg: #1f2937;
-      --bs-table-hover-color: #ffffff;
-    }
-    .table-wrap { max-height: 58vh; overflow: auto; border: 1px solid #374151; border-radius: .5rem; }
-    thead th { position: sticky; top: 0; background: #1f2937 !important; z-index: 2; }
-    .small-muted { color: #9ca3af; font-size: .9rem; }
-    .url-cell { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .group-pill { cursor: pointer; }
-    .group-pill.active { outline: 2px solid #22c55e; }
-
-.toolbar-row{
-  display:flex;
-  align-items:flex-start;
-  gap:16px;
-  flex-wrap:wrap;
-}
-.toolbar-spacer{
-  flex:1;
-}
-.autosave-inline{
-  white-space:nowrap;
-  margin-top:28px;
+body {
+  background: #111827;
+  color: #e5e7eb;
 }
 
+.card {
+  background: #1f2937;
+  border-color: #374151;
+}
 
-/* v18 UI Cleanup v5 SD filter */
-#excludeSdChannels {
+.form-control,
+.form-select {
+  background: #111827;
+  color: #e5e7eb;
+  border-color: #4b5563;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.form-control:disabled {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.form-select option {
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.table {
+  --bs-table-bg: #111827;
+  --bs-table-color: #e5e7eb;
+  --bs-table-border-color: #374151;
+  --bs-table-hover-bg: #1f2937;
+  --bs-table-hover-color: #ffffff;
+}
+
+.table-wrap {
+  max-height: 58vh;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: .5rem;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: #1f2937 !important;
+  z-index: 2;
+}
+
+.small-muted {
+  color: #9ca3af;
+  font-size: .9rem;
+}
+
+.url-cell {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9ca3af;
+}
+
+.playlist-toolbar {
+  min-width: min(560px, 100%);
+  flex: 0 1 560px;
+}
+
+.group-pill {
   cursor: pointer;
 }
 
+.group-pill.active {
+  outline: 2px solid #22c55e;
+}
 
-
-
-
-/* v18 UI Cleanup v7 filter layout */
 .filter-panel {
   display: flex;
   flex-direction: column;
@@ -92,21 +129,6 @@ body { background: #111827; color: #e5e7eb; }
   margin-top: 2px;
 }
 
-@media (max-width: 1000px) {
-  .filter-toolbar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  .filter-autosave {
-    justify-self: start;
-    align-self: start;
-    padding-bottom: 0;
-  }
-}
-
-
-/* v18 UI Cleanup v9 order modal */
 .order-list-wrap {
   max-height: 60vh;
   overflow: auto;
@@ -122,14 +144,10 @@ body { background: #111827; color: #e5e7eb; }
   background: #374151 !important;
 }
 
-
-/* v11 Manage Order polish */
 #manageOrderBtn {
   margin-left: 6px;
 }
 
-
-/* V19.1 search clear button */
 .search-input-wrap {
   position: relative;
 }
@@ -152,104 +170,325 @@ body { background: #111827; color: #e5e7eb; }
   color: #ffffff;
 }
 
-
-/* V19.2 status polish */
 .status-line {
   color: #ffffff;
   font-weight: 700;
   margin-bottom: 6px;
 }
 
-
-/* Source Loaded privacy state */
-.source-loaded-placeholder {
-  font-weight: 700;
-  color: #e5e7eb;
+#excludeSdChannels {
+  cursor: pointer;
 }
 
-/* EPG source manager */
-.epg-add-row {
+/* Sports automation stays inside the existing single-page flow. */
+.sports-card {
+  border-color: #374151;
+}
+
+.sports-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sports-icon {
+  width: 42px;
+  height: 42px;
   display: grid;
-  grid-template-columns: minmax(150px, 220px) minmax(320px, 1fr) auto;
+  place-items: center;
+  border: 1px solid #4b5563;
+  border-radius: .6rem;
+  background: #111827;
+  font-size: 1.2rem;
+}
+
+.sports-subsection + .sports-subsection {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #374151;
+}
+
+.sports-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.sports-wide-field {
+  grid-column: span 2;
+}
+
+.sports-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+
+.sports-rules {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: end;
 }
 
-.epg-list {
-  font-size: .9rem;
-}
-
-.epg-table-wrap {
-  max-height: 260px;
-  overflow: auto;
+.sports-rule {
+  display: grid;
+  grid-template-columns: 110px minmax(220px, 1fr) minmax(190px, 260px) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
   border: 1px solid #374151;
-  border-radius: .5rem;
+  border-radius: .6rem;
+  background: #111827;
 }
 
-.epg-table-wrap th,
-.epg-table-wrap td {
-  white-space: nowrap;
+.sports-rule-type {
+  display: inline-block;
+  padding: .25rem .55rem;
+  border-radius: 999px;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-size: .75rem;
+  text-transform: capitalize;
 }
 
-.epg-name-cell {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sports-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.epg-url-cell {
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sports-preview-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid #374151;
+  border-radius: .6rem;
+  background: #111827;
 }
 
-.epg-served-cell {
-  min-width: 260px;
-  max-width: 380px;
+.sports-preview-number {
+  color: #93c5fd;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
-.epg-status-cell {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sports-footer {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid #374151;
+  border-radius: .6rem;
+  background: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-@media (max-width: 900px) {
-  .epg-add-row {
+.sports-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sports-selection-toolbar {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+}
+
+#sportsSelectionResults {
+  max-height: 430px;
+  overflow: auto;
+}
+
+.sports-result-button {
+  text-align: left;
+}
+
+.sports-error {
+  color: #fca5a5;
+  font-size: .9rem;
+  margin-bottom: 4px;
+}
+
+.sports-channel-subtitle {
+  color: #9ca3af;
+  font-size: .8rem;
+  margin-top: 2px;
+}
+
+.sports-generated-row > td {
+  background: rgba(29, 78, 216, .08) !important;
+}
+
+@media (max-width: 1100px) {
+  .filter-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .filter-autosave {
+    justify-self: start;
+    align-self: start;
+    padding-bottom: 0;
+  }
+
+  .sports-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sports-options {
     grid-template-columns: 1fr;
   }
 
-  .epg-table-wrap {
-    overflow-x: auto;
+  .sports-rule {
+    grid-template-columns: 100px minmax(180px, 1fr) minmax(170px, 220px) auto;
   }
 }
 
-/* v33 manager labels */
-.manager-heading {
-  margin-bottom: .65rem;
+@media (max-width: 760px) {
+  .filter-search,
+  .filter-provider,
+  .playlist-toolbar {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sports-header,
+  .sports-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sports-settings-grid,
+  .sports-rule,
+  .sports-selection-toolbar,
+  .sports-preview-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sports-wide-field {
+    grid-column: auto;
+  }
 }
 
-.manager-title {
-  color: #ffffff;
-  font-weight: 800;
-  letter-spacing: .035em;
-  font-size: 1.25rem;
-  line-height: 1.15;
-  display: flex;
+/* Sports controls inherit Bootstrap's dark-mode variables explicitly. Without
+   these overrides, Bootstrap's label/heading variables can render near-black
+   text on the dark card even though the page body is light text. */
+.sports-card {
+  --bs-body-color: #e5e7eb;
+  --bs-heading-color: #f3f4f6;
+  color: #e5e7eb;
+  color-scheme: dark;
+}
+
+.sports-card h2,
+.sports-card h3,
+.sports-card strong,
+.sports-card .form-label,
+.sports-card .form-check-label {
+  color: #e5e7eb;
+}
+
+.sports-card .small-muted {
+  color: #aeb8c7;
+}
+
+.sports-selection-dialog {
+  max-width: 760px;
+}
+
+.sports-selection-toolbar {
+  grid-template-columns: 150px minmax(220px, 1fr) 170px;
+}
+
+.sports-selection-results {
+  max-height: 430px;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: .6rem;
+  background: #111827;
+}
+
+.sports-selection-result {
+  display: grid;
+  grid-template-columns: auto 38px minmax(0, 1fr) auto;
   align-items: center;
-  gap: .55rem;
-  text-transform: uppercase;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #374151;
+  color: #e5e7eb;
+  cursor: pointer;
 }
 
-.manager-icon {
-  color: #0d6efd;
-  font-size: 1.15rem;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
+.sports-selection-result:last-child {
+  border-bottom: 0;
 }
 
-.form-label {
-  color: #ffffff;
+.sports-selection-result:hover {
+  background: #1f2937;
+}
+
+.sports-selection-result.is-added {
+  cursor: default;
+  opacity: .65;
+}
+
+.sports-selection-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: .35rem;
+  background: #1f2937;
+}
+
+.sports-selection-logo-fallback {
+  display: grid;
+  place-items: center;
+  border: 1px solid #4b5563;
+  color: #93c5fd;
   font-weight: 700;
+}
+
+.sports-selection-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.sports-selection-copy strong,
+.sports-selection-copy .small-muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sports-selection-plus {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #6b7280;
+  border-radius: .35rem;
+  color: #93c5fd;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+@media (max-width: 760px) {
+  .sports-selection-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sports-selection-dialog .form-label,
+.sports-selection-dialog strong,
+.sports-selection-dialog .modal-title {
+  color: #e5e7eb;
 }

@@ -1,151 +1,120 @@
-# M3U Web Picker v18
+# M3U Web Picker — Sports Automation v20.2
 
-Refactor release based on v17.
+A single-page Flask application for loading an M3U playlist, selecting channels, ordering the custom playlist, and automatically generating a daily sports channel block.
 
-Changes:
-- Moved embedded HTML from `app.py` into `templates/index.html`.
-- Moved API routes into `api/routes.py`.
-- Moved shared state/helpers into `core.py`.
-- Kept the v17 behavior:
-  - M3U URL/file loading
-  - cached startup restore
-  - SQLite selection persistence
-  - search-driven `Add all X` / `Remove all X`
-  - playlist endpoints
-  - EPG removed
+## Run the separate sports test container
 
-Run:
+This is the easiest way to test without touching an existing instance:
+
 ```bash
-pip install -r requirements.txt
-python3 app.py
-or
-python3 app.py -d (for debug on port 9998 so that you can run two at a time for testing)
+docker compose -f docker-compose.sports-debug.yml up -d --build
 ```
 
 Open:
+
 ```text
-http://localhost:9999
-or
-http://localhost:9998 (if in debug mode)
+http://localhost:10000
 ```
 
-Note:
-This is a structural cleanup before Docker. Keep running v17 while testing this separately.
+Docker Desktop shows it separately as:
 
+```text
+m3u-picker-sports-test
+```
 
-v18 UI tweak:
-- Added a `Saved X channels` button next to `Add all` / `Remove all`.
-- Clicking it filters the table to only currently selected/saved channels.
-- Clicking again returns to all channels.
+Source files are bind-mounted into the debug container, so Flask reloads after local code edits while the debug database remains inside the container.
 
+View logs:
 
-v18 UI tweak:
-- When `Saved X channels` mode is active, `Add all` and `Remove all` are disabled.
-- The saved button turns solid green while active.
+```bash
+docker compose -f docker-compose.sports-debug.yml logs -f
+```
 
+Stop only the test instance:
 
-v18 UI layout:
-- Search and Provider Group intended to sit on the same toolbar row.
-- Auto-Save status moved to the far right of that toolbar.
-- Layout-only cleanup before Docker work.
+```bash
+docker compose -f docker-compose.sports-debug.yml down
+```
 
+## Run the normal instance
 
-V_18_UI_Cleanup_v3:
-- Moved inline CSS out of `templates/index.html` into `static/css/app.css`.
-- Moved inline JavaScript out of `templates/index.html` into `static/js/app.js`.
-- `index.html` now loads assets through Flask `url_for`.
-- This is still a cleanup branch; keep v17 as the known-good running version while testing.
+```bash
+cp .env.example .env
+mkdir -p backups
+docker compose up -d --build
+```
 
+Open `http://localhost:9999`.
 
-V_18_UI_Cleanup_v4:
-- Reworked the filter toolbar so Search, Provider Group, and Auto-Save live on the same horizontal row.
-- Kept Add all / Remove all / Saved controls directly under the search input.
-- No backend changes.
+The normal Compose file runs Waitress and creates a verified SQLite backup each night at the configured `BACKUP_TIME` and `BACKUP_TIMEZONE`, without a host cron job. The live database stays inside the container at `/app/m3u_picker.db`; only backup copies are written through the `/backups` bind mount.
 
+## Private test data warning
 
-V_18_UI_Cleanup_v5:
-- Added `Don't show SD channels` checkbox above the search bar.
-- When enabled, channels from provider group `LOW BANDWIDTH` are hidden from the working list.
-- Search, Add all, and Remove all operate only on the filtered list.
+This test bundle preserves the `config.json` and cached provider playlist from the local repository you uploaded so the sports screen has real data immediately. Provider stream URLs can contain account credentials. Do not publish or send this ZIP to other people. To make a clean distributable copy, remove `config.json`, `master_playlist_cache.m3u`, `epg_cache.xml`, and generated playlists before building or sharing it.
 
+## Sports automation behavior
 
-V_18_UI_Cleanup_v6:
-- Fixed SD filter label visibility/readability.
-- Renamed SD filter to `Hide SD / LOW BANDWIDTH channels`.
-- Tightened toolbar alignment so Provider Group and Auto-save sit cleanly on the same row as Search.
+The Sports Automation section sits directly below the existing Channel Manager. It is not a tab and does not add a sidebar.
 
+Settings auto-save silently to SQLite. There is no Save button. The interface only displays an error when a setting cannot be saved. Refresh time is stored as a canonical 24-hour `HH:MM` value and formatted by the browser for display.
 
-V_18_UI_Cleanup_v7:
-- Reworked filter area into three clean rows:
-  1. Hide SD / LOW BANDWIDTH checkbox
-  2. Search, Provider Group, and Auto-save aligned vertically
-  3. Add all / Remove all / Saved buttons under Search
-- Fixes the vertical alignment issue from v6.
+Fresh installs start with **zero sports selections**. The cached catalog contains available choices, but the application never assumes which teams, leagues, conferences, or sports the user follows.
 
+Use **Add selection** to filter by type and sport, search the cached catalog, select one or more items, and add them to the nightly rules. Team names and logos are also discovered from permanent provider team feeds and cached in SQLite. Removing the final rule leaves the list empty after refreshes and container restarts.
 
-V_18_UI_Cleanup_v8:
-- Fixed empty `custom.m3u` generation after the v18 API/core refactor.
-- API routes now reference shared state through the `core` module instead of copied globals.
-- This keeps selected channel state and loaded channel catalog in sync when saving.
-- Removed the stale `/epg.xml` route from the cleanup branch.
+The top **Enable sports** switch is the master control. **Auto update** controls the nightly schedule, while **Update now** performs the same refresh immediately even when Auto update is off. Update now is disabled only when the master switch is off.
 
+At the configured update time, the application:
 
-V_18_UI_Cleanup_v9:
-- Added `python3 app.py -d` / `--dev` to run on port 9998.
-- Added Manage Order button next to custom.m3u URL.
-- Added Custom Playlist Order modal.
-- Selected channels now keep a persistent `sort_order` in SQLite.
-- Saving order rewrites `custom.m3u` in that order.
+1. Refreshes the provider M3U when a URL source is configured.
+2. Tries to derive and cache the provider's Xtream XMLTV feed.
+3. Matches the current sports day's events against saved rules.
+4. Builds home, away, national, event, Spanish, and backup feed variants when the provider data makes them identifiable.
+5. Replaces the previous generated sports rows in one SQLite transaction.
+6. Rewrites `custom.m3u` atomically.
 
+A failed provider refresh or failed scan leaves the previous generated sports channels intact. A successful scan with zero matches removes stale sports channels.
 
-V_18_UI_Cleanup_v10:
-- Fixed Manage Order modal not loading saved channels.
-- v9 wrote custom.m3u from DB order first, so newly selected in-memory channels could be missing from the DB/order payload.
-- v10 writes from the current selected_ids, preserves existing sort_order, and refreshes the DB before opening the order modal.
+Generated sports channels begin at the user-selected channel number, default `1000`. Each event reserves a configurable block, default `10`, so late-added alternate feeds do not renumber every following event.
 
+The Channel Manager displays generated sports entries automatically. Those rows are checked and locked because they are controlled by Sports Automation rather than manual selection. Manually selected channels keep their normal ordering and numbering.
 
-V_18_UI_Cleanup_v12:
-- Removed the search textbox from the Manage Order popup.
-- Popup now focuses only on Move Up / Move Down and Save Order.
+## Current matching strategy
 
+This MVP uses provider data first:
 
-V_18_UI_Cleanup_v15:
-- Rebuilt from v12.
-- Custom Groups UI is hidden using `d-none` instead of being commented out.
-- This preserves the DOM elements that the existing JavaScript expects.
-- Provider URL loading should work again.
+- M3U channel names and groups
+- M3U `tvg-id`, `tvg-name`, and `tvg-logo`
+- Dynamic event dates embedded in provider channel names
+- Permanent team streams for home/away feed association
+- XMLTV programme data when the Xtream XMLTV endpoint is available
 
+It does not require an external sports API. The cached catalog is designed so external metadata enrichment can be added later without changing the UI or rule model.
 
-# V19 M3U Proxy
+## v20.2 QA fixes
 
-Promoted from the v18 UI cleanup branch.
+- No demo sports rules are inserted into new databases; the untouched v20.1 demo set is removed once during upgrade.
+- Removing every rule no longer causes demo selections to return.
+- The Add Selection dialog is compact, searchable, sport-filtered, logo-aware, and supports adding several choices at once.
+- Dark-theme labels and headings remain readable.
+- Successful URL/file loads clear the visible source field and show `Source loaded.`
+- Invalid refresh times cannot corrupt the scheduler or break a manual update.
+- User-facing update failures no longer expose Python exceptions or credential-bearing URLs.
+- Stream URLs shown in the channel table mask both Xtream path credentials.
 
-New in V19:
-- Auto-generates `tvg-chno` channel numbers in `custom.m3u`.
-- Channel numbers follow the saved custom playlist order.
-- Reordering channels in Manage Order rewrites channel numbers on save.
-- Existing provider `tvg-chno` values are replaced.
-- Missing `tvg-chno` values are added.
-- Custom Groups UI remains hidden.
+## Manual backup
 
+```bash
+docker compose exec -T m3u-picker python /app/backup_db.py
+```
 
-## V19.1
+## Local Python run
 
-- Added an inline `X` button inside the search box.
-- The button appears only when search text exists.
-- Clicking it clears search, refreshes the channel list, and keeps focus in the search box.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 app.py --dev
+```
 
-
-## V19.2
-
-- Moved status display above the Hide SD / LOW BANDWIDTH checkbox.
-- Added inline `Status:` label.
-- Made status line bold white for better visibility.
-
-
-## V20 Source Loaded + Export
-
-- Restored `Source Loaded` behavior after successful channel table load.
-- Source controls lock only after URL/file/cached channels successfully load.
-- Export remains after Manage Order.
-- `/export` downloads the canonical `custom.m3u` as `download.m3u`.
+Open `http://localhost:9998`.

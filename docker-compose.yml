@@ -1,7 +1,50 @@
+# Normal long-running instance.
+#
+# Host paths and container paths are different things:
+#   - The LEFT side/source is a folder on the computer running Docker.
+#   - The RIGHT side/target is the path visible inside the Linux container.
+#
+# The app always writes nightly DB backups to /backups INSIDE the container.
+# M3U_BACKUP_DIR chooses which HOST folder Docker maps to /backups.
+#
+# Examples for a .env file next to this Compose file:
+#   Linux:   M3U_BACKUP_DIR=/home/me/Documents/m3u_picker/nightly
+#   macOS:   M3U_BACKUP_DIR=/Users/me/Documents/m3u_picker/nightly
+#   Windows: M3U_BACKUP_DIR=C:/Users/me/Documents/m3u_picker/nightly
+#   Portable default: M3U_BACKUP_DIR=./backups
+#
+# The live DB is intentionally NOT mounted. It stays at /app/m3u_picker.db in
+# the container and is copied safely to the host backup folder each night.
+name: m3u-picker
+
 services:
   m3u-picker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+
     container_name: m3u-picker
+
     ports:
-      - "9999:9999"
+      # HOST:CONTAINER. Change M3U_HOST_PORT if 9999 is already occupied.
+      - "${M3U_HOST_PORT:-9999}:9999"
+
+    environment:
+      # Enable the in-app nightly SQLite backup scheduler. No host cron needed.
+      M3U_BACKUP_ENABLED: "true"
+      M3U_BACKUP_CONTAINER_DIR: /backups
+      BACKUP_TIME: "03:15"
+      BACKUP_TIMEZONE: "America/New_York"
+      BACKUP_RETENTION_DAYS: "30"
+
+      # Master playlist refresh remains at 3:00 AM. Sports has its own time in
+      # the web UI and defaults to 3:00 AM as well.
+      MASTER_REFRESH_HOUR: "3"
+      MASTER_REFRESH_MINUTE: "0"
+
+    volumes:
+      - type: bind
+        source: "${M3U_BACKUP_DIR:-./backups}"
+        target: /backups
+
     restart: unless-stopped

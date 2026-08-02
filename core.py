@@ -1,51 +1,53 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import gzip
 import json
+import os
 import re
-import ssl
 import sqlite3
 import threading
 import time
-import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import List
+from typing import Iterable, List
 
-from flask import Flask, Response, jsonify, request, send_file
+import sports
+from backup import create_database_backup
 
 
-# All app-generated files must stay inside this folder.
 APP_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = APP_DIR / "exports"
-EXPORT_DIR.mkdir(exist_ok=True)
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = APP_DIR / "m3u_picker.db"
 CONFIG_PATH = APP_DIR / "config.json"
 MASTER_CACHE_PATH = APP_DIR / "master_playlist_cache.m3u"
-EPG_DIR = APP_DIR / "epg"
-EPG_DIR.mkdir(exist_ok=True)
+EPG_CACHE_PATH = APP_DIR / "epg_cache.xml"
 
 PLAYLIST_NAME = "custom.m3u"
 PLAYLIST_PATH = EXPORT_DIR / PLAYLIST_NAME
-PORT = 9999
+PORT = int(os.environ.get("M3U_PORT", "9999"))
+DEV_PORT = int(os.environ.get("M3U_DEV_PORT", "9998"))
 
-SCHEDULE_HOUR = 3
-SCHEDULE_MINUTE = 0
-EPG_REFRESH_OFFSET_MINUTES = 15
-
+SCHEDULE_HOUR = int(os.environ.get("MASTER_REFRESH_HOUR", "3"))
+SCHEDULE_MINUTE = int(os.environ.get("MASTER_REFRESH_MINUTE", "0"))
 
 channels: List[dict] = []
 selected_ids: set[int] = set()
 last_source_url = ""
-last_refresh = None
+last_refresh: str | None = None
 source_mode = ""
-epg_sources: list[dict] = []
 scheduler_started = False
-epg_startup_cache_started = False
+
+state_lock = threading.RLock()
+scan_lock = threading.Lock()
+
+
+class SportsScanError(RuntimeError):
+    """Safe, user-facing failure for an explicit sports update."""
 
 
 @dataclass
@@ -55,11 +57,19 @@ class Entry:
     group: str
     url: str
     raw: list[str]
+    tvg_id: str = ""
+    tvg_name: str = ""
+    tvg_logo: str = ""
+    tvg_chno: str = ""
+    attrs: dict[str, str] | None = None
+    is_sports_generated: bool = False
 
 
-def db_connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+def db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS selections (
             key TEXT PRIMARY KEY,
             name TEXT,
@@ -67,20 +77,24 @@ def db_connect():
             url TEXT NOT NULL,
             sort_order INTEGER
         )
-    """)
+        """
+    )
     try:
         conn.execute("ALTER TABLE selections ADD COLUMN sort_order INTEGER")
     except sqlite3.OperationalError:
         pass
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS custom_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             slug TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL
         )
-    """)
-    conn.execute("""
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS group_channels (
             group_id INTEGER NOT NULL,
             channel_key TEXT NOT NULL,
@@ -90,8 +104,10 @@ def db_connect():
             PRIMARY KEY (group_id, channel_key),
             FOREIGN KEY (group_id) REFERENCES custom_groups(id) ON DELETE CASCADE
         )
-    """)
+        """
+    )
     conn.commit()
+    sports.init_db(DB_PATH)
     return conn
 
 
@@ -100,13 +116,13 @@ def slugify(name: str) -> str:
     return slug or "group"
 
 
-def unique_slug(conn, name: str) -> str:
+def unique_slug(conn: sqlite3.Connection, name: str) -> str:
     base = slugify(name)
     slug = base
-    i = 2
+    index = 2
     while conn.execute("SELECT 1 FROM custom_groups WHERE slug = ?", (slug,)).fetchone():
-        slug = f"{base}-{i}"
-        i += 1
+        slug = f"{base}-{index}"
+        index += 1
     return slug
 
 
@@ -114,27 +130,38 @@ def channel_key(channel: dict) -> str:
     return str(channel.get("url", "")).strip()
 
 
+def parse_extinf_attributes(line: str) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in re.findall(r'([A-Za-z0-9_-]+)="([^"]*)"', line)
+    }
+
+
 def rewrite_extinf_attr(line: str, key: str, value: str) -> str:
     if not line.startswith("#EXTINF"):
         return line
-
+    escaped = str(value).replace('"', "'")
     if re.search(rf'{re.escape(key)}="[^"]*"', line):
-        return re.sub(rf'{re.escape(key)}="[^"]*"', f'{key}="{value}"', line)
-
+        return re.sub(rf'{re.escape(key)}="[^"]*"', f'{key}="{escaped}"', line)
     if "," in line:
         left, right = line.rsplit(",", 1)
-        return f'{left} {key}="{value}",{right}'
-
-    return f'{line} {key}="{value}"'
+        return f'{left} {key}="{escaped}",{right}'
+    return f'{line} {key}="{escaped}"'
 
 
 def apply_channel_number(channel: dict, number: int) -> list[str]:
     raw = list(channel.get("raw", []))
     if not raw:
         return raw
-
     raw[0] = rewrite_extinf_attr(raw[0], "tvg-chno", str(number))
     return raw
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
 
 
 def load_selected_keys_from_db() -> set[str]:
@@ -158,27 +185,25 @@ def save_selected_channels_to_db(selected_channels: list[dict]) -> None:
         ) + 1
 
         conn.execute("DELETE FROM selections")
-        for ch in selected_channels:
-            key = channel_key(ch)
+        for channel in selected_channels:
+            key = channel_key(channel)
             if not key:
                 continue
-
             sort_order = existing_order.get(key)
             if sort_order is None:
                 sort_order = next_order
                 next_order += 1
-
             conn.execute(
                 """
                 INSERT OR REPLACE INTO selections
-                (key, name, group_title, url, sort_order)
+                    (key, name, group_title, url, sort_order)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     key,
-                    ch.get("name", ""),
-                    ch.get("group", ""),
-                    ch.get("url", ""),
+                    channel.get("name", ""),
+                    channel.get("group", ""),
+                    channel.get("url", ""),
                     sort_order,
                 ),
             )
@@ -196,7 +221,6 @@ def selected_channels_in_order() -> list[dict]:
         ordered_keys = [row[0] for row in rows]
     finally:
         conn.close()
-
     current = channel_by_key_map()
     return [current[key] for key in ordered_keys if key in current]
 
@@ -213,7 +237,6 @@ def selected_channel_order_payload() -> list[dict]:
         ).fetchall()
     finally:
         conn.close()
-
     return [
         {
             "key": row[0],
@@ -229,11 +252,7 @@ def selected_channel_order_payload() -> list[dict]:
 def save_channel_order(keys: list[str]) -> int:
     conn = db_connect()
     try:
-        existing = {
-            row[0]
-            for row in conn.execute("SELECT key FROM selections").fetchall()
-        }
-
+        existing = {row[0] for row in conn.execute("SELECT key FROM selections")}
         order = 0
         for key in keys:
             if key in existing:
@@ -242,7 +261,6 @@ def save_channel_order(keys: list[str]) -> int:
                     (order, key),
                 )
                 order += 1
-
         conn.commit()
         return order
     finally:
@@ -253,9 +271,9 @@ def apply_saved_selections_to_loaded_channels() -> None:
     global selected_ids
     saved_keys = load_selected_keys_from_db()
     selected_ids = {
-        int(ch["id"])
-        for ch in channels
-        if channel_key(ch) in saved_keys
+        int(channel["id"])
+        for channel in channels
+        if channel_key(channel) in saved_keys
     }
 
 
@@ -274,32 +292,16 @@ def save_config() -> None:
         "source_mode": source_mode,
         "last_refresh": last_refresh,
         "schedule": {"hour": SCHEDULE_HOUR, "minute": SCHEDULE_MINUTE},
-        "epg_sources": epg_sources,
-        "epg_schedule": {"offset_minutes_after_m3u": EPG_REFRESH_OFFSET_MINUTES},
     }
-    CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write_text(CONFIG_PATH, json.dumps(data, indent=2))
 
 
 def restore_config() -> None:
-    global last_source_url, source_mode, last_refresh, epg_sources
+    global last_source_url, source_mode, last_refresh
     data = load_config()
     last_source_url = str(data.get("source_url", "")).strip()
     source_mode = str(data.get("source_mode", "")).strip()
     last_refresh = data.get("last_refresh")
-    epg_sources = []
-    for source in data.get("epg_sources", []) or []:
-        name = str(source.get("name", "")).strip()
-        url = str(source.get("url", "")).strip()
-        if not name or not url:
-            continue
-        source_id = normalize_epg_id(source.get("id") or name)
-        epg_sources.append({
-            "id": source_id,
-            "name": name,
-            "url": url,
-            "last_refresh": source.get("last_refresh"),
-            "last_error": source.get("last_error"),
-        })
 
 
 def parse_m3u_text(text: str) -> list[dict]:
@@ -308,23 +310,21 @@ def parse_m3u_text(text: str) -> list[dict]:
     current: list[str] = []
     name = ""
     group = ""
+    attrs: dict[str, str] = {}
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-
         if stripped.startswith("#EXTINF"):
             current = [stripped]
             name = stripped.rsplit(",", 1)[1].strip() if "," in stripped else ""
-            match = re.search(r'group-title="([^"]*)"', stripped)
-            group = match.group(1) if match else ""
+            attrs = parse_extinf_attributes(stripped)
+            group = attrs.get("group-title", "")
             continue
-
         if current and stripped.startswith("#"):
             current.append(stripped)
             continue
-
         if current and not stripped.startswith("#"):
             current.append(stripped)
             parsed.append(
@@ -334,90 +334,40 @@ def parse_m3u_text(text: str) -> list[dict]:
                     group=group,
                     url=stripped,
                     raw=current.copy(),
+                    tvg_id=attrs.get("tvg-id", ""),
+                    tvg_name=attrs.get("tvg-name", ""),
+                    tvg_logo=attrs.get("tvg-logo", ""),
+                    tvg_chno=attrs.get("tvg-chno", ""),
+                    attrs=dict(attrs),
                 )
             )
             current = []
+            attrs = {}
 
     return [asdict(entry) for entry in parsed]
 
 
-def download_url_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict]:
-    req = urllib.request.Request(
+def download_url_bytes(url: str, timeout: int = 90) -> bytes:
+    request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "M3U-Web-Picker/1.0",
-            "Accept": "*/*",
-            # Do not let servers apply transparent HTTP compression.
-            # XMLTV .gz URLs are still handled explicitly below.
-            "Accept-Encoding": "identity",
-        },
+        headers={"User-Agent": "M3U-Web-Picker/2.0", "Accept": "*/*"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read()
-        headers = dict(response.headers.items())
-    return raw, headers
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
 
 
 def download_url_text(url: str, timeout: int = 90) -> str:
-    raw, headers = download_url_bytes(url, timeout=timeout)
-    return raw.decode("utf-8-sig", errors="replace")
+    return download_url_bytes(url, timeout).decode("utf-8-sig", errors="replace")
 
 
-def download_epg_url_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict]:
-    """Download provider EPG bytes only.
-
-    Some XMLTV providers have broken/self-signed/expired TLS chains. Ignore SSL
-    verification here only; M3U downloading and M3U serving continue to use the
-    existing code paths unchanged.
-    """
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "M3U-Web-Picker/1.0",
-            "Accept": "application/xml,text/xml,*/*",
-            "Accept-Encoding": "identity",
-        },
-    )
-    context = ssl._create_unverified_context() if url.lower().startswith("https://") else None
-    with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
-        raw = response.read()
-        headers = dict(response.headers.items())
-    return raw, headers
-
-
-def download_epg_bytes(url: str, timeout: int = 90) -> bytes:
-    """Download an XMLTV EPG and return XML bytes suitable to serve directly.
-
-    Preserve provider bytes instead of decoding/re-encoding so XML declarations
-    and non-UTF-8 encodings remain intact for clients like Jellyfin. If the
-    provider URL/headers indicate gzip, decompress once and cache the XML bytes.
-    """
-    raw, headers = download_epg_url_bytes(url, timeout=timeout)
-    content_encoding = str(headers.get("Content-Encoding", "")).lower()
-    content_type = str(headers.get("Content-Type", "")).lower()
-    is_gzip = (
-        "gzip" in content_encoding
-        or "gzip" in content_type
-        or url.lower().endswith((".gz", ".gzip"))
-        or raw.startswith(b"\x1f\x8b")
-    )
-    if is_gzip:
-        raw = gzip.decompress(raw)
-    return raw
-
-
-def download_epg_text(url: str, timeout: int = 90) -> str:
-    return download_epg_bytes(url, timeout=timeout).decode("utf-8-sig", errors="replace")
-
-
-def download_m3u_text(url: str, timeout: int = 60) -> str:
+def download_m3u_text(url: str, timeout: int = 90) -> str:
     return download_url_text(url, timeout=timeout)
 
 
-
 def selected_channels_from_selected_ids_in_order() -> list[dict]:
-    selected_channels = [ch for ch in channels if int(ch["id"]) in selected_ids]
-
+    selected_channels = [
+        channel for channel in channels if int(channel["id"]) in selected_ids
+    ]
     conn = db_connect()
     try:
         existing_order = {
@@ -427,38 +377,51 @@ def selected_channels_from_selected_ids_in_order() -> list[dict]:
     finally:
         conn.close()
 
-    def sort_key(ch: dict):
-        key = channel_key(ch)
+    def sort_key(channel: dict):
+        key = channel_key(channel)
         order = existing_order.get(key)
         if order is None:
-            return (1, ch.get("name", "").lower(), key)
-        return (0, order, ch.get("name", "").lower())
+            return (1, channel.get("name", "").lower(), key)
+        return (0, order, channel.get("name", "").lower())
 
     return sorted(selected_channels, key=sort_key)
 
 
 def write_current_playlist() -> int:
-    selected_channels = selected_channels_from_selected_ids_in_order()
-
-    lines = ["#EXTM3U"]
-    for number, ch in enumerate(selected_channels, start=1):
-        lines.extend(apply_channel_number(ch, number))
-
-    PLAYLIST_PATH.write_text("\n".join(lines), encoding="utf-8")
-    save_selected_channels_to_db(selected_channels)
-    return len(selected_channels)
+    with state_lock:
+        manual_channels = selected_channels_from_selected_ids_in_order()
+        generated = sports.generated_rows(DB_PATH)
+        lines = ["#EXTM3U"]
+        for number, channel in enumerate(manual_channels, start=1):
+            lines.extend(apply_channel_number(channel, number))
+        for row in generated:
+            lines.extend(row.get("raw", []))
+        atomic_write_text(PLAYLIST_PATH, "\n".join(lines) + "\n")
+        save_selected_channels_to_db(manual_channels)
+        return len(manual_channels) + len(generated)
 
 
 def channel_by_key_map() -> dict[str, dict]:
-    return {channel_key(ch): ch for ch in channels if channel_key(ch)}
+    return {channel_key(channel): channel for channel in channels if channel_key(channel)}
+
+
+def combined_channels_for_api() -> list[dict]:
+    # Generated sports channels are displayed first so the Channel Manager visibly
+    # changes after a scan. Their negative IDs prevent them from being treated as
+    # manual selections by the existing selection endpoint.
+    return [*sports.generated_channel_payloads(DB_PATH), *channels]
+
+
+def selected_ids_payload() -> list[int]:
+    generated_ids = [channel["id"] for channel in sports.generated_channel_payloads(DB_PATH)]
+    return sorted([*selected_ids, *generated_ids])
 
 
 def group_channels_for_slug(slug: str) -> tuple[str, list[dict]]:
     conn = db_connect()
     try:
         group = conn.execute(
-            "SELECT id, name FROM custom_groups WHERE slug = ?",
-            (slug,),
+            "SELECT id, name FROM custom_groups WHERE slug = ?", (slug,)
         ).fetchone()
         if not group:
             return "", []
@@ -472,13 +435,8 @@ def group_channels_for_slug(slug: str) -> tuple[str, list[dict]]:
         ]
     finally:
         conn.close()
-
     current = channel_by_key_map()
-    output = []
-    for key in keys:
-        if key in current:
-            output.append(current[key])
-    return group_name, output
+    return group_name, [current[key] for key in keys if key in current]
 
 
 def all_grouped_channels() -> list[dict]:
@@ -492,125 +450,124 @@ def all_grouped_channels() -> list[dict]:
         ]
     finally:
         conn.close()
-
     current = channel_by_key_map()
     return [current[key] for key in keys if key in current]
+
+
+def list_custom_groups() -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """
+            SELECT g.id, g.name, g.slug, g.created_at, COUNT(gc.channel_key)
+            FROM custom_groups g
+            LEFT JOIN group_channels gc ON gc.group_id = g.id
+            GROUP BY g.id
+            ORDER BY g.name COLLATE NOCASE
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        {
+            "id": row[0],
+            "name": row[1],
+            "slug": row[2],
+            "created_at": row[3],
+            "channel_count": row[4],
+        }
+        for row in rows
+    ]
+
+
+def create_custom_group(name: str) -> dict:
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("Group name is required.")
+    conn = db_connect()
+    try:
+        slug = unique_slug(conn, clean_name)
+        cursor = conn.execute(
+            "INSERT INTO custom_groups(name, slug, created_at) VALUES (?, ?, ?)",
+            (clean_name, slug, datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return {"id": cursor.lastrowid, "name": clean_name, "slug": slug}
+    finally:
+        conn.close()
+
+
+def group_member_keys(slug: str) -> list[str]:
+    conn = db_connect()
+    try:
+        group = conn.execute("SELECT id FROM custom_groups WHERE slug = ?", (slug,)).fetchone()
+        if not group:
+            return []
+        rows = conn.execute(
+            "SELECT channel_key FROM group_channels WHERE group_id = ?",
+            (group[0],),
+        ).fetchall()
+        return [row[0] for row in rows]
+    finally:
+        conn.close()
+
+
+def add_channels_to_group(slug: str, keys: Iterable[str]) -> int:
+    current = channel_by_key_map()
+    conn = db_connect()
+    try:
+        group = conn.execute("SELECT id FROM custom_groups WHERE slug = ?", (slug,)).fetchone()
+        if not group:
+            raise ValueError("Group not found.")
+        added = 0
+        for key in keys:
+            channel = current.get(key)
+            if not channel:
+                continue
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO group_channels
+                    (group_id, channel_key, name, group_title, url)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (group[0], key, channel.get("name", ""), channel.get("group", ""), channel.get("url", "")),
+            )
+            added += cursor.rowcount
+        conn.commit()
+        return added
+    finally:
+        conn.close()
+
+
+def remove_channels_from_group(slug: str, keys: Iterable[str]) -> int:
+    conn = db_connect()
+    try:
+        group = conn.execute("SELECT id FROM custom_groups WHERE slug = ?", (slug,)).fetchone()
+        if not group:
+            raise ValueError("Group not found.")
+        removed = 0
+        for key in keys:
+            cursor = conn.execute(
+                "DELETE FROM group_channels WHERE group_id = ? AND channel_key = ?",
+                (group[0], key),
+            )
+            removed += cursor.rowcount
+        conn.commit()
+        return removed
+    finally:
+        conn.close()
 
 
 def m3u_from_channels(items: list[dict]) -> str:
     lines = ["#EXTM3U"]
     seen = set()
-    for ch in items:
-        key = channel_key(ch)
+    for channel in items:
+        key = channel_key(channel)
         if not key or key in seen:
             continue
         seen.add(key)
-        lines.extend(ch["raw"])
+        lines.extend(channel["raw"])
     return "\n".join(lines) + "\n"
-
-
-
-def normalize_epg_id(source_id: str) -> str:
-    return slugify(str(source_id or "").removesuffix(".xml"))
-
-
-def epg_cache_path(source_id: str) -> Path:
-    return EPG_DIR / f"{normalize_epg_id(source_id)}.xml"
-
-
-def epg_public_url(source_id: str) -> str:
-    return f"/epg/{normalize_epg_id(source_id)}.xml"
-
-
-def find_epg_source(source_id: str) -> dict | None:
-    wanted = normalize_epg_id(source_id)
-    return next((item for item in epg_sources if normalize_epg_id(item.get("id")) == wanted), None)
-
-
-def epg_sources_payload() -> list[dict]:
-    payload = []
-    for source in epg_sources:
-        source_id = normalize_epg_id(source.get("id"))
-        item = dict(source)
-        item["id"] = source_id
-        item["url_path"] = epg_public_url(source_id)
-        item["cached"] = epg_cache_path(source_id).exists()
-        payload.append(item)
-    return payload
-
-
-def add_epg_source(name: str, url: str) -> dict:
-    global epg_sources
-    name = name.strip()
-    url = url.strip()
-    if not name:
-        raise ValueError("EPG name is required.")
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("EPG URL must start with http:// or https://")
-
-    source_id = unique_epg_id(name)
-    source = {
-        "id": source_id,
-        "name": name,
-        "url": url,
-        "last_refresh": None,
-        "last_error": None,
-    }
-    epg_sources.append(source)
-    save_config()
-    return source
-
-
-def unique_epg_id(name: str) -> str:
-    base = normalize_epg_id(name)
-    existing = {normalize_epg_id(source.get("id", "")) for source in epg_sources}
-    source_id = base
-    i = 2
-    while source_id in existing:
-        source_id = f"{base}-{i}"
-        i += 1
-    return source_id
-
-
-def delete_epg_source(source_id: str) -> bool:
-    global epg_sources
-    wanted = normalize_epg_id(source_id)
-    before = len(epg_sources)
-    epg_sources = [source for source in epg_sources if normalize_epg_id(source.get("id")) != wanted]
-    try:
-        epg_cache_path(wanted).unlink(missing_ok=True)
-    except Exception:
-        pass
-    save_config()
-    return len(epg_sources) != before
-
-def refresh_epg_source(source_id: str) -> tuple[bool, str]:
-    source_id = normalize_epg_id(source_id)
-    source = find_epg_source(source_id)
-    if not source:
-        return False, "EPG source not found."
-
-    try:
-        raw = download_epg_bytes(source["url"], timeout=90)
-        epg_cache_path(source_id).write_bytes(raw)
-        source["last_refresh"] = datetime.now().isoformat(timespec="seconds")
-        source["last_error"] = None
-        save_config()
-        return True, f"Refreshed {source['name']}."
-    except Exception as exc:
-        source["last_error"] = str(exc)
-        save_config()
-        return False, str(exc)
-
-
-def refresh_all_epg_sources() -> dict:
-    results = []
-    ok_count = 0
-    for source in list(epg_sources):
-        ok, message = refresh_epg_source(source["id"])
-        ok_count += 1 if ok else 0
-        results.append({"id": source["id"], "name": source["name"], "ok": ok, "message": message})
-    return {"count": len(results), "ok_count": ok_count, "results": results}
 
 
 def refresh_master_from_url() -> tuple[bool, str]:
@@ -619,81 +576,165 @@ def refresh_master_from_url() -> tuple[bool, str]:
         return False, "No source URL configured."
     try:
         text = download_m3u_text(last_source_url)
-        MASTER_CACHE_PATH.write_text(text, encoding="utf-8")
-        channels = parse_m3u_text(text)
-        apply_saved_selections_to_loaded_channels()
-        write_current_playlist()
-        last_refresh = datetime.now().isoformat(timespec="seconds")
-        source_mode = "url"
-        save_config()
+        parsed = parse_m3u_text(text)
+        with state_lock:
+            atomic_write_text(MASTER_CACHE_PATH, text)
+            channels = parsed
+            sports.discover_catalog_from_channels(DB_PATH, channels)
+            apply_saved_selections_to_loaded_channels()
+            last_refresh = datetime.now().astimezone().isoformat(timespec="seconds")
+            source_mode = "url"
+            save_config()
+            write_current_playlist()
         return True, f"Refreshed {len(channels)} channels."
     except Exception as exc:
         return False, str(exc)
 
 
+def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> dict:
+    settings = sports.get_settings(DB_PATH)
+    if not settings.get("enabled"):
+        raise SportsScanError("Turn on Sports Automation before updating sports channels.")
+    if not channels:
+        raise SportsScanError("Load an M3U source before updating sports channels.")
+    if not scan_lock.acquire(blocking=False):
+        raise SportsScanError("A sports update is already running.")
+    try:
+        if refresh_source and source_mode == "url" and last_source_url:
+            refreshed, message = refresh_master_from_url()
+            if not refreshed:
+                sports.record_scan_failure(DB_PATH, "Provider playlist refresh failed.", trigger)
+                print("Provider refresh failed during sports update.")
+                raise SportsScanError(
+                    "Could not refresh the provider playlist. Existing sports channels were kept."
+                )
 
-def seconds_until_next_run(hour: int, minute: int) -> float:
-    now = datetime.now()
-    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
+        # EPG is enrichment. A failed XMLTV refresh falls back to the cached EPG
+        # and then to M3U-only matching; it does not delete yesterday's channels.
+        if last_source_url:
+            sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH)
+
+        sports.discover_catalog_from_channels(DB_PATH, channels)
+        result = sports.scan_channels(
+            DB_PATH,
+            list(channels),
+            EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+            trigger=trigger,
+        )
+        write_current_playlist()
+        return result
+    except SportsScanError:
+        raise
+    except Exception as exc:
+        # Keep credentials and Python internals out of the browser. The detailed
+        # exception remains available in Docker logs for debugging.
+        print(f"Sports update failed ({type(exc).__name__}).")
+        raise SportsScanError(
+            "Sports update failed. Existing sports channels were kept."
+        ) from exc
+    finally:
+        scan_lock.release()
+
+
+def sports_number_conflicts() -> int:
+    settings = sports.get_settings(DB_PATH)
+    start = int(settings.get("start_channel", 1000))
+    manual_count = len(selected_channels_from_selected_ids_in_order())
+    return max(0, manual_count - start + 1)
+
+
+def _date_from_iso(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).date().isoformat()
+    except Exception:
+        return ""
 
 
 def scheduler_loop() -> None:
+    last_backup_date = ""
     while True:
-        time.sleep(seconds_until_next_run(SCHEDULE_HOUR, SCHEDULE_MINUTE))
-        refresh_master_from_url()
-        time.sleep(EPG_REFRESH_OFFSET_MINUTES * 60)
-        refresh_all_epg_sources()
+        try:
+            now = datetime.now().astimezone()
+            today = now.date().isoformat()
+
+            master_refreshed = False
+            if (
+                source_mode == "url"
+                and last_source_url
+                and (now.hour, now.minute) == (SCHEDULE_HOUR, SCHEDULE_MINUTE)
+                and _date_from_iso(last_refresh) != today
+            ):
+                master_refreshed, _message = refresh_master_from_url()
+
+            if sports.should_run_scheduled(DB_PATH, now):
+                try:
+                    # Avoid downloading the provider playlist twice when the master
+                    # refresh and sports refresh share the same minute.
+                    run_sports_scan(
+                        trigger="scheduled",
+                        refresh_source=not master_refreshed,
+                    )
+                except Exception as exc:
+                    print(f"Scheduled sports scan failed: {exc}")
+
+            backup_enabled = os.environ.get("M3U_BACKUP_ENABLED", "false").lower() in {
+                "1", "true", "yes", "on"
+            }
+            backup_time = os.environ.get("BACKUP_TIME", "03:15")
+            backup_timezone_name = os.environ.get("BACKUP_TIMEZONE", "America/New_York")
+            try:
+                backup_hour, backup_minute = [int(part) for part in backup_time.split(":", 1)]
+                backup_now = now.astimezone(ZoneInfo(backup_timezone_name))
+            except Exception:
+                backup_hour, backup_minute = 3, 15
+                backup_now = now.astimezone(ZoneInfo("America/New_York"))
+            backup_date = backup_now.date().isoformat()
+            if (
+                backup_enabled
+                and (backup_now.hour, backup_now.minute) == (backup_hour, backup_minute)
+                and last_backup_date != backup_date
+            ):
+                backup_dir = Path(os.environ.get("M3U_BACKUP_CONTAINER_DIR", "/backups"))
+                retention = int(os.environ.get("BACKUP_RETENTION_DAYS", "30"))
+                create_database_backup(DB_PATH, backup_dir, retention)
+                last_backup_date = backup_date
+        except Exception as exc:
+            print(f"Scheduler error: {exc}")
+        time.sleep(30)
 
 
 def start_scheduler_once() -> None:
     global scheduler_started
-    if scheduler_started:
+    if scheduler_started or os.environ.get("M3U_DISABLE_SCHEDULER", "").lower() in {"1", "true", "yes"}:
+        return
+    # Flask's debug reloader imports the app twice. Skip the parent process and
+    # start the scheduler only inside the serving child.
+    if os.environ.get("FLASK_DEBUG") == "1" and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         return
     scheduler_started = True
-    threading.Thread(target=scheduler_loop, daemon=True).start()
-
-
-def refresh_missing_epg_caches() -> None:
-    """Generate any missing EPG cache files after startup.
-
-    EPG source configuration and EPG cache files are separate. On a fresh
-    install/rebuild the config can exist while the cache directory is empty,
-    so generate missing caches immediately instead of waiting for the 3:15 AM
-    scheduled refresh.
-    """
-    for source in list(epg_sources):
-        source_id = normalize_epg_id(source.get("id"))
-        if source_id and not epg_cache_path(source_id).exists():
-            refresh_epg_source(source_id)
-
-
-def start_epg_startup_cache_once() -> None:
-    global epg_startup_cache_started
-    if epg_startup_cache_started:
-        return
-    epg_startup_cache_started = True
-    threading.Thread(target=refresh_missing_epg_caches, daemon=True).start()
+    threading.Thread(target=scheduler_loop, daemon=True, name="m3u-scheduler").start()
 
 
 restore_config()
 
+
 def load_cached_master_playlist_on_startup() -> None:
     global channels
-
+    db_connect().close()
     if not MASTER_CACHE_PATH.exists():
+        write_current_playlist()
         return
-
     try:
         text = MASTER_CACHE_PATH.read_text(encoding="utf-8-sig", errors="replace")
         channels = parse_m3u_text(text)
+        sports.discover_catalog_from_channels(DB_PATH, channels)
         apply_saved_selections_to_loaded_channels()
         write_current_playlist()
     except Exception as exc:
         print(f"Startup cache load failed: {exc}")
 
+
 load_cached_master_playlist_on_startup()
-start_epg_startup_cache_once()
 start_scheduler_once()

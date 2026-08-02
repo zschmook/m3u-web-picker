@@ -5,7 +5,6 @@ let customGroups = [];
 let activeGroupSlug = "";
 let activeGroupMembers = new Set();
 let showGroupOnly = false;
-let epgSources = [];
 
 const els = {
   table: document.getElementById("channelTable"),
@@ -25,373 +24,235 @@ const els = {
 els.playlistUrl.value = `${location.origin}/playlist/custom.m3u`;
 els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
 
-function setStatus(msg) { els.status.textContent = msg || ""; }
-
-
-function updateClearSearchButton() {
-  const btn = document.getElementById("clearSearchBtn");
-  if (!btn) return;
-
-  if (els.search.value.length > 0) {
-    btn.classList.remove("d-none");
-  } else {
-    btn.classList.add("d-none");
-  }
-}
-
-
-async function copyTextValue(value, input = null) {
-  const text = String(value || "");
-
-  // navigator.clipboard is unavailable on many plain-http LAN pages,
-  // which is the normal way this app is used. Try it only when present,
-  // then fall back to the old selection-based copy method.
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (_) {}
-  }
-
-  if (input) {
-    input.focus();
-    input.select();
-    input.setSelectionRange(0, text.length);
-    return document.execCommand("copy");
-  }
-
-  const temp = document.createElement("textarea");
-  temp.value = text;
-  temp.setAttribute("readonly", "");
-  temp.style.position = "fixed";
-  temp.style.left = "-9999px";
-  document.body.appendChild(temp);
-  temp.focus();
-  temp.select();
-  const ok = document.execCommand("copy");
-  document.body.removeChild(temp);
-  return ok;
-}
-
-async function copyInputValue(inputId, buttonId) {
-  const input = document.getElementById(inputId);
-  const btn = document.getElementById(buttonId);
-  await copyTextValue(input.value, input);
-  btn.textContent = "Copied!";
-  setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-}
-
-function channelKey(ch) { return String(ch.url || "").trim(); }
-
-function setSourceMode(mode) {
-  const urlInput = document.getElementById("m3uUrl");
-  const urlBtn = document.getElementById("loadUrlBtn");
-  const fileInput = document.getElementById("m3uFile");
-  const fileBtn = document.getElementById("uploadBtn");
-  const label = document.getElementById("sourceModeLabel");
-
-  // If the source is locked after a successful load, do not unlock it here.
-  if (urlInput && urlInput.value === "Source Loaded") {
-    return;
-  }
-
-  if (mode === "url") {
-    if (fileInput) fileInput.disabled = true;
-    if (fileBtn) fileBtn.disabled = true;
-    if (urlInput) urlInput.disabled = false;
-    if (urlBtn) urlBtn.disabled = false;
-    if (label) label.textContent = "URL source active. File loading disabled.";
-  } else if (mode === "file") {
-    if (urlInput) urlInput.disabled = true;
-    if (urlBtn) urlBtn.disabled = true;
-    if (fileInput) fileInput.disabled = false;
-    if (fileBtn) fileBtn.disabled = false;
-    if (label) label.textContent = "File source active. URL loading disabled.";
-  } else {
-    if (urlInput) urlInput.disabled = false;
-    if (urlBtn) urlBtn.disabled = false;
-    if (fileInput) fileInput.disabled = false;
-    if (fileBtn) fileBtn.disabled = false;
-    if (label) label.textContent = "";
-  }
-}
-
-
-function lockLoadedSourceControls() {
-  const urlInput = document.getElementById("m3uUrl");
-  const loadUrlBtn = document.getElementById("loadUrlBtn");
-  const fileInput = document.getElementById("m3uFile");
-  const uploadBtn = document.getElementById("uploadBtn");
-  const changeSourceBtn = document.getElementById("changeSourceBtn");
-  const label = document.getElementById("sourceModeLabel");
-
-  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
-
-  urlInput.value = "Source Loaded";
-  urlInput.disabled = true;
-  urlInput.classList.add("source-loaded-placeholder");
-
-  loadUrlBtn.disabled = true;
-  if (fileInput) fileInput.disabled = true;
-  if (uploadBtn) uploadBtn.disabled = true;
-
-  changeSourceBtn.classList.remove("d-none");
-  if (label) label.textContent = "Source loaded. Click Change Source to replace it.";
-}
-
-function unlockLoadedSourceControls() {
-  const urlInput = document.getElementById("m3uUrl");
-  const loadUrlBtn = document.getElementById("loadUrlBtn");
-  const fileInput = document.getElementById("m3uFile");
-  const uploadBtn = document.getElementById("uploadBtn");
-  const changeSourceBtn = document.getElementById("changeSourceBtn");
-  const label = document.getElementById("sourceModeLabel");
-
-  if (!urlInput || !loadUrlBtn || !changeSourceBtn) return;
-
-  urlInput.value = "";
-  urlInput.disabled = false;
-  urlInput.classList.remove("source-loaded-placeholder");
-
-  loadUrlBtn.disabled = false;
-  if (fileInput) {
-    fileInput.disabled = false;
-    fileInput.value = "";
-  }
-  if (uploadBtn) uploadBtn.disabled = false;
-
-  changeSourceBtn.classList.add("d-none");
-  if (label) label.textContent = "";
-
-  urlInput.focus();
-}
-
-function showUrlModal() {
-  const modalEl = document.getElementById("urlModal");
-  const modalInput = document.getElementById("modalUrlInput");
-  modalInput.value = "";
-  const modal = new bootstrap.Modal(modalEl);
-  modal.show();
-  modalEl.addEventListener("shown.bs.modal", () => modalInput.focus(), { once: true });
-}
-
-function acceptModalUrl() {
-  const modalEl = document.getElementById("urlModal");
-  const modalInput = document.getElementById("modalUrlInput");
-  const value = modalInput.value.trim();
-  if (!value) { modalInput.focus(); return; }
-  document.getElementById("m3uUrl").value = value;
-  const modal = bootstrap.Modal.getInstance(modalEl);
-  if (modal) modal.hide();
-  loadFromUrl();
+function setStatus(message) {
+  els.status.textContent = message || "";
 }
 
 function escapeHtml(value) {
   return String(value ?? "")
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function channelKey(channel) {
+  return String(channel.url || "").trim();
+}
+
+function isGeneratedSportsChannel(channel) {
+  return Boolean(channel.is_sports_generated || Number(channel.id) < 0);
+}
+
+function maskUrl(value) {
+  const raw = String(value || "");
+  try {
+    const url = new URL(raw);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length >= 3) {
+      const tail = parts.at(-1);
+      url.pathname = `/••••••/••••••/${tail}`;
+    } else if (parts.length) {
+      url.pathname = "/••••••";
+    }
+    if (url.search) {
+      for (const key of ["username", "password", "user", "pass", "token"]) {
+        if (url.searchParams.has(key)) url.searchParams.set(key, "••••••");
+      }
+    }
+    return url.toString();
+  } catch {
+    return raw.length > 72 ? `${raw.slice(0, 56)}…` : raw;
+  }
+}
+
+function updateClearSearchButton() {
+  const button = document.getElementById("clearSearchBtn");
+  if (!button) return;
+  button.classList.toggle("d-none", els.search.value.length === 0);
+}
+
+async function copyInputValue(inputId, buttonId) {
+  const input = document.getElementById(inputId);
+  const button = document.getElementById(buttonId);
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch {
+    input.select();
+    document.execCommand("copy");
+  }
+  button.textContent = "Copied!";
+  setTimeout(() => { button.textContent = "Copy"; }, 1500);
+}
+
+function setSourceMode(mode) {
+  const urlInput = document.getElementById("m3uUrl");
+  const urlButton = document.getElementById("loadUrlBtn");
+  const fileInput = document.getElementById("m3uFile");
+  const fileButton = document.getElementById("uploadBtn");
+  const label = document.getElementById("sourceModeLabel");
+
+  if (mode === "url") {
+    fileInput.disabled = true;
+    fileButton.disabled = true;
+    urlInput.disabled = false;
+    urlButton.disabled = false;
+    label.textContent = "Source loaded.";
+  } else if (mode === "file") {
+    urlInput.disabled = true;
+    urlButton.disabled = true;
+    fileInput.disabled = false;
+    fileButton.disabled = false;
+    label.textContent = "Source loaded.";
+  } else {
+    urlInput.disabled = false;
+    urlButton.disabled = false;
+    fileInput.disabled = false;
+    fileButton.disabled = false;
+    label.textContent = "";
+  }
+}
+
+function showUrlModal() {
+  const modalElement = document.getElementById("urlModal");
+  const input = document.getElementById("modalUrlInput");
+  input.value = "";
+  const modal = new bootstrap.Modal(modalElement);
+  modal.show();
+  modalElement.addEventListener("shown.bs.modal", () => input.focus(), {once: true});
+}
+
+function acceptModalUrl() {
+  const modalElement = document.getElementById("urlModal");
+  const input = document.getElementById("modalUrlInput");
+  const value = input.value.trim();
+  if (!value) {
+    input.focus();
+    return;
+  }
+  document.getElementById("m3uUrl").value = value;
+  bootstrap.Modal.getInstance(modalElement)?.hide();
+  loadFromUrl();
 }
 
 function filteredChannels() {
-  const q = els.search.value.trim().toLowerCase();
+  const query = els.search.value.trim().toLowerCase();
   const group = els.groupFilter.value;
-  const only = els.selectedOnly.checked;
-  const excludeSd = els.excludeSdChannels && els.excludeSdChannels.checked;
+  const selectedOnly = els.selectedOnly.checked;
+  const excludeSd = Boolean(els.excludeSdChannels?.checked);
 
-  return channels.filter(ch => {
-    if (excludeSd && String(ch.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
-    if (group && ch.group !== group) return false;
-    if (only && !selected.has(ch.id)) return false;
-    if (showGroupOnly && activeGroupSlug && !activeGroupMembers.has(channelKey(ch))) return false;
-    if (q) {
-      const haystack = `${ch.name} ${ch.group} ${ch.url}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
+  return channels.filter(channel => {
+    if (excludeSd && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
+    if (group && channel.group !== group) return false;
+    if (selectedOnly && !selected.has(Number(channel.id))) return false;
+    if (showGroupOnly && activeGroupSlug && !activeGroupMembers.has(channelKey(channel))) return false;
+    if (query) {
+      const haystack = `${channel.name} ${channel.group} ${channel.url} ${channel.sports_subtitle || ""}`.toLowerCase();
+      if (!haystack.includes(query)) return false;
     }
     return true;
   });
 }
 
 function rebuildProviderGroupFilter() {
-  const groups = [...new Set(channels.map(ch => ch.group).filter(Boolean))].sort();
+  const current = els.groupFilter.value;
+  const groups = [...new Set(channels.map(channel => channel.group).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
   els.groupFilter.innerHTML = `<option value="">All provider groups</option>` +
-    groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+    groups.map(group => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`).join("");
+  if (groups.includes(current)) els.groupFilter.value = current;
 }
 
 function render() {
   const visible = filteredChannels();
-  els.table.innerHTML = visible.map(ch => `
-    <tr data-id="${ch.id}">
-      <td><input class="form-check-input channel-check" type="checkbox" data-id="${ch.id}" ${selected.has(ch.id) ? "checked" : ""}></td>
-      <td>${escapeHtml(ch.name)}</td>
-      <td>${escapeHtml(ch.group)}</td>
-      <td class="url-cell" title="${escapeHtml(ch.url)}">${escapeHtml(ch.url)}</td>
-    </tr>
-  `).join("");
+  els.table.innerHTML = visible.map(channel => {
+    const generated = isGeneratedSportsChannel(channel);
+    const id = Number(channel.id);
+    const subtitle = generated && channel.sports_subtitle
+      ? `<div class="sports-channel-subtitle">${escapeHtml(channel.sports_subtitle)}</div>`
+      : "";
+    const badge = generated ? `<span class="badge text-bg-primary ms-2">Auto sports</span>` : "";
+    const masked = maskUrl(channel.url);
+    return `
+      <tr data-id="${id}" class="${generated ? "sports-generated-row" : ""}">
+        <td>
+          <input class="form-check-input channel-check" type="checkbox" data-id="${id}"
+            ${selected.has(id) || generated ? "checked" : ""} ${generated ? "disabled" : ""}>
+        </td>
+        <td>
+          <div>${escapeHtml(channel.name)}${badge}</div>
+          ${subtitle}
+        </td>
+        <td>${escapeHtml(channel.group)}</td>
+        <td class="url-cell" title="Sensitive stream URL hidden">${escapeHtml(masked)}</td>
+      </tr>`;
+  }).join("");
+
+  const generatedIds = channels.filter(isGeneratedSportsChannel).map(channel => Number(channel.id));
+  for (const id of generatedIds) selected.add(id);
 
   els.selectedCount.textContent = selected.size;
   els.visibleCount.textContent = visible.length;
   els.totalCount.textContent = channels.length;
 
-  const selectBtn = document.getElementById("selectVisibleBtn");
-  const clearBtn = document.getElementById("clearVisibleBtn");
+  const selectButton = document.getElementById("selectVisibleBtn");
+  const clearButton = document.getElementById("clearVisibleBtn");
+  const showSelectedButton = document.getElementById("showSelectedBtn");
+  const manualVisible = visible.filter(channel => !isGeneratedSportsChannel(channel));
 
-  if (selectBtn) selectBtn.textContent = `Add all ${visible.length}`;
-  if (clearBtn) clearBtn.textContent = `Remove all ${visible.length}`;
-
-  const showSelectedBtn = document.getElementById("showSelectedBtn");
-  if (showSelectedBtn) {
-    showSelectedBtn.textContent = els.selectedOnly.checked
+  if (selectButton) selectButton.textContent = `Add all ${manualVisible.length}`;
+  if (clearButton) clearButton.textContent = `Remove all ${manualVisible.length}`;
+  if (showSelectedButton) {
+    showSelectedButton.textContent = els.selectedOnly.checked
       ? `Show all (${selected.size} saved)`
       : `Saved ${selected.size} channels`;
   }
 
   const savedMode = els.selectedOnly.checked;
-
-  if (selectBtn) selectBtn.disabled = savedMode || visible.length === 0;
-  if (clearBtn) clearBtn.disabled = savedMode || visible.length === 0;
-  if (showSelectedBtn) {
-    showSelectedBtn.disabled = selected.size === 0 && !savedMode;
-
-    if (savedMode) {
-      showSelectedBtn.classList.remove("btn-outline-success");
-      showSelectedBtn.classList.add("btn-success");
-    } else {
-      showSelectedBtn.classList.remove("btn-success");
-      showSelectedBtn.classList.add("btn-outline-success");
-    }
+  if (selectButton) selectButton.disabled = savedMode || manualVisible.length === 0;
+  if (clearButton) clearButton.disabled = savedMode || manualVisible.length === 0;
+  if (showSelectedButton) {
+    showSelectedButton.disabled = selected.size === 0 && !savedMode;
+    showSelectedButton.classList.toggle("btn-success", savedMode);
+    showSelectedButton.classList.toggle("btn-outline-success", !savedMode);
   }
 }
 
 function renderGroups() {
   const pills = document.getElementById("groupPills");
-  pills.innerHTML = customGroups.map(g => `
-    <span class="badge rounded-pill text-bg-secondary group-pill ${g.slug === activeGroupSlug ? "active" : ""}" data-slug="${escapeHtml(g.slug)}">
-      ${escapeHtml(g.name)}
-    </span>
+  pills.innerHTML = customGroups.map(group => `
+    <span class="badge rounded-pill text-bg-secondary group-pill ${group.slug === activeGroupSlug ? "active" : ""}"
+      data-slug="${escapeHtml(group.slug)}">${escapeHtml(group.name)}</span>
   `).join("");
 
   els.activeGroup.innerHTML = `<option value="">No group selected</option>` +
-    customGroups.map(g => `<option value="${escapeHtml(g.slug)}">${escapeHtml(g.name)}</option>`).join("");
-
+    customGroups.map(group => `<option value="${escapeHtml(group.slug)}">${escapeHtml(group.name)}</option>`).join("");
   if (activeGroupSlug) els.activeGroup.value = activeGroupSlug;
   updateGroupUrl();
 }
 
 function updateGroupUrl() {
-  if (activeGroupSlug) {
-    els.groupPlaylistUrl.value = `${location.origin}/playlist/group/${activeGroupSlug}.m3u`;
-  } else {
-    els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
-  }
+  els.groupPlaylistUrl.value = activeGroupSlug
+    ? `${location.origin}/playlist/group/${activeGroupSlug}.m3u`
+    : `${location.origin}/playlist/all.m3u`;
 }
 
 async function loadGroups() {
-  const res = await fetch("/api/groups");
-  const data = await res.json();
-  customGroups = data.groups || [];
-  renderGroups();
-}
-
-function renderEpgSources() {
-  const list = document.getElementById("epgSources");
-  if (!list) return;
-
-  if (!epgSources.length) {
-    list.innerHTML = `<div class="small-muted">No EPG sources added yet.</div>`;
-    return;
-  }
-
-  const rows = epgSources.map(source => {
-    const publicUrl = `${location.origin}${source.url_path || `/epg/${source.id}.xml`}`;
-    const state = source.last_error
-      ? `<span class="text-warning" title="${escapeHtml(source.last_error)}">Error</span>`
-      : source.last_refresh
-        ? escapeHtml(source.last_refresh)
-        : `Not refreshed`;
-
-    return `
-      <tr class="epg-source-row" data-id="${escapeHtml(source.id)}">
-        <td class="epg-name-cell" title="${escapeHtml(source.name)}"><strong>${escapeHtml(source.name)}</strong></td>
-        <td class="epg-url-cell" title="${escapeHtml(source.url)}">${escapeHtml(source.url)}</td>
-        <td class="epg-served-cell">
-          <div class="input-group input-group-sm">
-            <input class="form-control" value="${escapeHtml(publicUrl)}" readonly>
-            <button class="btn btn-success epg-copy-btn" type="button" data-url="${escapeHtml(publicUrl)}">Copy</button>
-          </div>
-        </td>
-        <td class="epg-status-cell small-muted" title="${source.last_error ? escapeHtml(source.last_error) : ''}">${source.last_error ? state : (source.last_refresh ? `Updated: ${state}` : state)}</td>
-        <td class="text-end"><button class="btn btn-outline-danger btn-sm epg-delete-btn" type="button">Delete</button></td>
-      </tr>
-    `;
-  }).join("");
-
-  list.innerHTML = `
-    <div class="epg-table-wrap">
-      <table class="table table-hover table-sm align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>URL</th>
-            <th>Served URL</th>
-            <th>Last Updated</th>
-            <th class="text-end">Action</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-async function loadEpgSources() {
   try {
-    const res = await fetch("/api/epg");
-    const data = await res.json();
-    epgSources = data.sources || [];
-    renderEpgSources();
+    const response = await fetch("/api/groups");
+    const data = await response.json();
+    customGroups = data.groups || [];
+    renderGroups();
   } catch {
-    epgSources = [];
-    renderEpgSources();
+    customGroups = [];
   }
-}
-
-async function addEpgSource() {
-  const nameInput = document.getElementById("epgName");
-  const urlInput = document.getElementById("epgUrl");
-  const name = nameInput.value.trim();
-  const url = urlInput.value.trim();
-
-  if (!name) { nameInput.focus(); return; }
-  if (!url) { urlInput.focus(); return; }
-
-  const res = await fetch("/api/epg", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({name, url})
-  });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "Could not add EPG source.");
-
-  nameInput.value = "";
-  urlInput.value = "";
-  await loadEpgSources();
-  setStatus(`Added EPG source: ${name}`);
-}
-
-async function deleteEpgSource(sourceId) {
-  const res = await fetch(`/api/epg/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "Could not delete EPG source.");
-  epgSources = data.sources || [];
-  renderEpgSources();
-  setStatus("Deleted EPG source.");
 }
 
 async function setActiveGroup(slug) {
   activeGroupSlug = slug || "";
   els.activeGroup.value = activeGroupSlug;
   updateGroupUrl();
-
   if (!activeGroupSlug) {
     activeGroupMembers = new Set();
     showGroupOnly = false;
@@ -399,9 +260,8 @@ async function setActiveGroup(slug) {
     render();
     return;
   }
-
-  const res = await fetch(`/api/groups/${activeGroupSlug}/channels`);
-  const data = await res.json();
+  const response = await fetch(`/api/groups/${activeGroupSlug}/channels`);
+  const data = await response.json();
   activeGroupMembers = new Set(data.channel_keys || []);
   renderGroups();
   render();
@@ -410,16 +270,17 @@ async function setActiveGroup(slug) {
 async function createGroup() {
   const input = document.getElementById("newGroupName");
   const name = input.value.trim();
-  if (!name) { input.focus(); return; }
-
-  const res = await fetch("/api/groups", {
+  if (!name) {
+    input.focus();
+    return;
+  }
+  const response = await fetch("/api/groups", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name})
   });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "Could not create group.");
-
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not create group.");
   input.value = "";
   await loadGroups();
   await setActiveGroup(data.group.slug);
@@ -428,110 +289,96 @@ async function createGroup() {
 
 async function addVisibleToGroup() {
   if (!activeGroupSlug) return alert("Choose or create a group first.");
-  const visible = filteredChannels();
-  const keys = visible.map(channelKey).filter(Boolean);
-
-  const res = await fetch(`/api/groups/${activeGroupSlug}/channels`, {
+  const keys = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel)).map(channelKey).filter(Boolean);
+  const response = await fetch(`/api/groups/${activeGroupSlug}/channels`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({channel_keys: keys})
   });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "Could not add channels.");
-
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not add channels.");
   await setActiveGroup(activeGroupSlug);
   setStatus(`Added ${data.added} visible channels to group.`);
 }
 
 async function removeVisibleFromGroup() {
   if (!activeGroupSlug) return alert("Choose a group first.");
-  const visible = filteredChannels();
-  const keys = visible.map(channelKey).filter(Boolean);
-
-  const res = await fetch(`/api/groups/${activeGroupSlug}/channels`, {
+  const keys = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel)).map(channelKey).filter(Boolean);
+  const response = await fetch(`/api/groups/${activeGroupSlug}/channels`, {
     method: "DELETE",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({channel_keys: keys})
   });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "Could not remove channels.");
-
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not remove channels.");
   await setActiveGroup(activeGroupSlug);
   setStatus(`Removed ${data.removed} visible channels from group.`);
 }
 
+function applyChannelPayload(data) {
+  channels = data.channels || [];
+  selected = new Set((data.selected_ids || []).map(Number));
+  rebuildProviderGroupFilter();
+  render();
+}
+
 async function loadFromUrl() {
   const url = document.getElementById("m3uUrl").value.trim();
-  if (!url) { showUrlModal(); return; }
-
+  if (!url) {
+    showUrlModal();
+    return;
+  }
   setStatus("Loading URL...");
-  const res = await fetch("/api/load-url", {
+  const response = await fetch("/api/load-url", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({url})
   });
-  const data = await res.json();
-  if (!res.ok) { setStatus(""); return alert(data.error || "URL load failed."); }
-
-  channels = data.channels;
-  selected = new Set(data.selected_ids || []);
-  rebuildProviderGroupFilter();
-  render();
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("");
+    return alert(data.error || "URL load failed.");
+  }
+  applyChannelPayload(data);
+  document.getElementById("m3uUrl").value = "";
+  document.getElementById("modalUrlInput").value = "";
   setSourceMode("url");
-  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
-  setStatus(`Loaded ${channels.length} channels from URL.`);
+  await loadSports();
+  setStatus(`Source loaded. ${channels.length} channels available.`);
 }
 
 async function uploadFile() {
   const file = document.getElementById("m3uFile").files[0];
   if (!file) return alert("Choose an M3U file first.");
   setStatus("Uploading file...");
-
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch("/api/upload", { method: "POST", body: form });
-  const data = await res.json();
-  if (!res.ok) { setStatus(""); return alert(data.error || "Upload failed."); }
-
-  channels = data.channels;
-  selected = new Set(data.selected_ids || []);
-  rebuildProviderGroupFilter();
-  render();
+  const response = await fetch("/api/upload", {method: "POST", body: form});
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("");
+    return alert(data.error || "Upload failed.");
+  }
+  applyChannelPayload(data);
+  document.getElementById("m3uFile").value = "";
   setSourceMode("file");
-  lockLoadedSourceControls();
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
-  setStatus(`Loaded ${channels.length} channels from file.`);
+  await loadSports();
+  setStatus(`Source loaded. ${channels.length} channels available.`);
 }
 
-
-
-async function loadInitialChannels() {
+async function loadInitialChannels({quiet = false} = {}) {
   try {
-    const res = await fetch("/api/channels");
-    const data = await res.json();
-
-    channels = data.channels || [];
-    selected = new Set(data.selected_ids || []);
-
-    rebuildProviderGroupFilter();
-    render();
-
-    if (data.source_mode) {
-      setSourceMode(data.source_mode);
-    }
-
-    if (channels.length > 0) {
-      lockLoadedSourceControls();
-      setStatus(`Loaded ${channels.length} cached channels.`);
-    } else {
-      unlockLoadedSourceControls();
-    }
-  } catch (err) {
-    setStatus("Could not load cached channels.");
+    const response = await fetch("/api/channels");
+    const data = await response.json();
+    applyChannelPayload(data);
+    if (data.source_mode) setSourceMode(data.source_mode);
+    if (!quiet && channels.length > 0) setStatus(`Loaded ${channels.length} cached channels.`);
+  } catch {
+    if (!quiet) setStatus("Could not load cached channels.");
   }
 }
-
 
 function scheduleSaveSelected() {
   clearTimeout(saveTimer);
@@ -539,30 +386,35 @@ function scheduleSaveSelected() {
 }
 
 async function saveSelected() {
+  const manualIds = [...selected].filter(id => Number(id) >= 0);
   setStatus("Saving playlist...");
-  const res = await fetch("/api/selection", {
+  const response = await fetch("/api/selection", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ids: [...selected]})
+    body: JSON.stringify({ids: manualIds})
   });
-  const data = await res.json();
-  if (!res.ok) { setStatus(data.error || "Save failed."); return; }
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(data.error || "Save failed.");
+    return;
+  }
   setStatus("Playlist updated.");
 }
 
-els.table.addEventListener("change", e => {
-  if (!e.target.classList.contains("channel-check")) return;
-  const id = Number(e.target.dataset.id);
-  if (e.target.checked) selected.add(id);
+els.table.addEventListener("change", event => {
+  if (!event.target.classList.contains("channel-check") || event.target.disabled) return;
+  const id = Number(event.target.dataset.id);
+  if (event.target.checked) selected.add(id);
   else selected.delete(id);
   render();
   scheduleSaveSelected();
 });
 
-els.table.addEventListener("dblclick", e => {
-  const row = e.target.closest("tr");
+els.table.addEventListener("dblclick", event => {
+  const row = event.target.closest("tr");
   if (!row) return;
   const id = Number(row.dataset.id);
+  if (id < 0) return;
   if (selected.has(id)) selected.delete(id);
   else selected.add(id);
   render();
@@ -574,11 +426,11 @@ document.getElementById("uploadBtn").addEventListener("click", uploadFile);
 document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyInputValue("playlistUrl", "copyPlaylistBtn"));
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
 document.getElementById("modalLoadBtn").addEventListener("click", acceptModalUrl);
-document.getElementById("modalUrlInput").addEventListener("keydown", e => { if (e.key === "Enter") acceptModalUrl(); });
+document.getElementById("modalUrlInput").addEventListener("keydown", event => { if (event.key === "Enter") acceptModalUrl(); });
 document.getElementById("changeSourceBtn").addEventListener("click", () => { setSourceMode(""); setStatus("Source unlocked."); });
 document.getElementById("createGroupBtn").addEventListener("click", createGroup);
-document.getElementById("newGroupName").addEventListener("keydown", e => { if (e.key === "Enter") createGroup(); });
-els.activeGroup.addEventListener("change", e => setActiveGroup(e.target.value));
+document.getElementById("newGroupName").addEventListener("keydown", event => { if (event.key === "Enter") createGroup(); });
+els.activeGroup.addEventListener("change", event => setActiveGroup(event.target.value));
 document.getElementById("addVisibleToGroupBtn").addEventListener("click", addVisibleToGroup);
 document.getElementById("removeVisibleFromGroupBtn").addEventListener("click", removeVisibleFromGroup);
 document.getElementById("showGroupOnlyBtn").addEventListener("click", () => {
@@ -588,33 +440,30 @@ document.getElementById("showGroupOnlyBtn").addEventListener("click", () => {
 });
 
 document.getElementById("selectVisibleBtn").addEventListener("click", () => {
-  const visible = filteredChannels();
-  for (const ch of visible) selected.add(ch.id);
+  const visible = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel));
+  for (const channel of visible) selected.add(Number(channel.id));
   render();
   scheduleSaveSelected();
   setStatus(`Added ${visible.length} channels from current search.`);
 });
-document.getElementById("showSelectedBtn").addEventListener("click", () => {
-  els.selectedOnly.checked = !els.selectedOnly.checked;
-  render();
-  setStatus(
-    els.selectedOnly.checked
-      ? "Showing saved channels only. Add all / Remove all disabled."
-      : "Showing all channels."
-  );
-});
 
 document.getElementById("clearVisibleBtn").addEventListener("click", () => {
-  const visible = filteredChannels();
-  for (const ch of visible) selected.delete(ch.id);
+  const visible = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel));
+  for (const channel of visible) selected.delete(Number(channel.id));
   render();
   scheduleSaveSelected();
   setStatus(`Removed ${visible.length} channels from current search.`);
 });
-document.getElementById("groupPills").addEventListener("click", e => {
-  const pill = e.target.closest(".group-pill");
-  if (!pill) return;
-  setActiveGroup(pill.dataset.slug);
+
+document.getElementById("showSelectedBtn").addEventListener("click", () => {
+  els.selectedOnly.checked = !els.selectedOnly.checked;
+  render();
+  setStatus(els.selectedOnly.checked ? "Showing saved channels only." : "Showing all channels.");
+});
+
+document.getElementById("groupPills").addEventListener("click", event => {
+  const pill = event.target.closest(".group-pill");
+  if (pill) setActiveGroup(pill.dataset.slug);
 });
 
 els.search.addEventListener("input", () => {
@@ -623,103 +472,12 @@ els.search.addEventListener("input", () => {
 });
 els.groupFilter.addEventListener("change", render);
 els.selectedOnly.addEventListener("change", render);
-if (els.excludeSdChannels) {
-  els.excludeSdChannels.addEventListener("change", () => {
-    render();
-    setStatus(
-      els.excludeSdChannels.checked
-        ? "SD / LOW BANDWIDTH channels hidden."
-        : "SD / LOW BANDWIDTH channels visible."
-    );
-  });
-}
-
-
-
-// Custom playlist order modal
-let orderChannels = [];
-let orderSelectedKey = "";
-
-function renderOrderTable() {
-  const tbody = document.getElementById("orderTable");
-
-  tbody.innerHTML = orderChannels.map(ch => {
-    const index = orderChannels.findIndex(item => item.key === ch.key);
-    return `
-      <tr data-key="${escapeHtml(ch.key)}" class="${ch.key === orderSelectedKey ? "order-selected" : ""}">
-        <td>${index + 1}</td>
-        <td>${escapeHtml(ch.name || ch.url)}</td>
-        <td>${escapeHtml(ch.group || "")}</td>
-      </tr>
-    `;
-  }).join("");
-}
-
-async function openOrderModal() {
-  const res = await fetch("/api/selection/order");
-  const data = await res.json();
-
-  orderChannels = data.channels || [];
-  orderSelectedKey = "";
-
-  renderOrderTable();
-
-  const modal = new bootstrap.Modal(document.getElementById("orderModal"));
-  modal.show();
-}
-
-function moveSelectedOrder(direction) {
-  if (!orderSelectedKey) return;
-
-  const idx = orderChannels.findIndex(ch => ch.key === orderSelectedKey);
-  if (idx < 0) return;
-
-  const newIdx = idx + direction;
-  if (newIdx < 0 || newIdx >= orderChannels.length) return;
-
-  const [item] = orderChannels.splice(idx, 1);
-  orderChannels.splice(newIdx, 0, item);
-
-  renderOrderTable();
-}
-
-async function saveOrder() {
-  const keys = orderChannels.map(ch => ch.key);
-
-  const res = await fetch("/api/selection/order", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({keys})
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    return alert(data.error || "Could not save order.");
-  }
-
-  setStatus(`Saved custom.m3u order for ${data.count} channels.`);
-
-  const modalEl = document.getElementById("orderModal");
-  const modal = bootstrap.Modal.getInstance(modalEl);
-  if (modal) {
-    modal.hide();
-  }
-}
-
-document.getElementById("manageOrderBtn").addEventListener("click", openOrderModal);
-
-document.getElementById("orderTable").addEventListener("click", e => {
-  const row = e.target.closest("tr");
-  if (!row) return;
-  orderSelectedKey = row.dataset.key;
-  renderOrderTable();
+els.excludeSdChannels?.addEventListener("change", () => {
+  render();
+  setStatus(els.excludeSdChannels.checked
+    ? "SD / LOW BANDWIDTH channels hidden."
+    : "SD / LOW BANDWIDTH channels visible.");
 });
-
-document.getElementById("moveOrderUpBtn").addEventListener("click", () => moveSelectedOrder(-1));
-document.getElementById("moveOrderDownBtn").addEventListener("click", () => moveSelectedOrder(1));
-document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
-
 
 document.getElementById("clearSearchBtn").addEventListener("click", () => {
   els.search.value = "";
@@ -728,36 +486,490 @@ document.getElementById("clearSearchBtn").addEventListener("click", () => {
   els.search.focus();
 });
 
+// Custom playlist order modal. Sports-generated channels have fixed numbers and
+// intentionally do not appear here.
+let orderChannels = [];
+let orderSelectedKey = "";
 
-const addEpgBtn = document.getElementById("addEpgBtn");
-if (addEpgBtn) addEpgBtn.addEventListener("click", addEpgSource);
-
-
-const epgSourcesEl = document.getElementById("epgSources");
-if (epgSourcesEl) {
-  epgSourcesEl.addEventListener("click", e => {
-    const row = e.target.closest(".epg-source-row");
-    if (!row) return;
-    const sourceId = row.dataset.id;
-
-
-    if (e.target.classList.contains("epg-delete-btn")) {
-      deleteEpgSource(sourceId);
-      return;
-    }
-
-    if (e.target.classList.contains("epg-copy-btn")) {
-      const input = row.querySelector(".epg-served-cell input");
-      const value = input ? input.value : (e.target.dataset.url || "");
-      copyTextValue(value, input);
-      e.target.textContent = "Copied!";
-      setTimeout(() => { e.target.textContent = "Copy"; }, 1500);
-    }
-  });
+function renderOrderTable() {
+  const tbody = document.getElementById("orderTable");
+  tbody.innerHTML = orderChannels.map((channel, index) => `
+    <tr data-key="${escapeHtml(channel.key)}" class="${channel.key === orderSelectedKey ? "order-selected" : ""}">
+      <td>${index + 1}</td>
+      <td>${escapeHtml(channel.name || channel.url)}</td>
+      <td>${escapeHtml(channel.group || "")}</td>
+    </tr>`).join("");
 }
 
-loadInitialChannels();
-loadGroups();
-loadEpgSources();
-render();
-updateClearSearchButton();
+async function openOrderModal() {
+  const response = await fetch("/api/selection/order");
+  const data = await response.json();
+  orderChannels = data.channels || [];
+  orderSelectedKey = "";
+  renderOrderTable();
+  new bootstrap.Modal(document.getElementById("orderModal")).show();
+}
+
+function moveSelectedOrder(direction) {
+  if (!orderSelectedKey) return;
+  const index = orderChannels.findIndex(channel => channel.key === orderSelectedKey);
+  const next = index + direction;
+  if (index < 0 || next < 0 || next >= orderChannels.length) return;
+  const [item] = orderChannels.splice(index, 1);
+  orderChannels.splice(next, 0, item);
+  renderOrderTable();
+}
+
+async function saveOrder() {
+  const response = await fetch("/api/selection/order", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({keys: orderChannels.map(channel => channel.key)})
+  });
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not save order.");
+  setStatus(`Saved manual order for ${data.count} channels.`);
+  bootstrap.Modal.getInstance(document.getElementById("orderModal"))?.hide();
+}
+
+document.getElementById("manageOrderBtn").addEventListener("click", openOrderModal);
+document.getElementById("orderTable").addEventListener("click", event => {
+  const row = event.target.closest("tr");
+  if (!row) return;
+  orderSelectedKey = row.dataset.key;
+  renderOrderTable();
+});
+document.getElementById("moveOrderUpBtn").addEventListener("click", () => moveSelectedOrder(-1));
+document.getElementById("moveOrderDownBtn").addEventListener("click", () => moveSelectedOrder(1));
+document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
+
+// Sports automation ---------------------------------------------------------
+let sportsState = {settings: {}, rules: [], catalog: [], generated: [], last_scan: null, next_update: null};
+let sportsModal = null;
+let sportsSaveTimer = null;
+let pendingSportsChanges = {};
+let sportsGeneratedSignature = "";
+let pendingSportsSelections = new Set();
+
+function sportsElement(id) {
+  return document.getElementById(id);
+}
+
+function setSportsError(message = "") {
+  const element = sportsElement("sportsSaveError");
+  element.textContent = message;
+  element.classList.toggle("d-none", !message);
+}
+
+function preferenceOptions(rule) {
+  const common = [["best", "Best feed per game"], ["all", "Show all feeds"]];
+  const options = rule.scope_type === "team"
+    ? [["favorite", `${rule.display_name} feed first`], ["home", "Home feed first"], ["away", "Away feed first"], ["national", "National feed first"], ["all", "Show all feeds"]]
+    : [...common, ["national", "National feed first"]];
+  return options.map(([value, label]) =>
+    `<option value="${value}" ${rule.feed_preference === value ? "selected" : ""}>${escapeHtml(label)}</option>`
+  ).join("");
+}
+
+function renderSportsRules() {
+  const target = sportsElement("sportsRules");
+  if (!sportsState.rules.length) {
+    target.innerHTML = `<div class="small-muted">No sports selected. Use Add selection to build the nightly rules.</div>`;
+    return;
+  }
+  target.innerHTML = sportsState.rules.map(rule => `
+    <div class="sports-rule" data-id="${rule.id}">
+      <div><span class="sports-rule-type">${escapeHtml(rule.scope_type)}</span></div>
+      <div>
+        <strong>${escapeHtml(rule.display_name)}</strong>
+        <div class="small-muted">${escapeHtml(sportsCatalogSubtitle(rule.scope_type, rule.scope_id))}</div>
+      </div>
+      <select class="form-select form-select-sm sports-rule-preference" aria-label="Feed preference for ${escapeHtml(rule.display_name)}">
+        ${preferenceOptions(rule)}
+      </select>
+      <button type="button" class="btn btn-outline-danger btn-sm sports-rule-remove">Remove</button>
+    </div>`).join("");
+}
+
+function sportsCatalogSubtitle(scopeType, scopeId) {
+  const item = sportsState.catalog.find(entry => entry.scope_type === scopeType && entry.id === scopeId);
+  return item?.subtitle || "";
+}
+
+function renderSportsPreview() {
+  const target = sportsElement("sportsPreview");
+  const rows = sportsState.generated || [];
+  sportsElement("sportsPreviewCount").textContent = `${rows.length} channel${rows.length === 1 ? "" : "s"}`;
+  if (!rows.length) {
+    target.innerHTML = `<div class="small-muted">No generated sports channels yet. The nightly update or Update now will populate this list.</div>`;
+    return;
+  }
+  target.innerHTML = rows.map(row => `
+    <div class="sports-preview-row">
+      <div class="sports-preview-number">${escapeHtml(row.assigned_number)}</div>
+      <div>
+        <div class="fw-semibold">${escapeHtml(row.display_name)}</div>
+        <div class="small-muted">${escapeHtml(row.subtitle || "")}</div>
+      </div>
+      <span class="badge text-bg-secondary">${escapeHtml(row.feed_type)}</span>
+    </div>`).join("");
+}
+
+function formatNextUpdate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+}
+
+function applySportsState() {
+  const settings = sportsState.settings || {};
+  const enabled = Boolean(settings.enabled);
+  sportsElement("sportsEnabled").checked = enabled;
+  sportsElement("sportsBody").classList.toggle("d-none", !enabled);
+  sportsElement("sportsEnabledBadge").textContent = enabled ? "Enabled" : "Off";
+  sportsElement("sportsEnabledBadge").classList.toggle("text-bg-success", enabled);
+  sportsElement("sportsEnabledBadge").classList.toggle("text-bg-secondary", !enabled);
+
+  sportsElement("sportsStartChannel").value = settings.start_channel ?? 1000;
+  sportsElement("sportsBlockSize").value = settings.channels_per_event ?? 10;
+  sportsElement("sportsGroupTitle").value = settings.group_title || "Sports Today";
+  sportsElement("sportsTimezone").value = settings.timezone || "America/New_York";
+  sportsElement("sportsRefreshTime").value = settings.refresh_time || "03:00";
+  sportsElement("sportsEventWindow").value = settings.event_window || "today";
+  sportsElement("sportsIncludeReplays").checked = Boolean(settings.include_replays);
+  sportsElement("sportsIncludePregame").checked = Boolean(settings.include_pregame);
+  sportsElement("sportsUseBackups").checked = Boolean(settings.use_backup_feeds);
+  sportsElement("sportsAutoUpdate").checked = Boolean(settings.auto_update);
+  sportsElement("sportsAutoUpdate").disabled = !enabled;
+  sportsElement("sportsRunScanBtn").disabled = !enabled;
+
+  const conflictCount = Number(sportsState.number_conflicts || 0);
+  const warning = sportsElement("sportsNumberWarning");
+  warning.classList.toggle("d-none", conflictCount === 0);
+  warning.textContent = conflictCount
+    ? `Starting channel overlaps ${conflictCount} manually numbered channel${conflictCount === 1 ? "" : "s"}. Choose a higher start number.`
+    : "";
+
+  const generatedCount = (sportsState.generated || []).length;
+  sportsElement("sportsHeaderSummary").textContent = enabled
+    ? `${sportsState.rules.length} selection${sportsState.rules.length === 1 ? "" : "s"} • ${generatedCount} generated channel${generatedCount === 1 ? "" : "s"}`
+    : "Automatically build a daily sports channel block.";
+
+  sportsElement("sportsNextUpdate").textContent = !enabled
+    ? "Sports automation disabled"
+    : settings.auto_update
+      ? `Next update: ${formatNextUpdate(sportsState.next_update)}`
+      : "Automatic updates disabled";
+
+  const lastScan = sportsState.last_scan;
+  sportsElement("sportsLastScan").textContent = lastScan
+    ? `Last scan: ${lastScan.status} • ${lastScan.channel_count} channels • ${formatNextUpdate(lastScan.finished_at)}`
+    : "";
+
+  renderSportsRules();
+  renderSportsPreview();
+  sportsGeneratedSignature = JSON.stringify((sportsState.generated || []).map(row => [row.id, row.generated_at, row.assigned_number]));
+}
+
+async function loadSports({quiet = false} = {}) {
+  try {
+    const response = await fetch("/api/sports/settings");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not load sports settings.");
+    sportsState = data;
+    setSportsError("");
+    applySportsState();
+  } catch (error) {
+    if (!quiet) setSportsError(error.message);
+  }
+}
+
+function scheduleSportsSave(changes) {
+  Object.assign(sportsState.settings, changes);
+  Object.assign(pendingSportsChanges, changes);
+  clearTimeout(sportsSaveTimer);
+  sportsSaveTimer = setTimeout(saveSportsSettings, 650);
+}
+
+async function saveSportsSettings() {
+  const changes = {...pendingSportsChanges};
+  pendingSportsChanges = {};
+  if (!Object.keys(changes).length) return true;
+  try {
+    const response = await fetch("/api/sports/settings", {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(changes)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not save sports settings.");
+    sportsState = data;
+    setSportsError("");
+    applySportsState();
+    return true;
+  } catch (error) {
+    Object.assign(pendingSportsChanges, changes);
+    setSportsError(`Could not save sports settings. ${error.message}`);
+    return false;
+  }
+}
+
+function sportsFamily(item) {
+  const league = String(item.league_id || item.id || "").toLowerCase();
+  const families = {
+    mlb: "Baseball",
+    nfl: "Football",
+    ncaaf: "Football",
+    nba: "Basketball",
+    wnba: "Basketball",
+    ncaab: "Basketball",
+    nhl: "Hockey",
+    mls: "Soccer",
+    nwsl: "Soccer",
+    cornhole: "Cornhole",
+    "formula-1": "Motorsports",
+    ufc: "Combat sports",
+    soccer: "Soccer"
+  };
+  return families[league] || "Other";
+}
+
+function updateSportsSelectionSportOptions() {
+  const type = sportsElement("sportsSelectionType").value;
+  const current = sportsElement("sportsSelectionSport").value;
+  const families = [...new Set(
+    sportsState.catalog
+      .filter(item => item.scope_type === type)
+      .map(sportsFamily)
+  )].sort((a, b) => a.localeCompare(b));
+  sportsElement("sportsSelectionSport").innerHTML =
+    `<option value="">All sports</option>` +
+    families.map(family => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join("");
+  if (families.includes(current)) sportsElement("sportsSelectionSport").value = current;
+}
+
+function updateSportsAddSelectedButton() {
+  const button = sportsElement("sportsAddSelectedBtn");
+  const count = pendingSportsSelections.size;
+  button.disabled = count === 0;
+  button.textContent = count ? `Add ${count} selected` : "Add selected";
+}
+
+function renderSportsSelectionResults() {
+  const type = sportsElement("sportsSelectionType").value;
+  const query = sportsElement("sportsSelectionSearch").value.trim().toLowerCase();
+  const family = sportsElement("sportsSelectionSport").value;
+  const existing = new Set(sportsState.rules.map(rule => `${rule.scope_type}:${rule.scope_id}`));
+  const items = sportsState.catalog.filter(item => {
+    if (item.scope_type !== type) return false;
+    if (family && sportsFamily(item) !== family) return false;
+    const haystack = `${item.name} ${item.subtitle} ${item.league_id || ""} ${(item.aliases || []).join(" ")}`.toLowerCase();
+    return !query || haystack.includes(query);
+  });
+
+  const placeholder = type === "team"
+    ? "Search teams…"
+    : type === "league"
+      ? "Search leagues…"
+      : type === "conference"
+        ? "Search conferences…"
+        : "Search sports…";
+  sportsElement("sportsSelectionSearch").placeholder = placeholder;
+
+  sportsElement("sportsSelectionResults").innerHTML = items.map(item => {
+    const key = `${item.scope_type}:${item.id}`;
+    const added = existing.has(key);
+    const checked = pendingSportsSelections.has(key);
+    const logo = item.logo_url
+      ? `<img class="sports-selection-logo" src="${escapeHtml(item.logo_url)}" alt="" loading="lazy">`
+      : `<span class="sports-selection-logo sports-selection-logo-fallback" aria-hidden="true">${escapeHtml((item.name || "?").slice(0, 1).toUpperCase())}</span>`;
+    return `
+      <label class="sports-selection-result ${added ? "is-added" : ""}" role="listitem">
+        <input class="form-check-input sports-selection-check" type="checkbox"
+          data-key="${escapeHtml(key)}" ${checked ? "checked" : ""} ${added ? "disabled" : ""}>
+        ${logo}
+        <span class="sports-selection-copy">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span class="small-muted">${escapeHtml(item.subtitle || sportsFamily(item))}</span>
+        </span>
+        ${added ? '<span class="badge text-bg-secondary">Added</span>' : '<span class="sports-selection-plus" aria-hidden="true">+</span>'}
+      </label>`;
+  }).join("") || `<div class="small-muted p-3">No matches.</div>`;
+  updateSportsAddSelectedButton();
+}
+
+async function addSelectedSportsRules() {
+  const selectedItems = [...pendingSportsSelections].map(key => {
+    const [scopeType, ...idParts] = key.split(":");
+    const scopeId = idParts.join(":");
+    const item = sportsState.catalog.find(entry => entry.scope_type === scopeType && entry.id === scopeId);
+    return item ? {
+      scope_type: item.scope_type,
+      scope_id: item.id,
+      feed_preference: item.scope_type === "team" ? "favorite" : "best"
+    } : null;
+  }).filter(Boolean);
+  if (!selectedItems.length) return;
+
+  const button = sportsElement("sportsAddSelectedBtn");
+  button.disabled = true;
+  button.textContent = "Adding…";
+  try {
+    const response = await fetch("/api/sports/rules", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({items: selectedItems})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not add sports selections.");
+    sportsState.rules = data.rules;
+    pendingSportsSelections.clear();
+    setSportsError("");
+    bootstrap.Modal.getInstance(sportsElement("sportsSelectionModal"))?.hide();
+    applySportsState();
+  } catch (error) {
+    setSportsError(error.message);
+    updateSportsAddSelectedButton();
+  }
+}
+
+
+async function updateSportsRule(ruleId, changes) {
+  const response = await fetch(`/api/sports/rules/${ruleId}`, {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(changes)
+  });
+  const data = await response.json();
+  if (!response.ok) return setSportsError(data.error || "Could not update sports selection.");
+  sportsState.rules = data.rules;
+  setSportsError("");
+  renderSportsRules();
+}
+
+async function deleteSportsRule(ruleId) {
+  const response = await fetch(`/api/sports/rules/${ruleId}`, {method: "DELETE"});
+  const data = await response.json();
+  if (!response.ok) return setSportsError(data.error || "Could not remove sports selection.");
+  sportsState.rules = data.rules;
+  setSportsError("");
+  renderSportsRules();
+  applySportsState();
+}
+
+async function runSportsScan() {
+  clearTimeout(sportsSaveTimer);
+  const settingsSaved = await saveSportsSettings();
+  if (!settingsSaved) return;
+
+  const button = sportsElement("sportsRunScanBtn");
+  button.disabled = true;
+  button.textContent = "Updating…";
+  setSportsError("");
+  try {
+    const response = await fetch("/api/sports/scan", {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Sports scan failed.");
+    sportsState = data.sports;
+    applyChannelPayload(data);
+    applySportsState();
+    setStatus(data.result.message || `Generated ${data.result.count} sports channels.`);
+  } catch (error) {
+    setSportsError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Update now";
+  }
+}
+
+async function pollSportsStatus() {
+  try {
+    const response = await fetch("/api/sports/status");
+    const data = await response.json();
+    if (!response.ok) return;
+    const signature = JSON.stringify((data.generated || []).map(row => [row.id, row.generated_at, row.assigned_number]));
+    const changed = sportsGeneratedSignature && signature !== sportsGeneratedSignature;
+    sportsState = data;
+    applySportsState();
+    if (changed) await loadInitialChannels({quiet: true});
+  } catch {
+    // Silent polling failure. User-facing errors are reserved for explicit actions.
+  }
+}
+
+function bindSports() {
+  if (!sportsElement("sportsEnabled")) return;
+  sportsModal = new bootstrap.Modal(sportsElement("sportsSelectionModal"));
+
+  sportsElement("sportsEnabled").addEventListener("change", event => {
+    const enabled = event.target.checked;
+    sportsElement("sportsBody").classList.toggle("d-none", !enabled);
+    sportsElement("sportsAutoUpdate").disabled = !enabled;
+    sportsElement("sportsRunScanBtn").disabled = !enabled;
+    scheduleSportsSave({enabled});
+  });
+  sportsElement("sportsAutoUpdate").addEventListener("change", event => scheduleSportsSave({auto_update: event.target.checked}));
+  sportsElement("sportsStartChannel").addEventListener("input", event => scheduleSportsSave({start_channel: Number(event.target.value)}));
+  sportsElement("sportsBlockSize").addEventListener("input", event => scheduleSportsSave({channels_per_event: Number(event.target.value)}));
+  sportsElement("sportsGroupTitle").addEventListener("input", event => scheduleSportsSave({group_title: event.target.value}));
+  sportsElement("sportsTimezone").addEventListener("change", event => scheduleSportsSave({timezone: event.target.value}));
+  sportsElement("sportsEventWindow").addEventListener("change", event => scheduleSportsSave({event_window: event.target.value}));
+  sportsElement("sportsIncludeReplays").addEventListener("change", event => scheduleSportsSave({include_replays: event.target.checked}));
+  sportsElement("sportsIncludePregame").addEventListener("change", event => scheduleSportsSave({include_pregame: event.target.checked}));
+  sportsElement("sportsUseBackups").addEventListener("change", event => scheduleSportsSave({use_backup_feeds: event.target.checked}));
+  sportsElement("sportsRefreshTime").addEventListener("change", event => {
+    if (event.target.value) scheduleSportsSave({refresh_time: event.target.value});
+  });
+
+  sportsElement("sportsAddSelectionBtn").addEventListener("click", () => {
+    pendingSportsSelections.clear();
+    sportsElement("sportsSelectionType").value = "team";
+    sportsElement("sportsSelectionSearch").value = "";
+    updateSportsSelectionSportOptions();
+    renderSportsSelectionResults();
+    sportsModal.show();
+  });
+  sportsElement("sportsSelectionType").addEventListener("change", () => {
+    sportsElement("sportsSelectionSearch").value = "";
+    updateSportsSelectionSportOptions();
+    renderSportsSelectionResults();
+  });
+  sportsElement("sportsSelectionSearch").addEventListener("input", renderSportsSelectionResults);
+  sportsElement("sportsSelectionSport").addEventListener("change", renderSportsSelectionResults);
+  sportsElement("sportsSelectionResults").addEventListener("change", event => {
+    const checkbox = event.target.closest(".sports-selection-check");
+    if (!checkbox) return;
+    if (checkbox.checked) pendingSportsSelections.add(checkbox.dataset.key);
+    else pendingSportsSelections.delete(checkbox.dataset.key);
+    updateSportsAddSelectedButton();
+  });
+  sportsElement("sportsAddSelectedBtn").addEventListener("click", addSelectedSportsRules);
+  sportsElement("sportsSelectionModal").addEventListener("hidden.bs.modal", () => {
+    pendingSportsSelections.clear();
+    updateSportsAddSelectedButton();
+  });
+  sportsElement("sportsRules").addEventListener("change", event => {
+    const row = event.target.closest(".sports-rule");
+    if (row && event.target.classList.contains("sports-rule-preference")) {
+      updateSportsRule(Number(row.dataset.id), {feed_preference: event.target.value});
+    }
+  });
+  sportsElement("sportsRules").addEventListener("click", event => {
+    const row = event.target.closest(".sports-rule");
+    if (row && event.target.classList.contains("sports-rule-remove")) {
+      deleteSportsRule(Number(row.dataset.id));
+    }
+  });
+  sportsElement("sportsRunScanBtn").addEventListener("click", runSportsScan);
+}
+
+async function initialize() {
+  await Promise.all([loadInitialChannels(), loadGroups(), loadSports()]);
+  render();
+  updateClearSearchButton();
+  setInterval(pollSportsStatus, 60000);
+}
+
+bindSports();
+initialize();
