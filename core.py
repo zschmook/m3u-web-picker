@@ -7,6 +7,7 @@ import re
 import sqlite3
 import threading
 import time
+import traceback
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -26,6 +27,8 @@ DB_PATH = APP_DIR / "m3u_picker.db"
 CONFIG_PATH = APP_DIR / "config.json"
 MASTER_CACHE_PATH = APP_DIR / "master_playlist_cache.m3u"
 EPG_CACHE_PATH = APP_DIR / "epg_cache.xml"
+SPORTS_EPG_PATH = EXPORT_DIR / "sports.xml"
+COMBINED_EPG_PATH = EXPORT_DIR / "combined.xml"
 
 PLAYLIST_NAME = "custom.m3u"
 PLAYLIST_PATH = EXPORT_DIR / PLAYLIST_NAME
@@ -619,16 +622,43 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             DB_PATH,
             list(channels),
             EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+            sports_epg_path=SPORTS_EPG_PATH,
+            combined_epg_path=COMBINED_EPG_PATH,
             trigger=trigger,
         )
         write_current_playlist()
+        guide_check = sports.validate_guide_exports(
+            DB_PATH,
+            playlist_path=PLAYLIST_PATH,
+            sports_epg_path=SPORTS_EPG_PATH,
+            combined_epg_path=COMBINED_EPG_PATH,
+        )
+        result["guide_check"] = guide_check
+        if not guide_check["ok"]:
+            print(f"Generated sports guide validation failed: {guide_check}")
         return result
     except SportsScanError:
         raise
     except Exception as exc:
-        # Keep credentials and Python internals out of the browser. The detailed
-        # exception remains available in Docker logs for debugging.
-        print(f"Sports update failed ({type(exc).__name__}).")
+        # Keep credentials and Python internals out of the browser. In debug mode,
+        # print the complete traceback to Docker logs so parser failures are
+        # actionable. Production logs keep the message compact.
+        debug_enabled = str(os.environ.get("FLASK_DEBUG", "")).lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        } or str(os.environ.get("M3U_DEBUG", "")).lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if debug_enabled:
+            print("Unexpected sports update traceback:")
+            traceback.print_exc()
+        else:
+            print(f"Sports update failed ({type(exc).__name__}).")
         raise SportsScanError(
             "Sports update failed. Existing sports channels were kept."
         ) from exc
@@ -725,6 +755,15 @@ def load_cached_master_playlist_on_startup() -> None:
     db_connect().close()
     if not MASTER_CACHE_PATH.exists():
         write_current_playlist()
+        try:
+            sports.rebuild_epg_exports(
+                DB_PATH,
+                base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+                sports_epg_path=SPORTS_EPG_PATH,
+                combined_epg_path=COMBINED_EPG_PATH,
+            )
+        except Exception as exc:
+            print(f"Startup sports guide rebuild failed: {exc}")
         return
     try:
         text = MASTER_CACHE_PATH.read_text(encoding="utf-8-sig", errors="replace")
@@ -732,6 +771,12 @@ def load_cached_master_playlist_on_startup() -> None:
         sports.discover_catalog_from_channels(DB_PATH, channels)
         apply_saved_selections_to_loaded_channels()
         write_current_playlist()
+        sports.rebuild_epg_exports(
+            DB_PATH,
+            base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+            sports_epg_path=SPORTS_EPG_PATH,
+            combined_epg_path=COMBINED_EPG_PATH,
+        )
     except Exception as exc:
         print(f"Startup cache load failed: {exc}")
 

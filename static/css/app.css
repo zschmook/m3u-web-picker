@@ -492,3 +492,21 @@ thead th {
 .sports-selection-dialog .modal-title {
   color: #e5e7eb;
 }
+
+
+/* Update-now progress indicator. The button is disabled while a scan is active. */
+.sports-scan-spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.45rem;
+  vertical-align: -0.15rem;
+  border: 0.16rem solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: sports-scan-spin 0.75s linear infinite;
+}
+
+@keyframes sports-scan-spin {
+  to { transform: rotate(360deg); }
+}

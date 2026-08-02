@@ -116,6 +116,8 @@ def register_routes(app):
             playlist_exists=core.PLAYLIST_PATH.exists(),
             playlist_url="/playlist/custom.m3u",
             playlist_all_url="/playlist/all.m3u",
+            sports_epg_url="/epg/sports.xml",
+            combined_epg_url="/epg/combined.xml",
             playlist_path=str(core.PLAYLIST_PATH),
             source_url_configured=bool(core.last_source_url),
             source_mode=core.source_mode,
@@ -243,16 +245,76 @@ def register_routes(app):
         payload["number_conflicts"] = core.sports_number_conflicts()
         return jsonify(payload)
 
+    @app.get("/api/sports/guide-check")
+    def api_sports_guide_check():
+        return jsonify(
+            sports.validate_guide_exports(
+                core.DB_PATH,
+                playlist_path=core.PLAYLIST_PATH,
+                sports_epg_path=core.SPORTS_EPG_PATH,
+                combined_epg_path=core.COMBINED_EPG_PATH,
+            )
+        )
+
+    @app.get("/epg/sports.xml")
+    def sports_epg():
+        if not core.SPORTS_EPG_PATH.exists():
+            sports.rebuild_epg_exports(
+                core.DB_PATH,
+                base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
+                sports_epg_path=core.SPORTS_EPG_PATH,
+                combined_epg_path=core.COMBINED_EPG_PATH,
+            )
+        response = send_file(
+            core.SPORTS_EPG_PATH,
+            mimetype="application/xml",
+            as_attachment=False,
+            download_name="sports.xml",
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.SPORTS_EPG_PATH.stat().st_mtime))
+        return response
+
+    @app.get("/epg/combined.xml")
+    def combined_epg():
+        if not core.COMBINED_EPG_PATH.exists():
+            sports.rebuild_epg_exports(
+                core.DB_PATH,
+                base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
+                sports_epg_path=core.SPORTS_EPG_PATH,
+                combined_epg_path=core.COMBINED_EPG_PATH,
+            )
+        response = send_file(
+            core.COMBINED_EPG_PATH,
+            mimetype="application/xml",
+            as_attachment=False,
+            download_name="combined.xml",
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.SPORTS_EPG_PATH.stat().st_mtime))
+        return response
+
     @app.get("/playlist/custom.m3u")
     def playlist():
+        guide_url = request.url_root.rstrip("/") + "/epg/combined.xml"
         if not core.PLAYLIST_PATH.exists():
-            return Response("#EXTM3U\n", mimetype="audio/x-mpegurl")
-        return send_file(
-            core.PLAYLIST_PATH,
-            mimetype="audio/x-mpegurl",
-            as_attachment=False,
-            download_name=core.PLAYLIST_NAME,
-        )
+            text = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"\n'
+        else:
+            text = core.PLAYLIST_PATH.read_text(encoding="utf-8-sig", errors="replace")
+            lines = text.splitlines()
+            header = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
+            if lines and lines[0].startswith("#EXTM3U"):
+                lines[0] = header
+            else:
+                lines.insert(0, header)
+            text = "\n".join(lines) + "\n"
+        response = Response(text, mimetype="audio/x-mpegurl")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
     @app.get("/playlist/all.m3u")
     def playlist_all():

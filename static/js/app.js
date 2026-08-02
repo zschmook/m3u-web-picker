@@ -719,6 +719,7 @@ function sportsFamily(item) {
   const league = String(item.league_id || item.id || "").toLowerCase();
   const families = {
     mlb: "Baseball",
+    milb: "Baseball",
     nfl: "Football",
     ncaaf: "Football",
     nba: "Basketball",
@@ -865,7 +866,8 @@ async function runSportsScan() {
 
   const button = sportsElement("sportsRunScanBtn");
   button.disabled = true;
-  button.textContent = "Updating…";
+  button.setAttribute("aria-busy", "true");
+  button.innerHTML = '<span class="sports-scan-spinner" aria-hidden="true"></span><span>Scanning…</span>';
   setSportsError("");
   try {
     const response = await fetch("/api/sports/scan", {method: "POST"});
@@ -879,6 +881,7 @@ async function runSportsScan() {
     setSportsError(error.message);
   } finally {
     button.disabled = false;
+    button.removeAttribute("aria-busy");
     button.textContent = "Update now";
   }
 }

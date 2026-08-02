@@ -38,6 +38,7 @@ RULE_PRIORITY = {"team": 0, "conference": 1, "league": 2, "sport": 3}
 LEAGUE_NAMES = {
     "nfl": "NFL",
     "mlb": "MLB",
+    "milb": "MiLB",
     "nba": "NBA",
     "nhl": "NHL",
     "wnba": "WNBA",
@@ -50,6 +51,7 @@ LEAGUE_NAMES = {
 LEAGUE_PATTERNS = {
     "nfl": [r"\bnfl\b", r"national football league"],
     "mlb": [r"\bmlb\b", r"major league baseball"],
+    "milb": [r"\bmilb\b", r"minor league baseball"],
     "nba": [r"\bnba\b", r"national basketball association"],
     "nhl": [r"\bnhl\b", r"national hockey league"],
     "wnba": [r"\bwnba\b"],
@@ -86,6 +88,46 @@ MATCHUP_RE = re.compile(
 )
 LEADING_TIME_RE = re.compile(r"\b(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)\b", re.I)
 
+MLB_TEAMS = [
+    ("arizona-diamondbacks", "Arizona Diamondbacks", ["ARI", "Diamondbacks", "D-backs", "Dbacks"]),
+    ("atlanta-braves", "Atlanta Braves", ["ATL", "Braves"]),
+    ("baltimore-orioles", "Baltimore Orioles", ["BAL", "Orioles", "O's"]),
+    ("boston-red-sox", "Boston Red Sox", ["BOS", "Red Sox"]),
+    ("chicago-cubs", "Chicago Cubs", ["CHC", "Cubs"]),
+    ("chicago-white-sox", "Chicago White Sox", ["CHW", "CWS", "White Sox"]),
+    ("cincinnati-reds", "Cincinnati Reds", ["CIN", "Reds"]),
+    ("cleveland-guardians", "Cleveland Guardians", ["CLE", "Guardians"]),
+    ("colorado-rockies", "Colorado Rockies", ["COL", "Rockies"]),
+    ("detroit-tigers", "Detroit Tigers", ["DET", "Tigers"]),
+    ("houston-astros", "Houston Astros", ["HOU", "Astros"]),
+    ("kansas-city-royals", "Kansas City Royals", ["KC", "KCR", "Royals"]),
+    ("los-angeles-angels", "Los Angeles Angels", ["LAA", "Angels"]),
+    ("los-angeles-dodgers", "Los Angeles Dodgers", ["LAD", "Dodgers"]),
+    ("miami-marlins", "Miami Marlins", ["MIA", "Marlins"]),
+    ("milwaukee-brewers", "Milwaukee Brewers", ["MIL", "Brewers"]),
+    ("minnesota-twins", "Minnesota Twins", ["MIN", "Twins"]),
+    ("new-york-mets", "New York Mets", ["NYM", "Mets"]),
+    ("new-york-yankees", "New York Yankees", ["NYY", "Yankees"]),
+    ("oakland-athletics", "Oakland Athletics", ["ATH", "OAK", "Athletics", "A's"]),
+    ("philadelphia-phillies", "Philadelphia Phillies", ["PHI", "Phillies"]),
+    ("pittsburgh-pirates", "Pittsburgh Pirates", ["PIT", "Pirates"]),
+    ("san-diego-padres", "San Diego Padres", ["SD", "SDP", "Padres"]),
+    ("san-francisco-giants", "San Francisco Giants", ["SF", "SFG", "Giants"]),
+    ("seattle-mariners", "Seattle Mariners", ["SEA", "Mariners"]),
+    ("st-louis-cardinals", "St. Louis Cardinals", ["STL", "Cardinals"]),
+    ("tampa-bay-rays", "Tampa Bay Rays", ["TB", "TBR", "Rays"]),
+    ("texas-rangers", "Texas Rangers", ["TEX", "Rangers"]),
+    ("toronto-blue-jays", "Toronto Blue Jays", ["TOR", "Blue Jays", "Jays"]),
+    ("washington-nationals", "Washington Nationals", ["WSH", "WSN", "Nationals", "Nats"]),
+]
+
+MLB_ALIASES_BY_NAME = {
+    _normalize_name: aliases
+    for _slug_name, display_name, aliases in MLB_TEAMS
+    for _normalize_name in [re.sub(r"[^a-z0-9]+", " ", display_name.lower()).strip()]
+}
+
+
 CONFERENCE_TEAMS = {
     "ncaaf:big-ten": [
         "Illinois", "Indiana", "Iowa", "Maryland", "Michigan", "Michigan State",
@@ -108,6 +150,7 @@ CONFERENCE_TEAMS = {
 SEED_CATALOG = [
     ("league", "nfl", "NFL", "Every NFL game", "nfl", [], "", {}),
     ("league", "mlb", "MLB", "Every MLB game", "mlb", [], "", {}),
+    ("league", "milb", "MiLB", "Every Minor League Baseball game", "milb", ["Minor League Baseball"], "", {}),
     ("league", "nba", "NBA", "Every NBA game", "nba", [], "", {}),
     ("league", "nhl", "NHL", "Every NHL game", "nhl", [], "", {}),
     ("league", "wnba", "WNBA", "Every WNBA game", "wnba", [], "", {}),
@@ -115,16 +158,6 @@ SEED_CATALOG = [
     ("league", "ncaab", "College Basketball", "Every college basketball game", "ncaab", [], "", {}),
     ("league", "mls", "MLS", "Every MLS match", "mls", [], "", {}),
     ("league", "nwsl", "NWSL", "Every NWSL match", "nwsl", [], "", {}),
-    (
-        "team",
-        "mlb:philadelphia-phillies",
-        "Philadelphia Phillies",
-        "MLB team • home and away games",
-        "mlb",
-        ["Phillies", "Philadelphia Phillies", "PHI"],
-        "",
-        {},
-    ),
     (
         "conference",
         "ncaaf:big-ten",
@@ -161,6 +194,21 @@ SEED_CATALOG = [
     ("sport", "soccer", "Soccer", "Soccer matches from any competition", "", ["football"], "", {}),
 ]
 
+SEED_CATALOG.extend(
+    (
+        "team",
+        f"mlb:{slug}",
+        display_name,
+        "MLB team • home and away games",
+        "mlb",
+        [display_name, *aliases],
+        "",
+        {},
+    )
+    for slug, display_name, aliases in MLB_TEAMS
+)
+
+
 LEGACY_DEMO_RULES = {
     ("league", "nfl"),
     ("team", "mlb:philadelphia-phillies"),
@@ -180,6 +228,77 @@ NETWORK_WORDS = {
     "espn", "espn2", "espnu", "fox", "fs1", "fs2", "cbs", "cbssn", "nbc",
     "tnt", "tbs", "abc", "apple", "prime", "network", "redzone", "strike zone",
 }
+
+MAX_MALFORMED_SAMPLES = 10
+
+XMLTV_GENERATOR_NAME = "M3U Web Picker Sports Automation"
+GUIDE_PREGAME_HOURS = 24
+GUIDE_POSTGAME_HOURS = 2
+ESTIMATED_EVENT_HOURS = {
+    "mlb": 4,
+    "milb": 4,
+    "nfl": 4,
+    "ncaaf": 4,
+    "nba": 3,
+    "wnba": 3,
+    "nhl": 3,
+    "ncaab": 3,
+    "mls": 3,
+    "nwsl": 3,
+}
+
+
+class MalformedSportsEntry(ValueError):
+    """A provider entry contains bad event data and may be skipped safely."""
+
+
+def _new_scan_diagnostics() -> dict:
+    return {
+        "malformed_m3u": 0,
+        "malformed_epg": 0,
+        "samples": [],
+    }
+
+
+def _record_malformed_entry(
+    diagnostics: dict,
+    *,
+    source: str,
+    label: str,
+    exc: Exception,
+) -> None:
+    key = f"malformed_{source}"
+    diagnostics[key] = int(diagnostics.get(key, 0)) + 1
+    samples = diagnostics.setdefault("samples", [])
+    if len(samples) < MAX_MALFORMED_SAMPLES:
+        clean_label = re.sub(r"\s+", " ", str(label or "unnamed entry")).strip()
+        samples.append(
+            {
+                "source": source.upper(),
+                "label": clean_label[:180],
+                "error": f"{type(exc).__name__}: {exc}"[:240],
+            }
+        )
+
+
+def _malformed_count(diagnostics: dict) -> int:
+    return int(diagnostics.get("malformed_m3u", 0)) + int(
+        diagnostics.get("malformed_epg", 0)
+    )
+
+
+def _log_malformed_summary(diagnostics: dict) -> None:
+    count = _malformed_count(diagnostics)
+    if not count:
+        return
+    print(f"Sports scan skipped {count} malformed provider entr{'y' if count == 1 else 'ies'}.")
+    for sample in diagnostics.get("samples", []):
+        print(
+            "  - "
+            f"{sample.get('source', 'SOURCE')} entry "
+            f"{sample.get('label', 'unnamed entry')!r}: "
+            f"{sample.get('error', 'invalid data')}"
+        )
 
 
 def _connect(db_path: Path | str) -> sqlite3.Connection:
@@ -323,13 +442,139 @@ def init_db(db_path: Path | str) -> None:
                 group_title TEXT NOT NULL,
                 url TEXT NOT NULL,
                 tvg_id TEXT NOT NULL DEFAULT '',
+                source_tvg_id TEXT NOT NULL DEFAULT '',
                 tvg_logo TEXT NOT NULL DEFAULT '',
                 raw_json TEXT NOT NULL,
+                event_title TEXT NOT NULL DEFAULT '',
                 event_start TEXT,
+                event_end TEXT,
+                is_replay INTEGER NOT NULL DEFAULT 0,
                 generated_at TEXT NOT NULL
             )
             """
         )
+        # Add guide-related columns when upgrading an existing sports database.
+        for column_name, column_sql in (
+            ("source_tvg_id", "TEXT NOT NULL DEFAULT ''"),
+            ("event_title", "TEXT NOT NULL DEFAULT ''"),
+            ("event_end", "TEXT"),
+            ("is_replay", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            try:
+                conn.execute(
+                    f"ALTER TABLE sports_generated ADD COLUMN {column_name} {column_sql}"
+                )
+            except sqlite3.OperationalError:
+                pass
+
+        # Existing v20.3 rows inherited provider tvg-id values. Upgrade them
+        # once so every generated feed has its own stable XMLTV identity.
+        guide_migration_key = "migration_generated_xmltv_ids_v20_4"
+        guide_migrated = conn.execute(
+            "SELECT 1 FROM sports_settings WHERE key = ?",
+            (guide_migration_key,),
+        ).fetchone()
+        if not guide_migrated:
+            legacy_rows = conn.execute(
+                """
+                SELECT id, event_key, feed_type, source_channel_key, display_name,
+                       assigned_number, tvg_id, source_tvg_id, raw_json, league_id,
+                       event_start, event_title, event_end
+                FROM sports_generated
+                """
+            ).fetchall()
+            for legacy_row in legacy_rows:
+                old_tvg_id = str(legacy_row["tvg_id"] or "")
+                new_tvg_id = old_tvg_id
+                source_tvg_id = str(legacy_row["source_tvg_id"] or "")
+                if not old_tvg_id.startswith("m3u-picker.sports."):
+                    source_tvg_id = source_tvg_id or old_tvg_id
+                    new_tvg_id = _generated_tvg_id(int(legacy_row["assigned_number"]))
+                raw = _json_load(legacy_row["raw_json"], [])
+                if raw and new_tvg_id != old_tvg_id:
+                    raw[0] = _rewrite_extinf(
+                        raw[0],
+                        {"tvg-id": new_tvg_id},
+                        str(legacy_row["display_name"] or "Sports event"),
+                    )
+                event_title = str(legacy_row["event_title"] or "").strip()
+                if not event_title:
+                    event_title = re.sub(
+                        r"\s+—\s+[^—]+$",
+                        "",
+                        re.sub(
+                            r"^[^•]+•\s*",
+                            "",
+                            str(legacy_row["display_name"] or "Sports event"),
+                        ),
+                    ).strip()
+                event_end = legacy_row["event_end"]
+                if not event_end and legacy_row["event_start"]:
+                    try:
+                        event_end = (
+                            datetime.fromisoformat(legacy_row["event_start"])
+                            + _event_duration(str(legacy_row["league_id"] or ""))
+                        ).isoformat()
+                    except (TypeError, ValueError, OverflowError):
+                        event_end = None
+                conn.execute(
+                    """
+                    UPDATE sports_generated
+                    SET tvg_id = ?, source_tvg_id = ?, raw_json = ?,
+                        event_title = ?, event_end = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        new_tvg_id,
+                        source_tvg_id,
+                        json.dumps(raw),
+                        event_title,
+                        event_end,
+                        legacy_row["id"],
+                    ),
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (guide_migration_key, json.dumps(True)),
+            )
+
+        # Temporary sports channels reuse fixed numbered slots. Keep the XMLTV
+        # identity tied to that slot rather than to a changing event or stream
+        # URL so Jellyfin does not lose its guide mapping after each daily scan.
+        slot_guide_migration_key = "migration_generated_xmltv_slot_ids_v20_7"
+        slot_guide_migrated = conn.execute(
+            "SELECT 1 FROM sports_settings WHERE key = ?",
+            (slot_guide_migration_key,),
+        ).fetchone()
+        if not slot_guide_migrated:
+            slot_rows = conn.execute(
+                """
+                SELECT id, assigned_number, display_name, tvg_id, raw_json
+                FROM sports_generated
+                """
+            ).fetchall()
+            for slot_row in slot_rows:
+                new_tvg_id = _generated_tvg_id(int(slot_row["assigned_number"]))
+                raw = _json_load(slot_row["raw_json"], [])
+                if raw:
+                    raw[0] = _rewrite_extinf(
+                        raw[0],
+                        {"tvg-id": new_tvg_id},
+                        str(slot_row["display_name"] or "Sports event"),
+                    )
+                conn.execute(
+                    """
+                    UPDATE sports_generated
+                    SET tvg_id = ?, raw_json = ?
+                    WHERE id = ?
+                    """,
+                    (new_tvg_id, json.dumps(raw), slot_row["id"]),
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (slot_guide_migration_key, json.dumps(True)),
+            )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sports_scan_runs (
@@ -598,6 +843,10 @@ def _team_feed_identity(channel: dict) -> tuple[str, str, str] | None:
     return None
 
 
+def _known_mlb_aliases(team_name: str) -> list[str]:
+    return list(MLB_ALIASES_BY_NAME.get(_normalize(team_name), []))
+
+
 def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]) -> int:
     """Cache provider-discovered team names and logos in SQLite."""
     init_db(db_path)
@@ -608,6 +857,8 @@ def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]
             continue
         league_id, team_id, team_name = identity
         aliases = [team_name]
+        if league_id == "mlb":
+            aliases.extend(_known_mlb_aliases(team_name))
         words = team_name.split()
         if len(words) >= 2:
             aliases.append(words[-1])
@@ -874,18 +1125,25 @@ def _parse_xmltv_time(value: str, default_tz: ZoneInfo) -> datetime | None:
     match = re.match(r"^(\d{14})(?:\s+([+-]\d{4}|Z))?", value)
     if not match:
         return None
-    base = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
-    offset = match.group(2)
-    if not offset:
-        return base.replace(tzinfo=default_tz)
-    if offset == "Z":
-        return base.replace(tzinfo=ZoneInfo("UTC"))
-    sign = 1 if offset.startswith("+") else -1
-    hours = int(offset[1:3])
-    minutes = int(offset[3:5])
-    from datetime import timezone
+    try:
+        base = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+        offset = match.group(2)
+        if not offset:
+            return base.replace(tzinfo=default_tz)
+        if offset == "Z":
+            return base.replace(tzinfo=ZoneInfo("UTC"))
+        sign = 1 if offset.startswith("+") else -1
+        hours = int(offset[1:3])
+        minutes = int(offset[3:5])
+        if hours > 23 or minutes > 59:
+            raise ValueError("invalid XMLTV UTC offset")
+        from datetime import timezone
 
-    return base.replace(tzinfo=timezone(sign * timedelta(hours=hours, minutes=minutes)))
+        return base.replace(
+            tzinfo=timezone(sign * timedelta(hours=hours, minutes=minutes))
+        )
+    except (ValueError, OverflowError) as exc:
+        raise MalformedSportsEntry(f"Invalid XMLTV timestamp {value!r}.") from exc
 
 
 def _channel_text(channel: dict) -> str:
@@ -895,12 +1153,42 @@ def _channel_text(channel: dict) -> str:
     )
 
 
-def _detect_league(text: str) -> str:
-    normalized = text.lower()
-    for league_id, patterns in LEAGUE_PATTERNS.items():
-        if any(re.search(pattern, normalized, re.I) for pattern in patterns):
-            return league_id
-    return ""
+def _league_matches(text: str) -> list[str]:
+    normalized = str(text or "").lower()
+    return [
+        league_id
+        for league_id, patterns in LEAGUE_PATTERNS.items()
+        if any(re.search(pattern, normalized, re.I) for pattern in patterns)
+    ]
+
+
+def _detect_league(primary_text: str, fallback_text: str = "") -> str:
+    """Detect a league without letting shared provider groups blur MLB and MiLB.
+
+    Event titles and XMLTV categories are authoritative. Provider group/title
+    metadata is only a fallback, and an ambiguous ``MLB / MiLB`` fallback is
+    deliberately left unclassified rather than guessed.
+    """
+    primary_matches = _league_matches(primary_text)
+    if primary_matches:
+        # A title should normally contain only one league. If both baseball
+        # tokens appear, the more specific MiLB token wins only when MLB is not
+        # also explicitly present in the same title/category text.
+        if "milb" in primary_matches and "mlb" not in primary_matches:
+            return "milb"
+        if "mlb" in primary_matches and "milb" not in primary_matches:
+            return "mlb"
+        if len(primary_matches) == 1:
+            return primary_matches[0]
+        for league_id in LEAGUE_PATTERNS:
+            if league_id in primary_matches and league_id not in {"mlb", "milb"}:
+                return league_id
+        return ""
+
+    fallback_matches = _league_matches(fallback_text)
+    if {"mlb", "milb"}.issubset(fallback_matches):
+        return ""
+    return fallback_matches[0] if len(fallback_matches) == 1 else ""
 
 
 def _detect_sport(text: str) -> str:
@@ -918,7 +1206,7 @@ def _strip_provider_prefix(value: str) -> str:
         if re.search(r"\d|MLB|NBA|NHL|FLSP|Victory|Apple|MiLB", prefix, re.I):
             text = remainder.strip()
     text = re.sub(r"^(?:NFL|NHL|NCAAF|NCAAB|PPV|EVENTS)\s*(?:SD\s*)?\d{1,3}\s*:\s*", "", text, flags=re.I)
-    text = re.sub(r"^(?:MLB|NBA|NHL|NFL|NCAAF|NCAAB|NWSL)\s*:\s*", "", text, flags=re.I)
+    text = re.sub(r"^(?:MiLB|MLB|NBA|NHL|NFL|NCAAF|NCAAB|NWSL)\s*:\s*", "", text, flags=re.I)
     return text.strip(" |:-")
 
 
@@ -930,19 +1218,39 @@ def _extract_event_datetime(text: str, settings: dict, now: datetime) -> tuple[s
         time_value = match.group("time") or "00:00:00"
         if len(time_value) == 5:
             time_value += ":00"
-        start = datetime.fromisoformat(f"{match.group('date')}T{time_value}").replace(tzinfo=timezone)
+        timestamp = f"{match.group('date')}T{time_value}"
+        try:
+            start = datetime.fromisoformat(timestamp).replace(tzinfo=timezone)
+        except (ValueError, OverflowError) as exc:
+            raise MalformedSportsEntry(
+                f"Invalid embedded event timestamp {timestamp!r}."
+            ) from exc
         return clean, start
 
     time_match = LEADING_TIME_RE.search(text)
     if time_match:
-        hour = int(time_match.group("hour"))
+        raw_hour = int(time_match.group("hour"))
         minute = int(time_match.group("minute") or 0)
         ampm = time_match.group("ampm").lower()
+        if not 1 <= raw_hour <= 12 or not 0 <= minute <= 59:
+            raise MalformedSportsEntry(
+                f"Invalid event time {time_match.group(0)!r}."
+            )
+        hour = raw_hour
         if ampm == "pm" and hour != 12:
             hour += 12
         if ampm == "am" and hour == 12:
             hour = 0
-        start = datetime.combine(_sports_day(now, settings), dt_time(hour, minute), tzinfo=timezone)
+        try:
+            start = datetime.combine(
+                _sports_day(now, settings),
+                dt_time(hour, minute),
+                tzinfo=timezone,
+            )
+        except (ValueError, OverflowError) as exc:
+            raise MalformedSportsEntry(
+                f"Invalid event time {time_match.group(0)!r}."
+            ) from exc
         return text, start
     return text, None
 
@@ -972,6 +1280,27 @@ def _find_team_id(text: str, league_id: str, teams: list[dict]) -> tuple[str, st
     return team_id, name
 
 
+def _infer_baseball_league(
+    left: str,
+    right: str,
+    teams: list[dict],
+) -> str:
+    """Resolve an ambiguous shared baseball group from both participants.
+
+    Provider groups commonly say ``MLB / MiLB``. A matchup is promoted to a
+    league only when both sides resolve inside the same catalog, preventing an
+    MLB nickname embedded in a minor-league team name from leaking across the
+    boundary.
+    """
+    resolved = []
+    for candidate in ("mlb", "milb"):
+        away_id, _away_name = _find_team_id(left, candidate, teams)
+        home_id, _home_name = _find_team_id(right, candidate, teams)
+        if away_id and home_id:
+            resolved.append(candidate)
+    return resolved[0] if len(resolved) == 1 else ""
+
+
 def _event_from_text(
     db_path: Path | str,
     channel: dict,
@@ -988,7 +1317,11 @@ def _event_from_text(
     if PREGAME_RE.search(full_text) and not settings.get("include_pregame"):
         return None
 
-    league_id = _detect_league(full_text)
+    league_id = _detect_league(text)
+    if not league_id and extra_text:
+        league_id = _detect_league(extra_text)
+    if not league_id:
+        league_id = _detect_league("", _channel_text(channel))
     sport_id = _detect_sport(full_text)
     cleaned, parsed_start = _extract_event_datetime(_strip_provider_prefix(text), settings, now)
     start = forced_start or parsed_start
@@ -997,7 +1330,7 @@ def _event_from_text(
     match = MATCHUP_RE.search(cleaned)
     # Team-sport league rules are intended to add games, not static networks,
     # studio shows, RedZone channels, or numbered empty event slots.
-    if league_id in {"nfl", "mlb", "nba", "nhl", "wnba", "ncaaf", "ncaab", "mls", "nwsl"} and not match:
+    if league_id in {"nfl", "mlb", "milb", "nba", "nhl", "wnba", "ncaaf", "ncaab", "mls", "nwsl"} and not match:
         return None
     teams = _team_catalog(db_path)
     away_id = home_id = ""
@@ -1005,6 +1338,8 @@ def _event_from_text(
     if match:
         left = match.group("left").strip(" |:-")
         right = match.group("right").strip(" |:-")
+        if not league_id:
+            league_id = _infer_baseball_league(left, right, teams)
         away_id, away_name = _find_team_id(left, league_id, teams)
         home_id, home_name = _find_team_id(right, league_id, teams)
         display_name = f"{away_name} at {home_name}"
@@ -1041,6 +1376,7 @@ def _event_from_text(
         "start": start,
         "source_channels": [channel],
         "source_text": full_text,
+        "is_replay": bool(REPLAY_RE.search(full_text)),
     }
 
 
@@ -1052,14 +1388,29 @@ def _within_window(start: datetime, window_start: datetime, window_end: datetime
     return window_start <= local < window_end
 
 
-def _m3u_events(db_path: Path | str, channels: Iterable[dict], settings: dict, now: datetime) -> list[dict]:
+def _m3u_events(
+    db_path: Path | str,
+    channels: Iterable[dict],
+    settings: dict,
+    now: datetime,
+    diagnostics: dict,
+) -> list[dict]:
     window_start, window_end, _ = _target_window(now, settings)
     events = []
     for channel in channels:
         if _team_feed_identity(channel):
             continue
         text = str(channel.get("name", "") or "")
-        event = _event_from_text(db_path, channel, text, settings, now)
+        try:
+            event = _event_from_text(db_path, channel, text, settings, now)
+        except MalformedSportsEntry as exc:
+            _record_malformed_entry(
+                diagnostics,
+                source="m3u",
+                label=text or str(channel.get("tvg_name", "") or ""),
+                exc=exc,
+            )
+            continue
         if event and _within_window(event["start"], window_start, window_end):
             events.append(event)
     return events
@@ -1071,6 +1422,7 @@ def _epg_events(
     channels: list[dict],
     settings: dict,
     now: datetime,
+    diagnostics: dict,
 ) -> list[dict]:
     if not epg_path or not epg_path.exists() or epg_path.stat().st_size == 0:
         return []
@@ -1105,12 +1457,23 @@ def _epg_events(
             if tag != "programme":
                 continue
 
-            start = _parse_xmltv_time(element.attrib.get("start", ""), timezone)
+            channel_id = element.attrib.get("channel", "")
+            raw_start = element.attrib.get("start", "")
+            try:
+                start = _parse_xmltv_time(raw_start, timezone)
+            except MalformedSportsEntry as exc:
+                _record_malformed_entry(
+                    diagnostics,
+                    source="epg",
+                    label=f"programme channel={channel_id or 'unknown'} start={raw_start or 'missing'}",
+                    exc=exc,
+                )
+                element.clear()
+                continue
             if not start or not _within_window(start, window_start, window_end):
                 element.clear()
                 continue
 
-            channel_id = element.attrib.get("channel", "")
             source_channels = list(by_tvg_id.get(channel_id, []))
             if not source_channels:
                 for display_name in xml_names.get(channel_id, []):
@@ -1130,15 +1493,25 @@ def _epg_events(
                 element.clear()
                 continue
 
-            parsed = _event_from_text(
-                db_path,
-                source_channels[0],
-                title,
-                settings,
-                now,
-                forced_start=start,
-                extra_text=extra,
-            )
+            try:
+                parsed = _event_from_text(
+                    db_path,
+                    source_channels[0],
+                    title,
+                    settings,
+                    now,
+                    forced_start=start,
+                    extra_text=extra,
+                )
+            except MalformedSportsEntry as exc:
+                _record_malformed_entry(
+                    diagnostics,
+                    source="epg",
+                    label=title,
+                    exc=exc,
+                )
+                element.clear()
+                continue
             if parsed:
                 parsed["source_channels"] = source_channels
                 output.append(parsed)
@@ -1317,6 +1690,7 @@ def _generated_raw(channel: dict, generated: dict) -> list[str]:
     if not raw:
         raw = ["#EXTINF:-1", generated["url"]]
     attrs = {
+        "tvg-id": generated["tvg_id"],
         "tvg-chno": str(generated["assigned_number"]),
         "tvg-name": generated["display_name"],
         "group-title": generated["group_title"],
@@ -1330,6 +1704,489 @@ def _generated_raw(channel: dict, generated: dict) -> list[str]:
     if raw[-1] != generated["url"]:
         raw[-1] = generated["url"]
     return raw
+
+
+
+def _generated_tvg_id(assigned_number: int) -> str:
+    """Return a credential-free XMLTV id stable for one numbered sports slot.
+
+    Event names and provider URLs change every day. Jellyfin can retain a tuner
+    channel between refreshes, so tying the guide id to either value can leave
+    the retained channel mapped to yesterday's XMLTV id. The assigned sports
+    channel number is the durable identity the user configured.
+    """
+    number = int(assigned_number)
+    if number < 0:
+        raise ValueError("Sports channel numbers must be non-negative.")
+    return f"m3u-picker-sports-{number}"
+
+
+def _xmltv_time(value: datetime) -> str:
+    local = value if value.tzinfo else value.replace(tzinfo=ZoneInfo("UTC"))
+    return local.strftime("%Y%m%d%H%M%S %z")
+
+
+def _parse_iso_datetime(value: str | None, fallback_tz: ZoneInfo) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=fallback_tz)
+        return parsed
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _event_duration(league_id: str) -> timedelta:
+    return timedelta(hours=ESTIMATED_EVENT_HOURS.get(league_id, 3))
+
+
+def _clean_feed_subtitle(value: str) -> str:
+    # The M3U subtitle already carries the start time. XMLTV has explicit times,
+    # so omit the duplicate trailing time from programme subtitles.
+    return re.sub(r"\s*•\s*\d{1,2}:\d{2}\s+(?:AM|PM)\s*$", "", value or "", flags=re.I).strip()
+
+
+def _add_text(parent: ElementTree.Element, tag: str, text: str, **attrs) -> ElementTree.Element:
+    element = ElementTree.SubElement(parent, tag, {key: str(value) for key, value in attrs.items()})
+    element.text = str(text)
+    return element
+
+
+def _add_programme(
+    root: ElementTree.Element,
+    *,
+    channel_id: str,
+    start: datetime,
+    stop: datetime,
+    title: str,
+    subtitle: str,
+    description: str,
+    categories: Iterable[str],
+    is_live: bool = False,
+    is_replay: bool = False,
+) -> bool:
+    if stop <= start:
+        return False
+    programme = ElementTree.SubElement(
+        root,
+        "programme",
+        {
+            "start": _xmltv_time(start),
+            "stop": _xmltv_time(stop),
+            "channel": channel_id,
+        },
+    )
+    _add_text(programme, "title", title, lang="en")
+    if subtitle:
+        _add_text(programme, "sub-title", subtitle, lang="en")
+    if description:
+        _add_text(programme, "desc", description, lang="en")
+    for category in categories:
+        if category:
+            _add_text(programme, "category", category, lang="en")
+    if is_live:
+        ElementTree.SubElement(programme, "live")
+    if is_replay:
+        ElementTree.SubElement(programme, "previously-shown")
+    return True
+
+
+def _guide_coverage_window(anchor: datetime, settings: dict) -> tuple[datetime, datetime]:
+    """Return a continuous guide window around the current sports lineup.
+
+    Generated channels may survive a container restart with a provider timestamp
+    that has already gone stale. Keep those channels populated in Jellyfin while
+    the next scan corrects or replaces them instead of exporting a blank guide.
+    """
+    target_start, target_end, _ = _target_window(anchor, settings)
+    return (
+        min(target_start, anchor - timedelta(hours=6)),
+        max(target_end, anchor + timedelta(hours=30)),
+    )
+
+
+def build_sports_xmltv(
+    generated: list[dict],
+    settings: dict,
+    *,
+    generated_at: datetime | None = None,
+) -> bytes:
+    """Build a standalone XMLTV guide for generated sports channels."""
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    anchor = (generated_at or datetime.now().astimezone()).astimezone(timezone)
+    root = ElementTree.Element(
+        "tv",
+        {
+            "generator-info-name": XMLTV_GENERATOR_NAME,
+            "source-info-name": "Generated sports guide",
+        },
+    )
+
+    for item in generated:
+        channel_id = str(item.get("tvg_id", "") or "").strip()
+        if not channel_id:
+            continue
+        channel = ElementTree.SubElement(root, "channel", {"id": channel_id})
+        _add_text(channel, "display-name", item.get("display_name", "Sports"), lang="en")
+        # Jellyfin can map guide channels by channel number as well as id/name.
+        # Keep a purely numeric alias in addition to the friendly display name.
+        assigned_number = str(item.get("assigned_number", "") or "").strip()
+        if assigned_number:
+            _add_text(channel, "display-name", assigned_number, lang="en")
+            _add_text(channel, "display-name", f"CH {assigned_number}", lang="en")
+        logo = str(item.get("tvg_logo", "") or "").strip()
+        if logo:
+            ElementTree.SubElement(channel, "icon", {"src": logo})
+
+    for item in generated:
+        channel_id = str(item.get("tvg_id", "") or "").strip()
+        if not channel_id:
+            continue
+        league_id = str(item.get("league_id", "") or "")
+        league_label = LEAGUE_NAMES.get(league_id, "Sports")
+        event_title = str(item.get("event_title", "") or "").strip()
+        if not event_title:
+            # Migration fallback for rows generated before event_title existed.
+            display = str(item.get("display_name", "Sports event") or "Sports event")
+            event_title = re.sub(r"^[^•]+•\s*", "", display)
+            event_title = re.sub(r"\s+—\s+[^—]+$", "", event_title).strip()
+        feed_subtitle = _clean_feed_subtitle(str(item.get("subtitle", "") or ""))
+        start = _parse_iso_datetime(item.get("event_start"), timezone)
+        end = _parse_iso_datetime(item.get("event_end"), timezone)
+        is_replay = bool(item.get("is_replay"))
+        categories = ["Sports", league_label]
+        if is_replay:
+            categories.append("Replay")
+
+        coverage_start, coverage_end = _guide_coverage_window(anchor, settings)
+        if start:
+            local_start = start.astimezone(timezone)
+            live_end = (end or (start + _event_duration(league_id))).astimezone(timezone)
+            if live_end <= local_start:
+                live_end = local_start + _event_duration(league_id)
+            scheduled = local_start.strftime("%A, %B %-d at %-I:%M %p %Z")
+
+            # A provider timestamp can lag behind the actual event slot. When
+            # the entire scheduled interval is already outside the active guide
+            # window, export one continuous fallback programme instead of a
+            # blank channel. The next successful scan can replace it with exact
+            # upcoming/live/postgame segments.
+            schedule_is_stale = live_end + timedelta(hours=GUIDE_POSTGAME_HOURS) <= coverage_start
+            if schedule_is_stale:
+                _add_programme(
+                    root,
+                    channel_id=channel_id,
+                    start=coverage_start,
+                    stop=coverage_end,
+                    title=f"{league_label} • {event_title}",
+                    subtitle=feed_subtitle,
+                    description=(
+                        "Generated sports event channel. Provider schedule data was stale or unavailable; "
+                        "guide coverage is being held until the next refresh."
+                    ),
+                    categories=categories,
+                    is_replay=is_replay,
+                )
+                continue
+
+            # Cover the entire active channel window with non-overlapping XMLTV
+            # programmes. This prevents Jellyfin gaps before first pitch, during
+            # the event, or after a container restart.
+            upcoming_stop = min(local_start, coverage_end)
+            if coverage_start < upcoming_stop:
+                _add_programme(
+                    root,
+                    channel_id=channel_id,
+                    start=coverage_start,
+                    stop=upcoming_stop,
+                    title=f"Upcoming: {event_title}",
+                    subtitle=feed_subtitle,
+                    description=f"{league_label} event scheduled for {scheduled}. {feed_subtitle}.",
+                    categories=categories,
+                )
+
+            live_start = max(local_start, coverage_start)
+            live_stop = min(live_end, coverage_end)
+            live_prefix = "Replay" if is_replay else league_label
+            _add_programme(
+                root,
+                channel_id=channel_id,
+                start=live_start,
+                stop=live_stop,
+                title=f"{live_prefix} • {event_title}",
+                subtitle=feed_subtitle,
+                description=f"{event_title}. {feed_subtitle}.",
+                categories=categories,
+                is_live=not is_replay,
+                is_replay=is_replay,
+            )
+
+            post_start = max(live_end, coverage_start)
+            if post_start < coverage_end:
+                _add_programme(
+                    root,
+                    channel_id=channel_id,
+                    start=post_start,
+                    stop=coverage_end,
+                    title=f"{event_title} — Event window",
+                    subtitle=feed_subtitle,
+                    description="The generated event channel remains available until the next sports refresh.",
+                    categories=categories,
+                )
+        else:
+            # Exact provider schedule is unavailable. Cover the active lineup
+            # continuously so Jellyfin never presents an empty generated channel.
+            _add_programme(
+                root,
+                channel_id=channel_id,
+                start=coverage_start,
+                stop=coverage_end,
+                title=f"{league_label} • {event_title}",
+                subtitle=feed_subtitle,
+                description="Provider sports event or replay; exact schedule data was unavailable.",
+                categories=categories,
+                is_replay=is_replay,
+            )
+
+    if hasattr(ElementTree, "indent"):
+        ElementTree.indent(root, space="  ")
+    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _xmltv_fragments(elements: Iterable[ElementTree.Element]) -> bytes:
+    """Serialize XMLTV children without introducing a second XML declaration."""
+    return b"\n".join(
+        ElementTree.tostring(child, encoding="unicode", short_empty_elements=True).encode(
+            "ascii", errors="xmlcharrefreplace"
+        )
+        for child in elements
+    )
+
+
+def build_combined_xmltv(base_epg_path: Path | None, sports_xmltv: bytes) -> bytes:
+    """Merge generated guide data while preserving XMLTV element ordering.
+
+    XMLTV requires all ``channel`` elements to precede ``programme`` elements.
+    Older builds appended the complete sports document just before ``</tv>``,
+    which placed generated channels after the provider's programmes. Lenient XML
+    parsers accepted the file, but Jellyfin could ignore those late channel
+    definitions and therefore show blank guide rows.
+    """
+    if not base_epg_path or not base_epg_path.exists() or base_epg_path.stat().st_size == 0:
+        return sports_xmltv
+
+    base = base_epg_path.read_bytes()
+    close_matches = list(re.finditer(rb"</(?:[A-Za-z_][A-Za-z0-9_.-]*:)?tv\s*>", base, flags=re.I))
+    if not close_matches:
+        # A broken provider guide must not prevent generated sports guide data.
+        return sports_xmltv
+
+    overlay_root = ElementTree.fromstring(sports_xmltv)
+    channels = [child for child in overlay_root if child.tag.rsplit("}", 1)[-1] == "channel"]
+    programmes = [child for child in overlay_root if child.tag.rsplit("}", 1)[-1] == "programme"]
+    channel_fragment = _xmltv_fragments(channels)
+    programme_fragment = _xmltv_fragments(programmes)
+
+    close_match = close_matches[-1]
+    close_start = close_match.start()
+    programme_match = re.search(
+        rb"<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?programme(?:\s|>)",
+        base[:close_start],
+        flags=re.I,
+    )
+    channel_insert = programme_match.start() if programme_match else close_start
+
+    pieces = [base[:channel_insert]]
+    if channel_fragment:
+        pieces.extend([b"\n", channel_fragment, b"\n"])
+    pieces.append(base[channel_insert:close_start])
+    if programme_fragment:
+        pieces.extend([b"\n", programme_fragment, b"\n"])
+    pieces.append(base[close_start:])
+    return b"".join(pieces)
+
+def _write_prepared_epg_files(
+    generated: list[dict],
+    settings: dict,
+    *,
+    base_epg_path: Path | None,
+    sports_epg_path: Path | None,
+    combined_epg_path: Path | None,
+    generated_at: datetime,
+) -> list[tuple[Path, Path]]:
+    """Write validated temporary XMLTV files and return (temp, final) pairs."""
+    prepared: list[tuple[Path, Path]] = []
+    sports_bytes = build_sports_xmltv(generated, settings, generated_at=generated_at)
+    # Validate the standalone guide before touching a live export.
+    ElementTree.fromstring(sports_bytes)
+
+    for destination, payload in (
+        (sports_epg_path, sports_bytes),
+        (combined_epg_path, build_combined_xmltv(base_epg_path, sports_bytes)),
+    ):
+        if not destination:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp = destination.with_name(destination.name + ".tmp")
+        temp.write_bytes(payload)
+        prepared.append((temp, destination))
+    return prepared
+
+
+def rebuild_epg_exports(
+    db_path: Path | str,
+    *,
+    base_epg_path: Path | None,
+    sports_epg_path: Path,
+    combined_epg_path: Path,
+) -> None:
+    """Recreate guide exports from persisted generated rows, such as at startup."""
+    settings = get_settings(db_path)
+    rows = generated_rows(db_path)
+    generated_at = datetime.now().astimezone()
+    prepared = _write_prepared_epg_files(
+        rows,
+        settings,
+        base_epg_path=base_epg_path,
+        sports_epg_path=sports_epg_path,
+        combined_epg_path=combined_epg_path,
+        generated_at=generated_at,
+    )
+    for temp, destination in prepared:
+        temp.replace(destination)
+
+
+
+def _local_xml_name(tag: str) -> str:
+    return str(tag).rsplit("}", 1)[-1]
+
+
+def _xmltv_index(path: Path | None, fallback_tz: ZoneInfo) -> dict:
+    result = {
+        "exists": bool(path and path.exists()),
+        "channels": set(),
+        "programmes": defaultdict(list),
+        "error": "",
+        "size": 0,
+        "modified": "",
+    }
+    if not path or not path.exists():
+        return result
+    try:
+        result["size"] = path.stat().st_size
+        result["modified"] = datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+        root = ElementTree.parse(path).getroot()
+        for child in root:
+            tag = _local_xml_name(child.tag)
+            if tag == "channel":
+                channel_id = str(child.attrib.get("id", "") or "").strip()
+                if channel_id:
+                    result["channels"].add(channel_id)
+            elif tag == "programme":
+                channel_id = str(child.attrib.get("channel", "") or "").strip()
+                if not channel_id:
+                    continue
+                start = _parse_xmltv_time(str(child.attrib.get("start", "") or ""), fallback_tz)
+                stop = _parse_xmltv_time(str(child.attrib.get("stop", "") or ""), fallback_tz)
+                if start and stop and stop > start:
+                    result["programmes"][channel_id].append((start, stop))
+        return result
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        return result
+
+
+def _playlist_tvg_ids(path: Path | None) -> tuple[set[str], str]:
+    if not path or not path.exists():
+        return set(), "playlist file is missing"
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        return {
+            match.group(1).strip()
+            for match in re.finditer(r'\btvg-id="([^"]+)"', text, flags=re.I)
+            if match.group(1).strip()
+        }, ""
+    except Exception as exc:
+        return set(), f"{type(exc).__name__}: {exc}"
+
+
+def validate_guide_exports(
+    db_path: Path | str,
+    *,
+    playlist_path: Path | None,
+    sports_epg_path: Path | None,
+    combined_epg_path: Path | None,
+) -> dict:
+    """Validate the exact files served to Jellyfin without exposing stream URLs."""
+    settings = get_settings(db_path)
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    rows = generated_rows(db_path)
+    expected_ids = {str(row.get("tvg_id", "") or "").strip() for row in rows}
+    expected_ids.discard("")
+
+    playlist_ids, playlist_error = _playlist_tvg_ids(playlist_path)
+    sports_index = _xmltv_index(sports_epg_path, timezone)
+    combined_index = _xmltv_index(combined_epg_path, timezone)
+
+    missing_playlist = sorted(expected_ids - playlist_ids)
+    missing_sports_channels = sorted(expected_ids - sports_index["channels"])
+    missing_sports_programmes = sorted(
+        channel_id for channel_id in expected_ids if not sports_index["programmes"].get(channel_id)
+    )
+    missing_combined_channels = sorted(expected_ids - combined_index["channels"])
+    missing_combined_programmes = sorted(
+        channel_id for channel_id in expected_ids if not combined_index["programmes"].get(channel_id)
+    )
+
+    uncovered_event_starts = []
+    for row in rows:
+        channel_id = str(row.get("tvg_id", "") or "").strip()
+        event_start = _parse_iso_datetime(row.get("event_start"), timezone)
+        if not channel_id or not event_start:
+            continue
+        event_start = event_start.astimezone(timezone)
+        intervals = sports_index["programmes"].get(channel_id, [])
+        if not any(start <= event_start < stop for start, stop in intervals):
+            uncovered_event_starts.append(channel_id)
+
+    errors = [value for value in (playlist_error, sports_index["error"], combined_index["error"]) if value]
+    ok = not any(
+        (
+            errors,
+            missing_playlist,
+            missing_sports_channels,
+            missing_sports_programmes,
+            missing_combined_channels,
+            missing_combined_programmes,
+            uncovered_event_starts,
+        )
+    )
+    return {
+        "ok": ok,
+        "generated_channels": len(expected_ids),
+        "playlist_sports_ids": len(expected_ids & playlist_ids),
+        "sports_xml_channels": len(expected_ids & sports_index["channels"]),
+        "sports_xml_programme_channels": sum(
+            1 for channel_id in expected_ids if sports_index["programmes"].get(channel_id)
+        ),
+        "combined_xml_channels": len(expected_ids & combined_index["channels"]),
+        "combined_xml_programme_channels": sum(
+            1 for channel_id in expected_ids if combined_index["programmes"].get(channel_id)
+        ),
+        "missing_playlist_ids": missing_playlist,
+        "missing_sports_channels": missing_sports_channels,
+        "missing_sports_programmes": missing_sports_programmes,
+        "missing_combined_channels": missing_combined_channels,
+        "missing_combined_programmes": missing_combined_programmes,
+        "uncovered_event_starts": sorted(uncovered_event_starts),
+        "errors": errors,
+        "sports_xml_size": sports_index["size"],
+        "sports_xml_modified": sports_index["modified"],
+        "combined_xml_size": combined_index["size"],
+        "combined_xml_modified": combined_index["modified"],
+    }
 
 
 def _record_scan(
@@ -1385,6 +2242,8 @@ def scan_channels(
     channels: list[dict],
     epg_path: Path | None = None,
     *,
+    sports_epg_path: Path | None = None,
+    combined_epg_path: Path | None = None,
     trigger: str = "manual",
     now: datetime | None = None,
 ) -> dict:
@@ -1415,10 +2274,18 @@ def scan_channels(
         return result
 
     rules = [rule for rule in get_rules(db_path) if rule["enabled"]]
+    diagnostics = _new_scan_diagnostics()
     events = _merge_events(
         [
-            *_m3u_events(db_path, channels, settings, current),
-            *_epg_events(db_path, epg_path, channels, settings, current),
+            *_m3u_events(db_path, channels, settings, current, diagnostics),
+            *_epg_events(
+                db_path,
+                epg_path,
+                channels,
+                settings,
+                current,
+                diagnostics,
+            ),
         ]
     )
 
@@ -1466,9 +2333,16 @@ def scan_channels(
                 preferred_team = team_catalog.get(feed.get("team_id", ""))
                 if preferred_team:
                     logo = preferred_team.get("logo_url", "")
+            source_channel_key = str(channel.get("url", "") or "")
+            event_start = event.get("start")
+            event_end = (
+                event_start + _event_duration(event.get("league_id", ""))
+                if event_start
+                else None
+            )
             item = {
-                "channel_key": f"sports:{event['event_key']}:{feed_type}:{channel.get('url', '')}",
-                "source_channel_key": str(channel.get("url", "") or ""),
+                "channel_key": f"sports:{event['event_key']}:{feed_type}:{source_channel_key}",
+                "source_channel_key": source_channel_key,
                 "event_key": event["event_key"],
                 "league_id": event.get("league_id", ""),
                 "display_name": display_name,
@@ -1476,51 +2350,105 @@ def scan_channels(
                 "feed_type": feed_type,
                 "assigned_number": assigned,
                 "group_title": group_title,
-                "url": str(channel.get("url", "") or ""),
-                "tvg_id": str(channel.get("tvg_id", "") or ""),
+                "url": source_channel_key,
+                "tvg_id": _generated_tvg_id(assigned),
+                "source_tvg_id": str(channel.get("tvg_id", "") or ""),
                 "tvg_logo": logo,
-                "event_start": event.get("start").isoformat() if event.get("start") else None,
+                "event_title": event.get("display_name", ""),
+                "event_start": event_start.isoformat() if event_start else None,
+                "event_end": event_end.isoformat() if event_end else None,
+                "is_replay": bool(event.get("is_replay")),
             }
             item["raw"] = _generated_raw(channel, item)
             generated.append(item)
 
-    generated_at = _now_iso()
+    generated_at_dt = current.astimezone()
+    generated_at = generated_at_dt.isoformat(timespec="seconds")
+    prepared_epg = _write_prepared_epg_files(
+        generated,
+        settings,
+        base_epg_path=epg_path,
+        sports_epg_path=sports_epg_path,
+        combined_epg_path=combined_epg_path,
+        generated_at=generated_at_dt,
+    )
+    installed_epg: list[tuple[Path, Path | None]] = []
     with closing(_connect(db_path)) as conn:
-        # The replacement is atomic. A failure before this transaction leaves the
-        # previous day's generated channels intact.
+        # Database rows and guide exports are replaced as one operation. If an
+        # export cannot be installed, SQLite rolls back and the old guide files
+        # are restored, preserving yesterday's working lineup.
         conn.execute("BEGIN IMMEDIATE")
-        conn.execute("DELETE FROM sports_generated")
-        for item in generated:
-            conn.execute(
-                """
-                INSERT INTO sports_generated
-                    (channel_key, source_channel_key, event_key, league_id,
-                     display_name, subtitle, feed_type, assigned_number,
-                     group_title, url, tvg_id, tvg_logo, raw_json,
-                     event_start, generated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item["channel_key"],
-                    item["source_channel_key"],
-                    item["event_key"],
-                    item["league_id"],
-                    item["display_name"],
-                    item["subtitle"],
-                    item["feed_type"],
-                    item["assigned_number"],
-                    item["group_title"],
-                    item["url"],
-                    item["tvg_id"],
-                    item["tvg_logo"],
-                    json.dumps(item["raw"]),
-                    item["event_start"],
-                    generated_at,
-                ),
-            )
-        conn.commit()
+        try:
+            conn.execute("DELETE FROM sports_generated")
+            for item in generated:
+                conn.execute(
+                    """
+                    INSERT INTO sports_generated
+                        (channel_key, source_channel_key, event_key, league_id,
+                         display_name, subtitle, feed_type, assigned_number,
+                         group_title, url, tvg_id, source_tvg_id, tvg_logo, raw_json,
+                         event_title, event_start, event_end, is_replay, generated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item["channel_key"],
+                        item["source_channel_key"],
+                        item["event_key"],
+                        item["league_id"],
+                        item["display_name"],
+                        item["subtitle"],
+                        item["feed_type"],
+                        item["assigned_number"],
+                        item["group_title"],
+                        item["url"],
+                        item["tvg_id"],
+                        item["source_tvg_id"],
+                        item["tvg_logo"],
+                        json.dumps(item["raw"]),
+                        item["event_title"],
+                        item["event_start"],
+                        item["event_end"],
+                        1 if item["is_replay"] else 0,
+                        generated_at,
+                    ),
+                )
 
+            for temp_path, destination in prepared_epg:
+                backup_path = None
+                if destination.exists():
+                    backup_path = destination.with_name(destination.name + ".previous")
+                    backup_path.unlink(missing_ok=True)
+                    destination.replace(backup_path)
+                try:
+                    temp_path.replace(destination)
+                except Exception:
+                    if backup_path and backup_path.exists():
+                        backup_path.replace(destination)
+                    raise
+                installed_epg.append((destination, backup_path))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            for destination, backup_path in reversed(installed_epg):
+                destination.unlink(missing_ok=True)
+                if backup_path and backup_path.exists():
+                    backup_path.replace(destination)
+            raise
+        finally:
+            for temp_path, _destination in prepared_epg:
+                temp_path.unlink(missing_ok=True)
+            for _destination, backup_path in installed_epg:
+                if backup_path:
+                    backup_path.unlink(missing_ok=True)
+
+    malformed_count = _malformed_count(diagnostics)
     message = f"Generated {len(generated)} channels for {len(selected_events)} matching events."
+    if malformed_count:
+        message += (
+            f" Skipped {malformed_count} malformed provider "
+            f"entr{'y' if malformed_count == 1 else 'ies'}."
+        )
+        _log_malformed_summary(diagnostics)
     _record_scan(
         db_path,
         started_at=started_at,
@@ -1538,6 +2466,10 @@ def scan_channels(
         "generated_at": generated_at,
         "target_date": target_date,
         "message": message,
+        "skipped_entries": malformed_count,
+        "malformed_m3u": diagnostics.get("malformed_m3u", 0),
+        "malformed_epg": diagnostics.get("malformed_epg", 0),
+        "guide_channels": len(generated),
     }
 
 
@@ -1548,8 +2480,8 @@ def generated_rows(db_path: Path | str) -> list[dict]:
             """
             SELECT id, channel_key, source_channel_key, event_key, league_id,
                    display_name, subtitle, feed_type, assigned_number,
-                   group_title, url, tvg_id, tvg_logo, raw_json,
-                   event_start, generated_at
+                   group_title, url, tvg_id, source_tvg_id, tvg_logo, raw_json,
+                   event_title, event_start, event_end, is_replay, generated_at
             FROM sports_generated
             ORDER BY assigned_number
             """
