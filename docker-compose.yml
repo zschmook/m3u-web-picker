@@ -13,8 +13,8 @@
 #   Windows: M3U_BACKUP_DIR=C:/Users/me/Documents/m3u_picker/nightly
 #   Portable default: M3U_BACKUP_DIR=./backups
 #
-# The live DB is intentionally NOT mounted. It stays at /app/m3u_picker.db in
-# the container and is copied safely to the host backup folder each night.
+# Live runtime state is stored in a named Docker volume at /app/data and is
+# also copied safely to the host backup folder each night.
 name: m3u-picker
 
 services:
@@ -32,6 +32,11 @@ services:
     environment:
       # Enable the in-app nightly SQLite backup scheduler. No host cron needed.
       M3U_BACKUP_ENABLED: "true"
+      M3U_DATA_DIR: /app/data
+      M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
+      M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
+      M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
+      M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
       M3U_BACKUP_CONTAINER_DIR: /backups
       BACKUP_TIME: "03:15"
       BACKUP_TIMEZONE: "America/New_York"
@@ -46,5 +51,11 @@ services:
       - type: bind
         source: "${M3U_BACKUP_DIR:-./backups}"
         target: /backups
+      - type: volume
+        source: m3u-picker-data
+        target: /app/data
 
     restart: unless-stopped
+
+volumes:
+  m3u-picker-data:

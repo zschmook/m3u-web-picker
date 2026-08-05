@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from xml.etree import ElementTree
@@ -16,7 +17,7 @@ import sports  # noqa: E402
 
 
 FIXTURE = """#EXTM3U
-#EXTINF:-1 tvg-id="" tvg-name="" tvg-logo="https://example.test/mlb.png" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 19:05:00)
+#EXTINF:-1 tvg-id="" tvg-name="" tvg-logo="https://example.test/mlb.png" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
 http://provider.test/user/pass/100.ts
 #EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" tvg-name="MLB Philadelphia Phillies" tvg-logo="https://example.test/phillies.png" group-title="MLB / MiLB",MLB Philadelphia Phillies
 http://provider.test/user/pass/200.ts
@@ -56,6 +57,310 @@ class SportsTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_xtream_separate_credentials_are_detected_without_exposing_them_in_base_url(self):
+        auth = b'{"user_info":{"auth":1,"status":"Active","exp_date":"1780000000"},"server_info":{}}'
+        with patch("core._download_probe_bytes", return_value=auth), patch(
+            "core.download_m3u_text", return_value=FIXTURE
+        ):
+            source, text, parsed = core.detect_provider_source(
+                "Primary",
+                "https://provider.test:8443/player_api.php?old=ignored",
+                username="alice@example.com",
+                password="p@ss word",
+                role="primary",
+            )
+
+        self.assertEqual(source["kind"], "xtream")
+        self.assertTrue(source["xtream_api"])
+        self.assertEqual(source["url"], "https://provider.test:8443")
+        self.assertNotIn("alice", source["url"])
+        self.assertEqual(source["account_status"], "Active")
+        self.assertTrue(str(source["expires_at"]).startswith("2026-"))
+        playlist_url = core.provider_playlist_url(source)
+        self.assertIn("get.php?", playlist_url)
+        self.assertIn("username=alice%40example.com", playlist_url)
+        self.assertIn("password=p%40ss+word", playlist_url)
+        self.assertEqual(text, FIXTURE)
+        self.assertEqual(len(parsed), len(self.channels))
+
+    def test_xtream_live_api_imports_only_live_streams(self):
+        auth = b'{"user_info":{"auth":1,"status":"Active"},"server_info":{}}'
+        live_streams = [
+            {
+                "stream_id": 101,
+                "stream_type": "live",
+                "name": "MLB Network",
+                "category_id": "7",
+                "epg_channel_id": "mlb.network",
+                "stream_icon": "https://provider.test/mlb.png",
+                "num": 42,
+            },
+            {
+                "stream_id": 202,
+                "stream_type": "movie",
+                "name": "A VOD Movie",
+                "category_id": "99",
+            },
+        ]
+        categories = [{"category_id": "7", "category_name": "US Sports"}]
+        with patch("core._download_probe_bytes", return_value=auth), patch(
+            "core._download_json", side_effect=[live_streams, categories]
+        ):
+            source, text, parsed = core.detect_provider_source(
+                "Primary",
+                "https://provider.test:8443",
+                username="alice",
+                password="secret",
+                role="primary",
+            )
+
+        self.assertTrue(source["xtream_api"])
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["name"], "MLB Network")
+        self.assertEqual(parsed[0]["group"], "US Sports")
+        self.assertIn("/live/alice/secret/101.ts", parsed[0]["url"])
+        self.assertNotIn("A VOD Movie", text)
+
+    def test_fallback_registration_defers_channel_download(self):
+        auth = b'{"user_info":{"auth":1,"status":"Active"},"server_info":{}}'
+        with patch("core._download_probe_bytes", return_value=auth), patch(
+            "core._download_json"
+        ) as download_json:
+            source, text, parsed = core.detect_provider_source(
+                "Backup",
+                "https://provider.test:8443",
+                username="alice",
+                password="secret",
+                role="fallback",
+                load_channels=False,
+            )
+
+        self.assertTrue(source["deferred"])
+        self.assertEqual(source["channel_count"], 0)
+        self.assertEqual(text, "")
+        self.assertEqual(parsed, [])
+        download_json.assert_not_called()
+
+    def test_oversized_combined_playlist_is_rejected_before_parsing(self):
+        huge = "#EXTM3U\n" + "".join(
+            f"#EXTINF:-1,Entry {index}\nhttp://provider.test/{index}.ts\n"
+            for index in range(4)
+        )
+        with self.assertRaisesRegex(ValueError, "safety limit"):
+            core.validate_m3u_text(huge, max_channels=3)
+
+    def test_provider_payload_hides_urls_and_separate_credentials(self):
+        original_sources = core.provider_sources
+        original_master = core.MASTER_CACHE_PATH
+        try:
+            core.MASTER_CACHE_PATH = Path(self.temp.name) / "primary.m3u"
+            core.provider_sources = [
+                {
+                    "id": "primary",
+                    "name": "Primary",
+                    "role": "primary",
+                    "priority": 0,
+                    "kind": "xtream",
+                    "url": "https://secret-provider.test:8443",
+                    "username": "secret-user",
+                    "password": "secret-password",
+                    "xtream_api": True,
+                    "channel_count": 123,
+                    "account_status": "Active",
+                    "expires_at": "2026-09-17T00:00:00-04:00",
+                }
+            ]
+            payload = core.provider_sources_payload()
+        finally:
+            core.provider_sources = original_sources
+            core.MASTER_CACHE_PATH = original_master
+
+        self.assertEqual(payload[0]["kind"], "xtream")
+        self.assertTrue(payload[0]["credentials_saved"])
+        self.assertEqual(payload[0]["account_status"], "Active")
+        self.assertEqual(payload[0]["expires_at"], "2026-09-17T00:00:00-04:00")
+        self.assertNotIn("url", payload[0])
+        self.assertNotIn("username", payload[0])
+        self.assertNotIn("password", payload[0])
+
+    def test_xtream_config_keeps_legacy_source_url_free_of_credentials(self):
+        config_path = Path(self.temp.name) / "config.json"
+        original_config = core.CONFIG_PATH
+        original_sources = core.provider_sources
+        original_source_url = core.last_source_url
+        original_source_mode = core.source_mode
+        original_last_refresh = core.last_refresh
+        original_epg_sources = core.epg_sources
+        try:
+            core.CONFIG_PATH = config_path
+            core.provider_sources = [
+                {
+                    "id": "primary",
+                    "name": "Primary",
+                    "role": "primary",
+                    "priority": 0,
+                    "kind": "xtream",
+                    "url": "https://provider.test:8443",
+                    "username": "alice",
+                    "password": "secret",
+                    "output": "ts",
+                }
+            ]
+            core.source_mode = "url"
+            core.last_source_url = core.provider_playlist_url(core.provider_sources[0])
+            core.last_refresh = "2026-08-03T21:00:00-04:00"
+            core.epg_sources = []
+            core.save_config()
+
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["source_url"], "https://provider.test:8443")
+            self.assertNotIn("alice", saved["source_url"])
+            self.assertEqual(saved["provider_sources"][0]["username"], "alice")
+
+            core.provider_sources = []
+            core.last_source_url = ""
+            core.restore_config()
+            self.assertEqual(core.primary_provider_source()["username"], "alice")
+            self.assertIn("username=alice", core.last_source_url)
+        finally:
+            core.CONFIG_PATH = original_config
+            core.provider_sources = original_sources
+            core.last_source_url = original_source_url
+            core.source_mode = original_source_mode
+            core.last_refresh = original_last_refresh
+            core.epg_sources = original_epg_sources
+
+    def test_primary_provider_feed_wins_over_matching_fallback_feed(self):
+        fixture = """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
+{url}
+"""
+        primary = core.parse_m3u_text(fixture.format(url="http://primary.test/game.ts"))
+        fallback = core.parse_m3u_text(fixture.format(url="http://fallback.test/game.ts"))
+        for channel in primary:
+            channel["_provider_priority"] = 0
+            channel["_provider_source_id"] = "primary"
+        for channel in fallback:
+            channel["_provider_priority"] = 1
+            channel["_provider_source_id"] = "backup"
+        db_path = Path(self.temp.name) / "provider-priority.db"
+        sports.init_db(db_path)
+        sports.update_settings(
+            db_path,
+            {
+                "enabled": True,
+                "everything_mode": True,
+                "timezone": "America/New_York",
+            },
+        )
+        sports.scan_channels(
+            db_path,
+            [*fallback, *primary],
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        generated = sports.generated_rows(db_path)
+        self.assertEqual(len(generated), 1)
+        self.assertEqual(generated[0]["url"], "http://primary.test/game.ts")
+        self.assertEqual(
+            generated[0]["raw"][-1],
+            sports.generated_stream_path(generated[0]["assigned_number"]),
+        )
+        self.assertEqual(
+            sports.generated_stream_target(db_path, generated[0]["assigned_number"]),
+            "http://primary.test/game.ts",
+        )
+
+    def test_fallback_provider_fills_event_missing_from_primary(self):
+        primary = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="News",Local News
+http://primary.test/news.ts
+"""
+        )
+        fallback = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
+http://fallback.test/game.ts
+"""
+        )
+        for channel in primary:
+            channel["_provider_priority"] = 0
+        for channel in fallback:
+            channel["_provider_priority"] = 1
+        db_path = Path(self.temp.name) / "provider-fill.db"
+        sports.init_db(db_path)
+        sports.update_settings(
+            db_path,
+            {
+                "enabled": True,
+                "everything_mode": True,
+                "timezone": "America/New_York",
+            },
+        )
+        sports.scan_channels(
+            db_path,
+            [*primary, *fallback],
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        generated = sports.generated_rows(db_path)
+        self.assertEqual(len(generated), 1)
+        self.assertEqual(generated[0]["url"], "http://fallback.test/game.ts")
+        self.assertEqual(
+            generated[0]["raw"][-1],
+            sports.generated_stream_path(generated[0]["assigned_number"]),
+        )
+
+    def test_fallback_xmltv_can_confirm_event_while_primary_stream_still_wins(self):
+        sports.update_settings(
+            self.db_path,
+            {"event_window": "next_24_hours", "everything_mode": True},
+        )
+        primary = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="primary.event" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles
+http://primary.test/game.ts
+"""
+        )
+        fallback = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="fallback.event" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles
+http://fallback.test/game.ts
+"""
+        )
+        for channel in primary:
+            channel["_provider_priority"] = 0
+            channel["_provider_source_id"] = "primary"
+        for channel in fallback:
+            channel["_provider_priority"] = 1
+            channel["_provider_source_id"] = "backup"
+
+        fallback_epg = Path(self.temp.name) / "fallback-provider.xml"
+        fallback_epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="fallback.event"><display-name>MLB Event</display-name></channel>
+  <programme channel="fallback.event" start="20260803190000 -0400" stop="20260803230000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+
+        result = sports.scan_channels(
+            self.db_path,
+            [*primary, *fallback],
+            provider_epg_sources=[(fallback_epg, fallback)],
+            now=datetime(2026, 8, 3, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        generated = sports.generated_rows(self.db_path)
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(result["untimed_skipped"], 0)
+        self.assertEqual(len(generated), 1)
+        self.assertEqual(generated[0]["url"], "http://primary.test/game.ts")
+
 
     def test_channel_manager_lists_manual_channels_before_generated_channels(self):
         manual = [
@@ -75,6 +380,102 @@ class SportsTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in combined], [1, 2, -1])
 
+    def test_manual_and_generated_channels_with_same_stream_both_remain_in_playlist(self):
+        shared_url = "http://provider.test/user/pass/shared.ts"
+        manual = core.parse_m3u_text(
+            f"""#EXTM3U
+#EXTINF:-1 tvg-id=\"NBCSportsPhilly.provider\" group-title=\"US-SPORTS\",US-S: NBC SPORTS PHILLY
+{shared_url}
+"""
+        )
+        generated_url = sports.generated_stream_path(1040)
+        generated = [
+            {
+                "raw": [
+                    '#EXTINF:-1 tvg-id="m3u-picker-sports-1040" tvg-chno="1040" group-title="Sports Today",MLB Phillies Feed',
+                    generated_url,
+                ]
+            }
+        ]
+        db_path = Path(self.temp.name) / "manual-generated.db"
+        playlist_path = Path(self.temp.name) / "manual-generated.m3u"
+        with patch.object(core, "DB_PATH", db_path), patch.object(
+            core, "PLAYLIST_PATH", playlist_path
+        ), patch.object(core, "channels", manual), patch.object(
+            core, "selected_ids", {0}
+        ), patch("core.sports.generated_rows", return_value=generated):
+            count = core.write_current_playlist()
+
+        text = playlist_path.read_text(encoding="utf-8")
+        self.assertEqual(count, 2)
+        self.assertEqual(text.count(shared_url), 1)
+        self.assertEqual(text.count(generated_url), 1)
+        self.assertIn('tvg-id="NBCSportsPhilly.provider"', text)
+        self.assertIn('tvg-id="m3u-picker-sports-1040"', text)
+
+    def test_manual_rows_sharing_a_stream_url_keep_separate_saved_identities(self):
+        shared_url = "http://provider.test/user/pass/shared.ts"
+        manual = core.parse_m3u_text(
+            f"""#EXTM3U
+#EXTINF:-1 tvg-id=\"network.fulltime\" tvg-chno=\"22\" group-title=\"US-SPORTS\",Full-time Network
+{shared_url}
+#EXTINF:-1 tvg-id=\"network.alternate\" tvg-chno=\"222\" group-title=\"US-SPORTS\",Alternate Network Entry
+{shared_url}
+"""
+        )
+        db_path = Path(self.temp.name) / "manual-identity.db"
+        playlist_path = Path(self.temp.name) / "manual-identity.m3u"
+        with patch.object(core, "DB_PATH", db_path), patch.object(
+            core, "PLAYLIST_PATH", playlist_path
+        ), patch.object(core, "channels", manual), patch.object(
+            core, "selected_ids", {0, 1}
+        ), patch("core.sports.generated_rows", return_value=[]):
+            count = core.write_current_playlist()
+            keys = core.load_selected_keys_from_db()
+
+        text = playlist_path.read_text(encoding="utf-8")
+        self.assertEqual(count, 2)
+        self.assertEqual(text.count(shared_url), 2)
+        self.assertEqual(len(keys), 2)
+        self.assertTrue(all(key.startswith("manual:") for key in keys))
+        self.assertNotEqual(core.channel_key(manual[0]), core.channel_key(manual[1]))
+
+    def test_legacy_url_selection_migrates_without_losing_manual_channel(self):
+        manual = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id=\"NBCSportsPhilly.provider\" group-title=\"US-SPORTS\",US-S: NBC SPORTS PHILLY
+http://provider.test/user/pass/philly.ts
+"""
+        )
+        db_path = Path(self.temp.name) / "legacy-selection.db"
+        with patch.object(core, "DB_PATH", db_path), patch.object(
+            core, "channels", manual
+        ), patch.object(core, "selected_ids", set()):
+            conn = core.db_connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO selections (key, name, group_title, url, sort_order)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        manual[0]["url"],
+                        manual[0]["name"],
+                        manual[0]["group"],
+                        manual[0]["url"],
+                        0,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            core.apply_saved_selections_to_loaded_channels()
+            keys = core.load_selected_keys_from_db()
+            selected = set(core.selected_ids)
+
+        self.assertEqual(selected, {0})
+        self.assertEqual(keys, {core.channel_key(manual[0])})
+
     def test_before_refresh_uses_previous_sports_day(self):
         now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
         result = sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
@@ -91,6 +492,35 @@ class SportsTests(unittest.TestCase):
         self.assertIn("Away broadcast", rows[0]["subtitle"])
         self.assertIn('x-sports-subtitle="Away broadcast', rows[0]["raw"][0])
         self.assertIn('tvg-logo="https://example.test/phillies.png"', rows[0]["raw"][0])
+
+    def test_effective_sports_start_moves_above_manual_number_range(self):
+        self.assertEqual(sports.effective_start_channel(1000, 999), 1000)
+        self.assertEqual(sports.effective_start_channel(1000, 1000), 2000)
+        self.assertEqual(sports.effective_start_channel(1000, 1021), 2000)
+        self.assertEqual(sports.effective_start_channel(1500, 1600), 2500)
+
+    def test_scan_auto_shifts_sports_slots_above_large_manual_lineup(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        result = sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=now,
+            trigger="test",
+            manual_channel_count=1021,
+        )
+        rows = sports.generated_rows(self.db_path)
+        self.assertEqual(result["numbering"]["configured_start_channel"], 1000)
+        self.assertEqual(result["numbering"]["effective_start_channel"], 2000)
+        self.assertTrue(result["numbering"]["auto_shifted"])
+        self.assertEqual([row["assigned_number"] for row in rows], [2000, 2001, 2002])
+        self.assertEqual(
+            [row["tvg_id"] for row in rows],
+            [
+                "m3u-picker-sports-2000",
+                "m3u-picker-sports-2001",
+                "m3u-picker-sports-2002",
+            ],
+        )
 
     def test_generated_m3u_ids_match_synthetic_xmltv_guide(self):
         sports_epg = Path(self.temp.name) / "sports.xml"
@@ -156,7 +586,7 @@ class SportsTests(unittest.TestCase):
         first_programme = child_tags.index("programme")
         self.assertNotIn("channel", child_tags[first_programme:])
 
-        first_pitch = datetime(2026, 8, 1, 19, 5, tzinfo=ZoneInfo("America/New_York"))
+        first_pitch = datetime(2026, 8, 1, 23, 5, tzinfo=ZoneInfo("America/New_York"))
         for row in sports.generated_rows(self.db_path):
             covering = []
             for programme in root.findall(f"programme[@channel='{row['tvg_id']}']"):
@@ -166,10 +596,339 @@ class SportsTests(unittest.TestCase):
                     covering.append(programme)
             self.assertEqual(len(covering), 1)
 
+    def test_combined_xmltv_filters_provider_to_selected_manual_ids(self):
+        base_epg = Path(self.temp.name) / "provider-large.xml"
+        base_epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="Provider">
+  <channel id="keep"><display-name>Saved Channel</display-name></channel>
+  <channel id="drop"><display-name>Unselected Channel</display-name></channel>
+  <programme channel="keep" start="20260801000000 -0400" stop="20260802000000 -0400"><title>Keep Me</title></programme>
+  <programme channel="drop" start="20260801000000 -0400" stop="20260802000000 -0400"><title>Drop Me</title></programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports_epg = Path(self.temp.name) / "sports-filtered.xml"
+        combined_epg = Path(self.temp.name) / "combined-filtered.xml"
+        sports.scan_channels(
+            self.db_path,
+            self.channels,
+            base_epg,
+            sports_epg_path=sports_epg,
+            combined_epg_path=combined_epg,
+            base_channel_ids={"keep"},
+            now=datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        root = ElementTree.parse(combined_epg).getroot()
+        channel_ids = {node.attrib["id"] for node in root.findall("channel")}
+        titles = [node.findtext("title", default="") for node in root.findall("programme")]
+        self.assertIn("keep", channel_ids)
+        self.assertNotIn("drop", channel_ids)
+        self.assertIn("Keep Me", titles)
+        self.assertNotIn("Drop Me", titles)
+        self.assertTrue(any(value.startswith("m3u-picker-sports-") for value in channel_ids))
+
+    def test_finished_epg_event_is_not_generated_as_a_dead_channel(self):
+        epg = Path(self.temp.name) / "finished-event.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.finished"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.finished" start="20260803120000 -0400" stop="20260803160000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        channels = [
+            {
+                "id": 0,
+                "name": "MLB Event",
+                "group": "MLB / MiLB",
+                "url": "http://provider.test/user/pass/finished.ts",
+                "raw": [
+                    '#EXTINF:-1 tvg-id="mlb.finished" group-title="MLB / MiLB",MLB Event',
+                    "http://provider.test/user/pass/finished.ts",
+                ],
+                "tvg_id": "mlb.finished",
+                "tvg_name": "MLB Event",
+                "tvg_logo": "",
+            },
+            *self.channels[1:3],
+        ]
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 3, 18, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 0)
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(sports.generated_rows(self.db_path), [])
+
+    def test_next_24_hours_keeps_game_already_in_progress(self):
+        sports.update_settings(self.db_path, {"event_window": "next_24_hours"})
+        epg = Path(self.temp.name) / "live-next-24.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.live"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.live" start="20260803180000 -0400" stop="20260803220000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        channels = [
+            {
+                "id": 0,
+                "name": "MLB Event",
+                "group": "MLB / MiLB",
+                "url": "http://provider.test/user/pass/live.ts",
+                "raw": [
+                    '#EXTINF:-1 tvg-id="mlb.live" group-title="MLB / MiLB",MLB Event',
+                    "http://provider.test/user/pass/live.ts",
+                ],
+                "tvg_id": "mlb.live",
+                "tvg_name": "MLB Event",
+                "tvg_logo": "",
+            },
+            *self.channels[1:3],
+        ]
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 3, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+        self.assertGreaterEqual(result["count"], 1)
+
+    def test_game_crossing_refresh_boundary_remains_live(self):
+        epg = Path(self.temp.name) / "boundary-live.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.boundary"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.boundary" start="20260804010000 -0400" stop="20260804050000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        channels = [
+            {
+                "id": 0,
+                "name": "MLB Event",
+                "group": "MLB / MiLB",
+                "url": "http://provider.test/user/pass/boundary.ts",
+                "raw": [
+                    '#EXTINF:-1 tvg-id="mlb.boundary" group-title="MLB / MiLB",MLB Event',
+                    "http://provider.test/user/pass/boundary.ts",
+                ],
+                "tvg_id": "mlb.boundary",
+                "tvg_name": "MLB Event",
+                "tvg_logo": "",
+            },
+            *self.channels[1:3],
+        ]
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 4, 3, 5, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+
+    def test_embedded_start_uses_estimated_duration_for_live_window(self):
+        sports.update_settings(self.db_path, {"event_window": "next_24_hours"})
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-03 19:00:00)
+http://provider.test/user/pass/estimated.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" group-title="MLB / MiLB",MLB Philadelphia Phillies
+http://provider.test/user/pass/200.ts
+#EXTINF:-1 tvg-id="BaltimoreOrioles.mlb" group-title="MLB / MiLB",MLB Baltimore Orioles
+http://provider.test/user/pass/201.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            now=datetime(2026, 8, 3, 21, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+        self.assertGreaterEqual(result["count"], 1)
+
+    def test_estimated_event_expires_at_end_plus_grace_boundary(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-03 12:00:00)
+http://provider.test/user/pass/grace.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        still_live = sports.scan_channels(
+            self.db_path,
+            channels,
+            now=datetime(2026, 8, 3, 17, 29, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(still_live["events"], 1)
+
+        expired = sports.scan_channels(
+            self.db_path,
+            channels,
+            now=datetime(2026, 8, 3, 17, 30, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(expired["events"], 0)
+        self.assertEqual(expired["count"], 0)
+
+    def test_untimed_m3u_event_without_epg_confirmation_is_skipped(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles
+http://provider.test/user/pass/untimed.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            now=datetime(2026, 8, 3, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 0)
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["untimed_skipped"], 1)
+        self.assertIn("without XMLTV schedule confirmation", result["message"])
+
+    def test_untimed_m3u_event_is_kept_when_xmltv_supplies_timing(self):
+        sports.update_settings(self.db_path, {"event_window": "next_24_hours"})
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="mlb.corroborated" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles
+http://provider.test/user/pass/corroborated.ts
+"""
+        )
+        epg = Path(self.temp.name) / "corroborated.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.corroborated"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.corroborated" start="20260803190000 -0400" stop="20260803230000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 3, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(result["untimed_skipped"], 0)
+
+    def test_same_day_doubleheader_remains_two_distinct_events(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="mlb.doubleheader" group-title="MLB / MiLB",MLB Event
+http://provider.test/user/pass/doubleheader.ts
+"""
+        )
+        epg = Path(self.temp.name) / "doubleheader.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.doubleheader"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.doubleheader" start="20260803130000 -0400" stop="20260803170000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+  <programme channel="mlb.doubleheader" start="20260803190000 -0400" stop="20260803230000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 3, 12, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 2)
+        event_keys = {row["event_key"] for row in sports.generated_rows(self.db_path)}
+        self.assertEqual(len(event_keys), 2)
+
+    def test_near_duplicate_m3u_and_xmltv_times_merge_as_one_event(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="mlb.near" group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-03 13:05:00)
+http://provider.test/user/pass/near.ts
+"""
+        )
+        epg = Path(self.temp.name) / "near.xml"
+        epg.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="mlb.near"><display-name>MLB Event</display-name></channel>
+  <programme channel="mlb.near" start="20260803131000 -0400" stop="20260803171000 -0400">
+    <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg,
+            now=datetime(2026, 8, 3, 12, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 1)
+        starts = {row["event_start"] for row in sports.generated_rows(self.db_path)}
+        self.assertEqual(starts, {"2026-08-03T13:10:00-04:00"})
+
+    def test_cancelled_scan_keeps_existing_generated_output(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
+        before = sports.generated_rows(self.db_path)
+        self.assertEqual(len(before), 3)
+        with self.assertRaises(sports.ScanCancelled):
+            sports.scan_channels(
+                self.db_path,
+                self.channels,
+                now=now,
+                trigger="manual",
+                cancel_check=lambda: True,
+            )
+        after = sports.generated_rows(self.db_path)
+        self.assertEqual(
+            [(row["channel_key"], row["generated_at"]) for row in after],
+            [(row["channel_key"], row["generated_at"]) for row in before],
+        )
+
     def test_zero_event_scan_writes_valid_empty_sports_guide(self):
         sports_epg = Path(self.temp.name) / "sports-empty.xml"
         combined_epg = Path(self.temp.name) / "combined-empty.xml"
-        after = datetime(2026, 8, 2, 4, 0, tzinfo=ZoneInfo("America/New_York"))
+        after = datetime(2026, 8, 2, 5, 0, tzinfo=ZoneInfo("America/New_York"))
         result = sports.scan_channels(
             self.db_path,
             self.channels,
@@ -189,7 +948,7 @@ class SportsTests(unittest.TestCase):
         sports.scan_channels(self.db_path, self.channels, now=before, trigger="test")
         self.assertEqual(len(sports.generated_rows(self.db_path)), 3)
 
-        after = datetime(2026, 8, 2, 4, 0, tzinfo=ZoneInfo("America/New_York"))
+        after = datetime(2026, 8, 2, 5, 0, tzinfo=ZoneInfo("America/New_York"))
         result = sports.scan_channels(self.db_path, self.channels, now=after, trigger="test")
         self.assertEqual(result["count"], 0)
         self.assertEqual(sports.generated_rows(self.db_path), [])
@@ -199,6 +958,44 @@ class SportsTests(unittest.TestCase):
         sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
         names = [row["display_name"] for row in sports.generated_rows(self.db_path)]
         self.assertFalse(any("NFL 01" in name for name in names))
+
+    def test_clear_golf_off_air_titles_are_filtered_without_dropping_real_programming(self):
+        channel = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="golf.channel" group-title="PGA Tour",Golf Channel
+http://provider.test/live/golf.ts
+"""
+        )[0]
+        now = datetime(2026, 8, 3, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+        settings = sports.get_settings(self.db_path)
+
+        for title in (
+            "No EVENT Today",
+            "No Events Today!",
+            "PGA Tour — Signing-Off",
+        ):
+            with self.subTest(title=title):
+                self.assertIsNone(
+                    sports._event_from_text(
+                        self.db_path,
+                        channel,
+                        title,
+                        settings,
+                        now,
+                        forced_start=now,
+                    )
+                )
+
+        podcast = sports._event_from_text(
+            self.db_path,
+            channel,
+            "Golf Channel Podcast With Rex & Lav",
+            settings,
+            now,
+            forced_start=now,
+        )
+        self.assertIsNotNone(podcast)
+        self.assertEqual(podcast["display_name"], "Golf Channel Podcast With Rex & Lav")
 
     def test_malformed_m3u_timestamp_is_skipped_without_aborting_scan(self):
         malformed = core.parse_m3u_text(
@@ -227,6 +1024,80 @@ http://provider.test/user/pass/bad.ts
         at_refresh = datetime(2026, 8, 2, 3, 0, tzinfo=ZoneInfo("America/New_York"))
         self.assertTrue(sports.should_run_scheduled(self.db_path, at_refresh))
 
+    def test_interval_schedule_uses_last_completed_attempt_as_anchor(self):
+        sports.update_settings(
+            self.db_path,
+            {"schedule_mode": "interval", "interval_hours": 2},
+        )
+        finished = datetime(2026, 8, 2, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+        with patch("sports._now_iso", return_value=finished.isoformat()):
+            sports._record_scan(
+                self.db_path,
+                started_at=(finished - timedelta(minutes=4)).isoformat(),
+                status="success",
+                message="ok",
+                event_count=1,
+                channel_count=3,
+                target_date="2026-08-02",
+                trigger="manual",
+            )
+
+        self.assertEqual(
+            sports.next_update_at(self.db_path, finished + timedelta(minutes=30)),
+            finished + timedelta(hours=2),
+        )
+        self.assertFalse(
+            sports.should_run_scheduled(self.db_path, finished + timedelta(hours=1, minutes=59))
+        )
+        self.assertTrue(
+            sports.should_run_scheduled(self.db_path, finished + timedelta(hours=2))
+        )
+
+    def test_failed_interval_scan_waits_the_full_interval_before_retrying(self):
+        sports.update_settings(
+            self.db_path,
+            {"schedule_mode": "interval", "interval_hours": 3},
+        )
+        finished = datetime(2026, 8, 2, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+        with patch("sports._now_iso", return_value=finished.isoformat()):
+            sports._record_scan(
+                self.db_path,
+                started_at=(finished - timedelta(minutes=1)).isoformat(),
+                status="failed",
+                message="provider unavailable",
+                event_count=0,
+                channel_count=0,
+                target_date="2026-08-02",
+                trigger="scheduled",
+            )
+
+        self.assertFalse(
+            sports.should_run_scheduled(self.db_path, finished + timedelta(hours=2, minutes=59))
+        )
+        self.assertTrue(
+            sports.should_run_scheduled(self.db_path, finished + timedelta(hours=3))
+        )
+
+    def test_interval_schedule_without_a_scan_uses_a_stable_settings_anchor(self):
+        changed = datetime(2026, 8, 2, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+        with patch("sports._now_iso", return_value=changed.isoformat()):
+            sports.update_settings(
+                self.db_path,
+                {"schedule_mode": "interval", "interval_hours": 2},
+            )
+        first = sports.next_update_at(self.db_path, changed + timedelta(minutes=10))
+        second = sports.next_update_at(self.db_path, changed + timedelta(minutes=40))
+        self.assertEqual(first, changed + timedelta(hours=2))
+        self.assertEqual(second, first)
+
+    def test_interval_schedule_validation_is_bounded(self):
+        with self.assertRaisesRegex(ValueError, "1 to 24"):
+            sports.update_settings(self.db_path, {"interval_hours": 0})
+        with self.assertRaisesRegex(ValueError, "1 to 24"):
+            sports.update_settings(self.db_path, {"interval_hours": 25})
+        with self.assertRaisesRegex(ValueError, "Daily or Every X hours"):
+            sports.update_settings(self.db_path, {"schedule_mode": "weekly"})
+
     def test_failed_scheduled_scan_is_not_retried_twice_in_same_minute(self):
         at_refresh = datetime(2026, 8, 2, 3, 0, 5, tzinfo=ZoneInfo("America/New_York"))
         sports._record_scan(
@@ -248,7 +1119,7 @@ http://provider.test/user/pass/bad.ts
             """<?xml version="1.0" encoding="UTF-8"?>
 <tv>
   <channel id="mlb.event"><display-name>MLB Event</display-name></channel>
-  <programme channel="mlb.event" start="20260801190500 -0400" stop="20260801220500 -0400">
+  <programme channel="mlb.event" start="20260801230500 -0400" stop="20260802030500 -0400">
     <title>Philadelphia Phillies at Baltimore Orioles</title>
     <category>MLB</category>
   </programme>
@@ -287,7 +1158,7 @@ http://provider.test/user/pass/bad.ts
   <programme channel="mlb.event" start="20260801990500 -0400">
     <title>Bad Team at Worse Team</title><category>MLB</category>
   </programme>
-  <programme channel="mlb.event" start="20260801190500 -0400">
+  <programme channel="mlb.event" start="20260801230500 -0400" stop="20260802030500 -0400">
     <title>Philadelphia Phillies at Baltimore Orioles</title><category>MLB</category>
   </programme>
 </tv>
@@ -493,6 +1364,64 @@ http://provider.test/user/pass/milb.ts
         self.assertEqual(rows[0]["league_id"], "milb")
         self.assertIn("IronPigs", rows[0]["display_name"])
         self.assertNotIn("Phillies", rows[0]["display_name"])
+
+    def test_league_only_games_get_one_feed_but_selected_team_games_expand_without_duplicates(self):
+        db_path = Path(self.temp.name) / "league-team-overlap.db"
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB",(MLB 1) | Washington Nationals @ Philadelphia Phillies (2026-08-04 18:40:00)
+http://provider.test/events/nats-phillies.ts
+#EXTINF:-1 tvg-id="WashingtonNationals.mlb" group-title="MLB",MLB Washington Nationals
+http://provider.test/teams/nationals.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" group-title="MLB",MLB Philadelphia Phillies
+http://provider.test/teams/phillies.ts
+#EXTINF:-1 group-title="MLB",(MLB 2) | New York Yankees @ Baltimore Orioles (2026-08-04 19:05:00)
+http://provider.test/events/yankees-orioles.ts
+#EXTINF:-1 tvg-id="NewYorkYankees.mlb" group-title="MLB",MLB New York Yankees
+http://provider.test/teams/yankees.ts
+#EXTINF:-1 tvg-id="BaltimoreOrioles.mlb" group-title="MLB",MLB Baltimore Orioles
+http://provider.test/teams/orioles.ts
+"""
+        )
+        sports.init_db(db_path)
+        sports.discover_catalog_from_channels(db_path, channels)
+        sports.update_settings(
+            db_path,
+            {
+                "enabled": True,
+                "timezone": "America/New_York",
+                "event_window": "next_24_hours",
+            },
+        )
+        sports.add_rule(
+            db_path,
+            {"scope_type": "league", "scope_id": "mlb", "feed_preference": "all"},
+        )
+        sports.add_rule(
+            db_path,
+            {
+                "scope_type": "team",
+                "scope_id": "mlb:philadelphia-phillies",
+                "feed_preference": "favorite",
+            },
+        )
+
+        result = sports.scan_channels(
+            db_path,
+            channels,
+            now=datetime(2026, 8, 4, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        rows = sports.generated_rows(db_path)
+
+        self.assertEqual(result["events"], 2)
+        self.assertEqual(result["count"], 4)
+        phillies_rows = [row for row in rows if "Phillies" in row["display_name"]]
+        orioles_rows = [row for row in rows if "Orioles" in row["display_name"]]
+        self.assertEqual(len(phillies_rows), 3)
+        self.assertEqual(len(orioles_rows), 1)
+        self.assertEqual(len({row["event_key"] for row in phillies_rows}), 1)
+        self.assertEqual(len({row["event_key"] for row in rows}), 2)
 
     def test_shared_baseball_group_uses_all_mlb_epg_matchups_and_full_names(self):
         db_path = Path(self.temp.name) / "all-mlb-epg.db"
@@ -747,6 +1676,117 @@ http://provider.test/user/pass/milb.ts
         live_programmes = [node for node in root.findall("programme") if node.find("live") is not None]
         self.assertEqual(len(live_programmes), 1)
 
+    def test_authoritative_current_xmltv_programme_is_cloned_to_every_generated_feed(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="" tvg-name="" tvg-logo="https://example.test/mlb.png" group-title="MLB",(MLB 1) | Washington Nationals @ Philadelphia Phillies (2026-08-03 18:30:00)
+http://provider.test/user/pass/event.ts
+#EXTINF:-1 tvg-id="WashingtonNationals.mlb" tvg-name="MLB Washington Nationals" tvg-logo="https://example.test/nationals.png" group-title="MLB",MLB Washington Nationals
+http://provider.test/user/pass/nationals.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" tvg-name="MLB Philadelphia Phillies" tvg-logo="https://example.test/phillies.png" group-title="MLB",MLB Philadelphia Phillies
+http://provider.test/user/pass/phillies.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        epg_path = Path(self.temp.name) / "provider-current.xml"
+        epg_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="PhiladelphiaPhillies.mlb"><display-name>MLB Philadelphia Phillies</display-name></channel>
+  <programme channel="PhiladelphiaPhillies.mlb" start="20260803183000 -0400" stop="20260803213000 -0400">
+    <title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title>
+    <desc>From Citizens Bank Park in Philadelphia.</desc>
+    <category>Baseball</category>
+    <category>Sports</category>
+    <live />
+  </programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports_epg = Path(self.temp.name) / "sports-current.xml"
+        combined_epg = Path(self.temp.name) / "combined-current.xml"
+        scan_time = datetime(2026, 8, 3, 20, 49, tzinfo=ZoneInfo("America/New_York"))
+
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg_path=epg_path,
+            sports_epg_path=sports_epg,
+            combined_epg_path=combined_epg,
+            now=scan_time,
+            trigger="test",
+        )
+        self.assertEqual(result["count"], 3)
+        rows = sports.generated_rows(self.db_path)
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row["epg_programme"]["is_live"] for row in rows))
+        self.assertTrue(
+            all(
+                row["epg_programme"]["title"]
+                == "MLB Baseball : Washington Nationals at Philadelphia Phillies"
+                for row in rows
+            )
+        )
+
+        root = ElementTree.parse(sports_epg).getroot()
+        expected_start = datetime(2026, 8, 3, 18, 30, tzinfo=scan_time.tzinfo)
+        expected_stop = datetime(2026, 8, 3, 21, 30, tzinfo=scan_time.tzinfo)
+        for row in rows:
+            covering = []
+            for programme in root.findall(f"programme[@channel='{row['tvg_id']}']"):
+                start = sports._parse_xmltv_time(programme.attrib["start"], scan_time.tzinfo)
+                stop = sports._parse_xmltv_time(programme.attrib["stop"], scan_time.tzinfo)
+                if start <= scan_time < stop:
+                    covering.append((programme, start, stop))
+            self.assertEqual(len(covering), 1)
+            programme, start, stop = covering[0]
+            self.assertEqual(start, expected_start)
+            self.assertEqual(stop, expected_stop)
+            self.assertEqual(
+                programme.findtext("title", default=""),
+                "MLB Baseball : Washington Nationals at Philadelphia Phillies",
+            )
+            self.assertEqual(
+                programme.findtext("sub-title", default=""),
+                sports._clean_feed_subtitle(row["subtitle"]),
+            )
+            self.assertIn("From Citizens Bank Park", programme.findtext("desc", default=""))
+            self.assertIsNotNone(programme.find("live"))
+
+            postgame = [
+                node
+                for node in root.findall(f"programme[@channel='{row['tvg_id']}']")
+                if node.findtext("title", default="").endswith("— Event window")
+            ]
+            self.assertEqual(len(postgame), 1)
+            post_start = sports._parse_xmltv_time(postgame[0].attrib["start"], scan_time.tzinfo)
+            post_stop = sports._parse_xmltv_time(postgame[0].attrib["stop"], scan_time.tzinfo)
+            self.assertEqual(post_start, expected_stop)
+            self.assertEqual(
+                post_stop,
+                datetime(2026, 8, 3, 23, 0, tzinfo=scan_time.tzinfo),
+            )
+
+        # Startup/rebuild paths use persisted rows, so provenance must survive
+        # SQLite rather than existing only in the in-memory scan result.
+        rebuilt_sports = Path(self.temp.name) / "sports-rebuilt.xml"
+        rebuilt_combined = Path(self.temp.name) / "combined-rebuilt.xml"
+        sports.rebuild_epg_exports(
+            self.db_path,
+            base_epg_path=epg_path,
+            sports_epg_path=rebuilt_sports,
+            combined_epg_path=rebuilt_combined,
+        )
+        rebuilt_root = ElementTree.parse(rebuilt_sports).getroot()
+        rebuilt_titles = {
+            node.findtext("title", default="")
+            for node in rebuilt_root.findall("programme")
+        }
+        self.assertIn(
+            "MLB Baseball : Washington Nationals at Philadelphia Phillies",
+            rebuilt_titles,
+        )
+
     def test_served_guide_validation_checks_actual_playlist_and_xml_files(self):
         sports_epg = Path(self.temp.name) / "sports.xml"
         combined_epg = Path(self.temp.name) / "combined.xml"
@@ -940,7 +1980,7 @@ http://provider.test/user/pass/nhl-sd.ts
     def test_scan_groups_mlb_and_nhl_into_separate_number_ranges(self):
         extra = core.parse_m3u_text(
             """#EXTM3U
-#EXTINF:-1 group-title="NHL",NHL | Philadelphia Flyers @ New York Rangers (2026-08-01 20:00:00)
+#EXTINF:-1 group-title="NHL",NHL | Philadelphia Flyers @ New York Rangers (2026-08-01 23:30:00)
 http://provider.test/user/pass/nhl-event.ts
 """
         )
@@ -956,5 +1996,490 @@ http://provider.test/user/pass/nhl-event.ts
         self.assertTrue(all(2000 <= number <= 2999 for number in nhl_numbers))
 
 
+    def test_epg_manager_payload_hides_stored_url_and_credentials(self):
+        original_sources = core.epg_sources
+        try:
+            core.epg_sources = [
+                {
+                    "id": "provider",
+                    "name": "Provider guide",
+                    "url": "http://fanatic.astranettv.com/xmltv.php?username=secret&password=hidden",
+                    "last_refresh": None,
+                    "last_error": None,
+                }
+            ]
+            payload = core.epg_sources_payload()
+        finally:
+            core.epg_sources = original_sources
+
+        self.assertEqual(payload[0]["source_label"], "AstraNet")
+        self.assertNotIn("url", payload[0])
+        self.assertNotIn("secret", str(payload[0]))
+        self.assertNotIn("hidden", str(payload[0]))
+
+    def test_stale_empty_guide_is_detected_when_generated_rows_exist(self):
+        original_db = core.DB_PATH
+        original_sports_epg = core.SPORTS_EPG_PATH
+        original_combined_epg = core.COMBINED_EPG_PATH
+        original_epg_cache = core.EPG_CACHE_PATH
+        try:
+            core.DB_PATH = self.db_path
+            core.SPORTS_EPG_PATH = Path(self.temp.name) / "served-sports.xml"
+            core.COMBINED_EPG_PATH = Path(self.temp.name) / "served-combined.xml"
+            core.EPG_CACHE_PATH = Path(self.temp.name) / "provider.xml"
+            now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+            sports.scan_channels(self.db_path, self.channels, now=now, trigger="test")
+            core.SPORTS_EPG_PATH.write_text(
+                "<?xml version='1.0'?><tv />", encoding="utf-8"
+            )
+            self.assertTrue(core.guide_export_needs_rebuild(core.SPORTS_EPG_PATH))
+            core.ensure_epg_exports_current()
+            rebuilt = core.SPORTS_EPG_PATH.read_text(encoding="utf-8")
+            self.assertIn("m3u-picker-sports-1000", rebuilt)
+            self.assertIn("<programme", rebuilt)
+        finally:
+            core.DB_PATH = original_db
+            core.SPORTS_EPG_PATH = original_sports_epg
+            core.COMBINED_EPG_PATH = original_combined_epg
+            core.EPG_CACHE_PATH = original_epg_cache
+
+    def test_builtin_epg_payload_reports_served_guides(self):
+        original_sports_epg = core.SPORTS_EPG_PATH
+        original_combined_epg = core.COMBINED_EPG_PATH
+        try:
+            core.SPORTS_EPG_PATH = Path(self.temp.name) / "served-sports.xml"
+            core.COMBINED_EPG_PATH = Path(self.temp.name) / "served-combined.xml"
+            core.SPORTS_EPG_PATH.write_text("<tv />", encoding="utf-8")
+            core.COMBINED_EPG_PATH.write_text("<tv><channel id='one'/></tv>", encoding="utf-8")
+            payload = {item["id"]: item for item in core.epg_builtin_payload()}
+        finally:
+            core.SPORTS_EPG_PATH = original_sports_epg
+            core.COMBINED_EPG_PATH = original_combined_epg
+
+        self.assertEqual(payload["combined"]["url_path"], "/epg/combined.xml")
+        self.assertEqual(payload["sports"]["url_path"], "/epg/sports.xml")
+        self.assertTrue(payload["combined"]["cached"])
+        self.assertTrue(payload["sports"]["cached"])
+        self.assertGreater(payload["combined"]["size_bytes"], payload["sports"]["size_bytes"])
+        self.assertTrue(payload["combined"]["last_refresh"])
+
+
+    def _logical_airing_fixture(self):
+        timezone = ZoneInfo("America/New_York")
+
+        def event(start, stop, *, is_live=False, is_replay=False):
+            return {
+                "event_key": "temporary",
+                "event_base_key": f"{start.date().isoformat()}:mlb:washington:philadelphia",
+                "event_identity": "mlb:washington:philadelphia",
+                "event_date": start.date().isoformat(),
+                "league_id": "mlb",
+                "sport_id": "baseball",
+                "sport_tags": ["baseball"],
+                "display_name": "Washington Nationals at Philadelphia Phillies",
+                "away_team_id": "mlb:washington-nationals",
+                "away_team_name": "Washington Nationals",
+                "home_team_id": "mlb:philadelphia-phillies",
+                "home_team_name": "Philadelphia Phillies",
+                "start": start,
+                "end": stop,
+                "time_is_explicit": True,
+                "timing_source": "xmltv",
+                "source_channels": [
+                    {
+                        "url": f"http://provider.test/{start:%H%M}.ts",
+                        "name": "MLB Philadelphia Phillies",
+                    }
+                ],
+                "source_text": "Washington Nationals at Philadelphia Phillies",
+                "is_replay": is_replay,
+                "epg_programme": {
+                    "title": "MLB Baseball : Washington Nationals at Philadelphia Phillies",
+                    "subtitle": "",
+                    "description": "From Citizens Bank Park in Philadelphia.",
+                    "categories": ["Baseball", "Sports"],
+                    "start": start,
+                    "stop": stop,
+                    "is_live": is_live,
+                    "is_replay": is_replay,
+                    "is_new": False,
+                    "current_at_scan": False,
+                    "source_channel_id": "PhiladelphiaPhillies.mlb",
+                },
+            }
+
+        return [
+            event(
+                datetime(2026, 8, 4, 18, 40, tzinfo=timezone),
+                datetime(2026, 8, 4, 22, 40, tzinfo=timezone),
+                is_live=True,
+            ),
+            event(
+                datetime(2026, 8, 5, 0, 30, tzinfo=timezone),
+                datetime(2026, 8, 5, 3, 0, tzinfo=timezone),
+            ),
+            event(
+                datetime(2026, 8, 5, 6, 0, tzinfo=timezone),
+                datetime(2026, 8, 5, 8, 0, tzinfo=timezone),
+            ),
+        ]
+
+    def test_later_same_matchup_airings_do_not_allocate_new_events_when_replays_disabled(self):
+        merged = sports._merge_events(
+            self._logical_airing_fixture(),
+            settings={"include_replays": False},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["start"].hour, 18)
+        self.assertEqual(merged[0].get("epg_programmes", []), [])
+        self.assertTrue(merged[0]["event_key"].endswith(":1840"))
+
+    def test_replays_are_additional_programmes_on_one_logical_event(self):
+        merged = sports._merge_events(
+            self._logical_airing_fixture(),
+            settings={"include_replays": True},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["epg_programmes"]), 2)
+        self.assertTrue(all(item["is_replay"] for item in merged[0]["epg_programmes"]))
+        self.assertEqual(
+            sports._event_end(merged[0]),
+            datetime(2026, 8, 5, 8, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        item = {
+            "tvg_id": "m3u-picker-sports-1000",
+            "display_name": "MLB • Washington Nationals at Philadelphia Phillies — Phillies Feed",
+            "assigned_number": 1000,
+            "tvg_logo": "",
+            "league_id": "mlb",
+            "event_title": merged[0]["display_name"],
+            "subtitle": "Home broadcast • Philadelphia Phillies • 6:40 PM",
+            "event_start": merged[0]["start"].isoformat(),
+            "event_end": sports._event_end(merged[0]).isoformat(),
+            "is_replay": False,
+            "epg_programme": sports._serialize_epg_programme(merged[0]),
+        }
+        xml = sports.build_sports_xmltv(
+            [item],
+            {
+                "timezone": "America/New_York",
+                "schedule_mode": "interval",
+                "interval_hours": 2,
+                "target_mode": "next24",
+            },
+            generated_at=datetime(2026, 8, 4, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+        root = ElementTree.fromstring(xml)
+        self.assertEqual(len(root.findall("channel")), 1)
+        replay_nodes = [
+            node
+            for node in root.findall("programme")
+            if node.find("previously-shown") is not None
+        ]
+        self.assertEqual(len(replay_nodes), 2)
+        self.assertTrue(
+            all(node.findtext("title", default="").startswith("Replay:") for node in replay_nodes)
+        )
+        for node in root.findall("programme"):
+            if not node.findtext("title", default="").endswith("— Event window"):
+                continue
+            start = sports._parse_xmltv_time(node.attrib["start"], ZoneInfo("America/New_York"))
+            stop = sports._parse_xmltv_time(node.attrib["stop"], ZoneInfo("America/New_York"))
+            self.assertLessEqual(stop - start, timedelta(minutes=90))
+
+    def test_embedded_schedule_anchor_overrides_bad_live_markers_on_replays(self):
+        events = self._logical_airing_fixture()
+        # Some provider guides mark every airing as live, including overnight
+        # replays. The timed event M3U row is the canonical schedule anchor.
+        events[0]["has_embedded_anchor"] = True
+        events[0]["source_kind"] = "m3u"
+        for event in events:
+            event["epg_programme"]["is_live"] = True
+
+        merged = sports._merge_events(
+            events,
+            settings={"include_replays": False, "timezone": "America/New_York"},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["event_key"], "2026-08-04:mlb:washington:philadelphia:1840")
+
+        merged_with_replays = sports._merge_events(
+            events,
+            settings={"include_replays": True, "timezone": "America/New_York"},
+        )
+        self.assertEqual(len(merged_with_replays), 1)
+        self.assertEqual(len(merged_with_replays[0].get("epg_programmes", [])), 2)
+        self.assertTrue(
+            all(not airing.get("is_live") for airing in merged_with_replays[0]["epg_programmes"])
+        )
+
+    def test_multiple_timed_provider_rows_in_one_broadcast_day_collapse_to_one_game(self):
+        events = self._logical_airing_fixture()
+        for event in events:
+            event["timing_source"] = "embedded"
+            event["source_kind"] = "m3u"
+            event["has_embedded_anchor"] = True
+            event.pop("epg_programme", None)
+
+        merged = sports._merge_events(
+            events,
+            settings={"include_replays": False, "timezone": "America/New_York"},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["start"].hour, 18)
+        self.assertEqual(merged[0]["event_key"], "2026-08-04:mlb:washington:philadelphia:1840")
+
+        merged_with_replays = sports._merge_events(
+            events,
+            settings={"include_replays": True, "timezone": "America/New_York"},
+        )
+        self.assertEqual(len(merged_with_replays), 1)
+        # Timed rows without XMLTV programme metadata cannot create replay
+        # guide entries, but they still must not allocate new channel blocks.
+        self.assertEqual(merged_with_replays[0].get("epg_programmes", []), [])
+
+    def test_migrated_duplicate_history_anchors_do_not_resurrect_old_channel_blocks(self):
+        current = self._logical_airing_fixture()
+        history = []
+        for event in self._logical_airing_fixture():
+            clone = dict(event)
+            clone["source_channels"] = []
+            clone["source_kind"] = "history"
+            clone["source_kinds"] = ["history"]
+            clone["historical_anchor"] = True
+            clone["has_embedded_anchor"] = True
+            clone["timing_source"] = "embedded"
+            history.append(clone)
+
+        merged = sports._merge_events(
+            [*history, *current],
+            settings={"include_replays": False, "timezone": "America/New_York"},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["start"].hour, 18)
+        self.assertFalse(merged[0].get("historical_anchor", False))
+
+    def test_same_matchup_next_evening_remains_a_new_logical_game(self):
+        events = self._logical_airing_fixture()[:1]
+        next_game = dict(events[0])
+        next_game["start"] = datetime(
+            2026, 8, 5, 18, 40, tzinfo=ZoneInfo("America/New_York")
+        )
+        next_game["end"] = datetime(
+            2026, 8, 5, 22, 40, tzinfo=ZoneInfo("America/New_York")
+        )
+        next_game["epg_programme"] = dict(next_game["epg_programme"])
+        next_game["epg_programme"]["start"] = next_game["start"]
+        next_game["epg_programme"]["stop"] = next_game["end"]
+        for event in (events[0], next_game):
+            event["timing_source"] = "embedded"
+            event["source_kind"] = "m3u"
+            event["has_embedded_anchor"] = True
+
+        merged = sports._merge_events(
+            [events[0], next_game],
+            settings={"include_replays": False, "timezone": "America/New_York"},
+        )
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(
+            [event["event_date"] for event in merged],
+            ["2026-08-04", "2026-08-05"],
+        )
+
+    def test_scan_allocates_one_channel_block_for_live_game_and_overnight_replays(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="event.mlb" tvg-name="MLB Event" group-title="MLB",(MLB 1) | Washington Nationals @ Philadelphia Phillies (2026-08-04 18:40:00)
+http://provider.test/event.ts
+#EXTINF:-1 tvg-id="WashingtonNationals.mlb" tvg-name="MLB Washington Nationals" group-title="MLB",MLB Washington Nationals
+http://provider.test/nationals.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" tvg-name="MLB Philadelphia Phillies" group-title="MLB",MLB Philadelphia Phillies
+http://provider.test/phillies.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        sports.add_rule(
+            self.db_path,
+            {
+                "scope_type": "league",
+                "scope_id": "mlb",
+                "feed_preference": "all",
+            },
+        )
+        sports.update_settings(
+            self.db_path,
+            {
+                "event_window": "next_24_hours",
+                "include_replays": False,
+            },
+        )
+        epg_path = Path(self.temp.name) / "logical-airings.xml"
+        epg_path.write_text(
+            """<tv>
+<channel id="event.mlb"><display-name>MLB Event</display-name></channel>
+<programme channel="event.mlb" start="20260804184000 -0400" stop="20260804224000 -0400"><title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title><category>MLB</category><live/></programme>
+<programme channel="event.mlb" start="20260805003000 -0400" stop="20260805030000 -0400"><title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title><category>MLB</category><live/></programme>
+<programme channel="event.mlb" start="20260805060000 -0400" stop="20260805080000 -0400"><title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title><category>MLB</category><live/></programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports_epg = Path(self.temp.name) / "logical-sports.xml"
+        combined_epg = Path(self.temp.name) / "logical-combined.xml"
+        scan_time = datetime(2026, 8, 4, 17, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg_path=epg_path,
+            sports_epg_path=sports_epg,
+            combined_epg_path=combined_epg,
+            now=scan_time,
+            trigger="test",
+        )
+        self.assertEqual(result["count"], 3)
+        rows = sports.generated_rows(self.db_path)
+        self.assertEqual([row["assigned_number"] for row in rows], [1000, 1001, 1002])
+        self.assertEqual(len({row["event_key"] for row in rows}), 1)
+        self.assertTrue(all(not row["epg_programme"].get("airings") for row in rows))
+
+        sports.update_settings(self.db_path, {"include_replays": True})
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            epg_path=epg_path,
+            sports_epg_path=sports_epg,
+            combined_epg_path=combined_epg,
+            now=scan_time,
+            trigger="test",
+        )
+        self.assertEqual(result["count"], 3)
+        rows = sports.generated_rows(self.db_path)
+        self.assertTrue(all(len(row["epg_programme"].get("airings", [])) == 2 for row in rows))
+        root = ElementTree.parse(sports_epg).getroot()
+        self.assertEqual(
+            len([node for node in root.findall("programme") if node.find("previously-shown") is not None]),
+            6,
+        )
+
+    def test_previous_scan_anchor_suppresses_replay_after_event_slot_disappears(self):
+        live_channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="event.mlb" tvg-name="MLB Event" group-title="MLB",(MLB 1) | Washington Nationals @ Philadelphia Phillies (2026-08-04 18:40:00)
+http://provider.test/event.ts
+#EXTINF:-1 tvg-id="WashingtonNationals.mlb" tvg-name="MLB Washington Nationals" group-title="MLB",MLB Washington Nationals
+http://provider.test/nationals.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" tvg-name="MLB Philadelphia Phillies" group-title="MLB",MLB Philadelphia Phillies
+http://provider.test/phillies.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, live_channels)
+        sports.add_rule(
+            self.db_path,
+            {"scope_type": "league", "scope_id": "mlb", "feed_preference": "all"},
+        )
+        sports.update_settings(
+            self.db_path,
+            {"event_window": "next_24_hours", "include_replays": False},
+        )
+        live_epg = Path(self.temp.name) / "live.xml"
+        live_epg.write_text(
+            """<tv>
+<channel id="event.mlb"><display-name>MLB Event</display-name></channel>
+<programme channel="event.mlb" start="20260804184000 -0400" stop="20260804224000 -0400"><title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title><category>MLB</category><live/></programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        sports.scan_channels(
+            self.db_path,
+            live_channels,
+            epg_path=live_epg,
+            now=datetime(2026, 8, 4, 19, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertGreater(len(sports.generated_rows(self.db_path)), 0)
+
+        # The provider refresh has removed the timed event slot, but its guide
+        # now labels the overnight replay as live. The previous logical game is
+        # retained only as a classification anchor, so the replay does not
+        # allocate a fresh channel block when replays are disabled.
+        replay_channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 tvg-id="WashingtonNationals.mlb" tvg-name="MLB Washington Nationals" group-title="MLB",MLB Washington Nationals
+http://provider.test/nationals.ts
+#EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" tvg-name="MLB Philadelphia Phillies" group-title="MLB",MLB Philadelphia Phillies
+http://provider.test/phillies.ts
+"""
+        )
+        replay_epg = Path(self.temp.name) / "replay.xml"
+        replay_epg.write_text(
+            """<tv>
+<channel id="PhiladelphiaPhillies.mlb"><display-name>MLB Philadelphia Phillies</display-name></channel>
+<programme channel="PhiladelphiaPhillies.mlb" start="20260805003000 -0400" stop="20260805030000 -0400"><title>MLB Baseball : Washington Nationals at Philadelphia Phillies</title><category>MLB</category><live/></programme>
+</tv>""",
+            encoding="utf-8",
+        )
+        result = sports.scan_channels(
+            self.db_path,
+            replay_channels,
+            epg_path=replay_epg,
+            now=datetime(2026, 8, 5, 0, 45, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 0)
+        self.assertEqual(result["count"], 0)
+        self.assertGreaterEqual(result["scan_metrics"]["history_anchors"], 1)
+
+    def test_bad_live_marker_on_overnight_airing_does_not_force_duplicate_game(self):
+        events = self._logical_airing_fixture()[:2]
+        events[1]["epg_programme"]["is_live"] = True
+        merged = sports._merge_events(
+            events,
+            settings={"include_replays": False, "timezone": "America/New_York"},
+        )
+        self.assertEqual(len(merged), 1)
+
+    def test_epg_manager_ui_is_present_and_column_aligned(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+        javascript = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+        stylesheet = (root / "static" / "css" / "app.css").read_text(encoding="utf-8")
+        self.assertIn("EPG Manager", html)
+        self.assertIn('class="table table-hover table-sm align-middle mb-0 epg-manager-table"', html)
+        self.assertIn("<colgroup>", html)
+        self.assertIn('id="epgSources"', html)
+        self.assertIn('id="combinedEpgUrl"', html)
+        self.assertIn('id="sportsEpgUrl"', html)
+        self.assertIn('<th scope="col">Status</th>', html)
+        self.assertIn('id="epgAddStatus" class="epg-status-cell small-muted"></td>', html)
+        self.assertNotIn('>Credentials hidden after save</td>', html)
+        self.assertIn("loadEpgSources", javascript)
+        self.assertIn("renderBuiltInEpgStatus", javascript)
+        self.assertIn("table-layout: fixed", stylesheet)
+        self.assertIn("Live Channels", html)
+        self.assertIn("Last Updated / Status", html)
+        self.assertIn('id="providerOperationStatus"', html)
+        self.assertIn("provider-remove-primary-btn", javascript)
+        self.assertIn("Ready — loads during Sports Update", javascript)
+        self.assertIn('providerSources.some(source => source.role === "primary")', javascript)
+        self.assertIn("await loadInitialChannels();", javascript)
+        self.assertIn("await loadProviderSources();", javascript)
+        self.assertNotIn(
+            "Promise.all([loadInitialChannels(), loadProviderSources()",
+            javascript,
+        )
+        self.assertIn("usernameInput.value = \"\";", javascript)
+        self.assertIn("passwordInput.value = \"\";", javascript)
+        self.assertIn('id="primaryProviderFieldset"', html)
+        self.assertIn("fieldset.disabled = locked;", javascript)
+        self.assertIn("provider-account-status", javascript)
+        self.assertIn("v='22.0-rc1'", html)
 if __name__ == "__main__":
     unittest.main()
+

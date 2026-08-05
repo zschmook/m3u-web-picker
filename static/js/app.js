@@ -5,6 +5,14 @@ let customGroups = [];
 let activeGroupSlug = "";
 let activeGroupMembers = new Set();
 let showGroupOnly = false;
+let epgSources = [];
+let epgBuiltins = [];
+let providerSources = [];
+let currentSourceMode = "";
+let providerOperationBusy = false;
+let providerOperationStartedAt = 0;
+let providerProgressTimer = null;
+let providerProgressPollTick = 0;
 
 const els = {
   table: document.getElementById("channelTable"),
@@ -23,6 +31,10 @@ const els = {
 
 els.playlistUrl.value = `${location.origin}/playlist/custom.m3u`;
 els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
+const combinedEpgUrlInput = document.getElementById("combinedEpgUrl");
+const sportsEpgUrlInput = document.getElementById("sportsEpgUrl");
+if (combinedEpgUrlInput) combinedEpgUrlInput.value = `${location.origin}/epg/combined.xml`;
+if (sportsEpgUrlInput) sportsEpgUrlInput.value = `${location.origin}/epg/sports.xml`;
 
 const CHANNEL_MANAGER_COLLAPSE_KEY = "m3u-picker.channel-manager-collapsed";
 let channelManagerCollapsed = localStorage.getItem(CHANNEL_MANAGER_COLLAPSE_KEY) === "true";
@@ -57,7 +69,7 @@ function escapeHtml(value) {
 }
 
 function channelKey(channel) {
-  return String(channel.url || "").trim();
+  return String(channel.key || channel.url || "").trim();
 }
 
 function isGeneratedSportsChannel(channel) {
@@ -119,37 +131,47 @@ async function copyInputValue(inputId, buttonId) {
 }
 
 function setSourceMode(mode) {
+  currentSourceMode = mode || "";
   const urlInput = document.getElementById("m3uUrl");
+  const nameInput = document.getElementById("primaryName");
+  const usernameInput = document.getElementById("m3uUsername");
+  const passwordInput = document.getElementById("m3uPassword");
   const urlButton = document.getElementById("loadUrlBtn");
   const fileInput = document.getElementById("m3uFile");
   const fileButton = document.getElementById("uploadBtn");
+  const fieldset = document.getElementById("primaryProviderFieldset");
   const label = document.getElementById("sourceModeLabel");
+  const fileActions = document.getElementById("filePrimaryActions");
+  const locked = Boolean(currentSourceMode) || providerSources.some(source => source.role === "primary") || providerOperationBusy;
 
-  if (mode === "url") {
-    fileInput.disabled = true;
-    fileButton.disabled = true;
-    urlInput.disabled = false;
-    urlButton.disabled = false;
-    label.textContent = "Source loaded.";
-  } else if (mode === "file") {
-    urlInput.disabled = true;
-    urlButton.disabled = true;
-    fileInput.disabled = false;
-    fileButton.disabled = false;
-    label.textContent = "Source loaded.";
-  } else {
-    urlInput.disabled = false;
-    urlButton.disabled = false;
-    fileInput.disabled = false;
-    fileButton.disabled = false;
-    label.textContent = "";
+  if (fieldset) {
+    fieldset.disabled = locked;
+    fieldset.setAttribute("aria-disabled", String(locked));
   }
+  urlInput.disabled = locked;
+  nameInput.disabled = locked;
+  usernameInput.disabled = locked;
+  passwordInput.disabled = locked;
+  urlButton.disabled = locked;
+  fileInput.disabled = locked;
+  fileButton.disabled = locked;
+  if (locked) {
+    // Browsers/password managers may repopulate credential fields after the
+    // provider list loads. A saved primary is managed from the table below;
+    // these inputs are only for adding a replacement after removal.
+    usernameInput.value = "";
+    passwordInput.value = "";
+  }
+  if (fileActions) fileActions.classList.toggle("d-none", currentSourceMode !== "file");
+  if (label) label.textContent = currentSourceMode === "file" ? "File primary loaded." : "";
 }
 
 function showUrlModal() {
   const modalElement = document.getElementById("urlModal");
   const input = document.getElementById("modalUrlInput");
   input.value = "";
+  document.getElementById("modalUsernameInput").value = "";
+  document.getElementById("modalPasswordInput").value = "";
   const modal = new bootstrap.Modal(modalElement);
   modal.show();
   modalElement.addEventListener("shown.bs.modal", () => input.focus(), {once: true});
@@ -164,6 +186,8 @@ function acceptModalUrl() {
     return;
   }
   document.getElementById("m3uUrl").value = value;
+  document.getElementById("m3uUsername").value = document.getElementById("modalUsernameInput").value;
+  document.getElementById("m3uPassword").value = document.getElementById("modalPasswordInput").value;
   bootstrap.Modal.getInstance(modalElement)?.hide();
   loadFromUrl();
 }
@@ -281,6 +305,357 @@ async function loadGroups() {
   }
 }
 
+function formatEpgTimestamp(value) {
+  if (!value) return "Not generated";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function formatProviderExpiry(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleDateString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function formatEpgSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
+function renderBuiltInEpgStatus() {
+  const byId = new Map(epgBuiltins.map(item => [String(item.id || ""), item]));
+  for (const [id, elementId] of [["combined", "combinedEpgStatus"], ["sports", "sportsEpgStatus"]]) {
+    const target = document.getElementById(elementId);
+    if (!target) continue;
+    const guide = byId.get(id);
+    if (!guide || !guide.cached) {
+      target.textContent = "Generated on first request";
+      target.title = "";
+      continue;
+    }
+    const updated = formatEpgTimestamp(guide.last_refresh);
+    const size = formatEpgSize(guide.size_bytes);
+    target.innerHTML = `<span class="epg-status-primary">Updated ${escapeHtml(updated)}</span>${size ? `<span class="epg-status-secondary">${escapeHtml(size)}</span>` : ""}`;
+    target.title = [updated, size].filter(Boolean).join(" · ");
+  }
+}
+
+function renderEpgSources() {
+  const list = document.getElementById("epgSources");
+  if (!list) return;
+  renderBuiltInEpgStatus();
+  if (!epgSources.length) {
+    list.innerHTML = `<tr class="epg-empty-row"><td colspan="5" class="small-muted">No additional XMLTV sources.</td></tr>`;
+    return;
+  }
+  list.innerHTML = epgSources.map(source => {
+    const publicUrl = `${location.origin}${source.url_path || `/epg/${source.id}.xml`}`;
+    const status = source.last_error
+      ? `<span class="text-warning epg-status-primary">Refresh failed</span>`
+      : source.last_refresh
+        ? `<span class="epg-status-primary">Updated ${escapeHtml(formatEpgTimestamp(source.last_refresh))}</span>`
+        : `<span class="epg-status-primary">Never updated</span>`;
+    const title = source.last_error ? escapeHtml(source.last_error) : escapeHtml(formatEpgTimestamp(source.last_refresh));
+    return `
+      <tr class="epg-source-row" data-id="${escapeHtml(source.id)}">
+        <td class="epg-name-cell" title="${escapeHtml(source.name || source.id)}"><strong>${escapeHtml(source.name || source.id)}</strong></td>
+        <td><span class="badge rounded-pill epg-type-badge epg-type-external">${escapeHtml(source.source_label || "External")}</span></td>
+        <td class="epg-served-cell">
+          <div class="input-group input-group-sm">
+            <input class="form-control" value="${escapeHtml(publicUrl)}" readonly aria-label="Served XMLTV URL for ${escapeHtml(source.name || source.id)}">
+            <button class="btn btn-success epg-copy-btn" type="button">Copy</button>
+          </div>
+        </td>
+        <td class="epg-status-cell small-muted" title="${title}">${status}</td>
+        <td class="text-end"><button class="btn btn-outline-danger btn-sm epg-delete-btn epg-action-btn" type="button">Delete</button></td>
+      </tr>`;
+  }).join("");
+}
+
+async function loadEpgSources() {
+  try {
+    const response = await fetch("/api/epg");
+    const data = await response.json();
+    epgSources = data.sources || [];
+    epgBuiltins = data.builtins || [];
+  } catch {
+    epgSources = [];
+    epgBuiltins = [];
+  }
+  renderEpgSources();
+}
+
+async function addEpgSource() {
+  const nameInput = document.getElementById("epgName");
+  const urlInput = document.getElementById("epgUrl");
+  const addStatus = document.getElementById("epgAddStatus");
+  const name = nameInput?.value.trim() || "";
+  const url = urlInput?.value.trim() || "";
+  if (!name) {
+    nameInput?.focus();
+    return;
+  }
+  if (!url) {
+    urlInput?.focus();
+    return;
+  }
+  if (addStatus) addStatus.textContent = "Validating…";
+  setStatus("Adding EPG source...");
+  const response = await fetch("/api/epg", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, url})
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    if (addStatus) addStatus.textContent = data.error || "Could not add source";
+    setStatus("");
+    return alert(data.error || "Could not add EPG source.");
+  }
+  nameInput.value = "";
+  urlInput.value = "";
+  if (addStatus) addStatus.textContent = data.refreshed ? "Added" : "Saved; refresh pending";
+  await loadEpgSources();
+  window.setTimeout(() => { if (addStatus) addStatus.textContent = ""; }, 3500);
+  setStatus(data.refreshed ? `Added and refreshed EPG source: ${name}` : `Saved EPG source: ${name}. Refresh failed; it will retry later.`);
+}
+
+async function deleteEpgSource(sourceId) {
+  const response = await fetch(`/api/epg/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not delete EPG source.");
+  epgSources = data.sources || [];
+  renderEpgSources();
+  setStatus("Deleted EPG source.");
+}
+
+function formatElapsedSeconds(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  if (seconds < 60) return `${seconds}s elapsed`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s elapsed`;
+}
+
+function updateProviderProgressPanel(payload = {}) {
+  const panel = document.getElementById("providerOperationStatus");
+  if (!panel) return;
+  const stage = document.getElementById("providerOperationStage");
+  const detail = document.getElementById("providerOperationDetail");
+  const elapsed = document.getElementById("providerOperationElapsed");
+  const spinner = document.getElementById("providerOperationSpinner");
+  const channelCount = payload.channel_count;
+  const detailParts = [];
+  if (payload.detail) detailParts.push(payload.detail);
+  if (channelCount !== null && channelCount !== undefined) {
+    detailParts.push(`${Number(channelCount).toLocaleString()} live channels`);
+  }
+  stage.textContent = payload.stage || "Working…";
+  detail.textContent = detailParts.join(" • ");
+  elapsed.textContent = formatElapsedSeconds((Date.now() - providerOperationStartedAt) / 1000);
+  panel.classList.remove("d-none", "is-complete", "is-failed");
+  panel.classList.toggle("is-complete", payload.status === "complete");
+  panel.classList.toggle("is-failed", payload.status === "failed");
+  spinner.classList.toggle("d-none", payload.status === "complete" || payload.status === "failed");
+}
+
+async function pollProviderProgress() {
+  if (!providerOperationBusy) return;
+  providerProgressPollTick += 1;
+  const elapsed = document.getElementById("providerOperationElapsed");
+  if (elapsed) elapsed.textContent = formatElapsedSeconds((Date.now() - providerOperationStartedAt) / 1000);
+  if (providerProgressPollTick % 2 !== 0) return;
+  try {
+    const response = await fetch("/api/providers/progress", {cache: "no-store"});
+    if (response.ok) updateProviderProgressPanel(await response.json());
+  } catch {
+    // The elapsed clock still proves the browser is waiting even if a poll fails.
+  }
+}
+
+function startProviderProgress(initialStage) {
+  providerOperationBusy = true;
+  providerOperationStartedAt = Date.now();
+  providerProgressPollTick = 0;
+  updateProviderProgressPanel({stage: initialStage, status: "running"});
+  setSourceMode(currentSourceMode);
+  renderProviderSources();
+  clearInterval(providerProgressTimer);
+  providerProgressTimer = setInterval(pollProviderProgress, 500);
+  pollProviderProgress();
+}
+
+function finishProviderProgress(payload, {hideAfter = 5000} = {}) {
+  providerOperationBusy = false;
+  clearInterval(providerProgressTimer);
+  providerProgressTimer = null;
+  if (payload) updateProviderProgressPanel(payload);
+  setSourceMode(currentSourceMode);
+  renderProviderSources();
+  if (hideAfter) {
+    window.setTimeout(() => {
+      const panel = document.getElementById("providerOperationStatus");
+      if (panel && !providerOperationBusy) panel.classList.add("d-none");
+    }, hideAfter);
+  }
+}
+
+function renderProviderSources() {
+  const list = document.getElementById("providerSources");
+  if (!list) return;
+  const addButton = document.getElementById("addFallbackBtn");
+  const hasPrimary = providerSources.some(source => source.role === "primary");
+  setSourceMode(currentSourceMode);
+  if (addButton) addButton.disabled = !hasPrimary || providerOperationBusy;
+  if (!providerSources.length) {
+    list.innerHTML = `<tr><td colspan="6" class="small-muted">No URL provider loaded. Load a primary provider above.</td></tr>`;
+    return;
+  }
+  list.innerHTML = providerSources.map(source => {
+    const primary = source.role === "primary";
+    const priority = primary ? "Primary" : `Fallback ${Number(source.priority || 1)}`;
+    const kind = source.kind === "xtream"
+      ? (source.xtream_api ? "Xtream API" : "Xtream-compatible")
+      : "Direct M3U";
+    const refreshStatus = !primary && !hasPrimary
+      ? `<span class="text-warning">Waiting for primary</span>`
+      : source.last_error
+      ? `<span class="text-warning">Refresh failed</span>`
+      : source.deferred
+        ? "Ready — loads during Sports Update"
+        : source.last_refresh
+          ? `Updated ${escapeHtml(formatEpgTimestamp(source.last_refresh))}`
+          : source.cached ? "Cached" : "Not cached";
+    const accountBits = [];
+    if (source.kind === "xtream") {
+      if (source.account_status) accountBits.push(escapeHtml(source.account_status));
+      if (source.expires_at) accountBits.push(`Expires ${escapeHtml(formatProviderExpiry(source.expires_at))}`);
+    }
+    const accountStatus = accountBits.length
+      ? `<div class="provider-account-status">${accountBits.join(" • ")}</div>`
+      : "";
+    const status = `${refreshStatus}${accountStatus}`;
+    const title = source.last_error
+      ? escapeHtml(source.last_error)
+      : source.warning ? escapeHtml(source.warning) : "";
+    return `
+      <tr class="provider-source-row" data-id="${escapeHtml(source.id)}">
+        <td><span class="badge ${primary ? "text-bg-primary" : "text-bg-secondary"}">${escapeHtml(priority)}</span></td>
+        <td><strong>${escapeHtml(source.name || source.source_label || source.id)}</strong><div class="small-muted">${escapeHtml(source.source_label || "Provider")}</div></td>
+        <td>${escapeHtml(kind)}</td>
+        <td class="text-end">${Number(source.channel_count || 0).toLocaleString()}</td>
+        <td class="small-muted" title="${title}">${status}</td>
+        <td class="text-end">${primary
+          ? `<button class="btn btn-outline-danger btn-sm provider-remove-primary-btn" type="button">Remove</button>`
+          : `<button class="btn btn-outline-danger btn-sm provider-delete-btn" type="button">Remove</button>`}</td>
+      </tr>`;
+  }).join("");
+}
+
+async function loadProviderSources() {
+  try {
+    const response = await fetch("/api/providers");
+    const data = await response.json();
+    providerSources = data.sources || [];
+  } catch {
+    providerSources = [];
+  }
+  renderProviderSources();
+  setSourceMode(currentSourceMode);
+}
+
+async function addFallbackProvider() {
+  const nameInput = document.getElementById("fallbackName");
+  const urlInput = document.getElementById("fallbackUrl");
+  const usernameInput = document.getElementById("fallbackUsername");
+  const passwordInput = document.getElementById("fallbackPassword");
+  const name = nameInput.value.trim();
+  const url = urlInput.value.trim();
+  if (!name) return nameInput.focus();
+  if (!url) return urlInput.focus();
+  setStatus("Validating fallback provider...");
+  startProviderProgress("Validating fallback provider…");
+  let response;
+  let data;
+  try {
+    response = await fetch("/api/providers/fallback", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        name,
+        url,
+        username: usernameInput.value,
+        password: passwordInput.value
+      })
+    });
+    data = await response.json();
+  } catch (error) {
+    finishProviderProgress({stage: "Provider request failed", detail: String(error), status: "failed"}, {hideAfter: 0});
+    setStatus("");
+    return alert("Could not contact the application while adding the fallback provider.");
+  }
+  if (!response.ok) {
+    finishProviderProgress({stage: "Provider validation failed", detail: data.error || "Could not add fallback provider.", status: "failed"}, {hideAfter: 0});
+    setStatus("");
+    return alert(data.error || "Could not add fallback provider.");
+  }
+  providerSources = data.sources || [];
+  nameInput.value = "";
+  urlInput.value = "";
+  usernameInput.value = "";
+  passwordInput.value = "";
+  renderProviderSources();
+  finishProviderProgress({stage: "Fallback provider saved", detail: "Live channels will load only when Sports Update runs.", channel_count: 0, status: "complete"});
+  setStatus(`Added sports fallback provider: ${name}`);
+}
+
+async function deleteFallbackProvider(sourceId) {
+  const response = await fetch(`/api/providers/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
+  const data = await response.json();
+  if (!response.ok) return alert(data.error || "Could not delete fallback provider.");
+  providerSources = data.sources || [];
+  renderProviderSources();
+  setStatus("Deleted fallback provider.");
+}
+
+async function removePrimarySource() {
+  const keepFallbacks = providerSources.some(source => source.role === "fallback");
+  const message = keepFallbacks
+    ? "Remove the primary provider? Fallback settings will be kept but remain inactive until a new primary is added."
+    : "Remove the primary source?";
+  if (!window.confirm(message)) return;
+
+  setStatus("Removing primary source...");
+  const response = await fetch("/api/providers/primary", {method: "DELETE"});
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus("");
+    return alert(data.error || "Could not remove the primary source.");
+  }
+
+  providerSources = data.sources || [];
+  applyChannelPayload(data);
+  setSourceMode(data.source_mode || "");
+  renderProviderSources();
+  document.getElementById("m3uFile").value = "";
+  await loadSports();
+  setStatus("Primary source removed. You can now add a new primary.");
+}
+
 async function setActiveGroup(slug) {
   activeGroupSlug = slug || "";
   els.activeGroup.value = activeGroupSlug;
@@ -355,32 +730,58 @@ function applyChannelPayload(data) {
 }
 
 async function loadFromUrl() {
+  if (currentSourceMode || providerSources.some(source => source.role === "primary")) {
+    return alert("Remove the current primary source before adding another one.");
+  }
   const url = document.getElementById("m3uUrl").value.trim();
   if (!url) {
     showUrlModal();
     return;
   }
-  setStatus("Loading URL...");
-  const response = await fetch("/api/load-url", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({url})
-  });
-  const data = await response.json();
+  const name = document.getElementById("primaryName").value.trim() || "Primary";
+  const username = document.getElementById("m3uUsername").value;
+  const password = document.getElementById("m3uPassword").value;
+  setStatus(username || password ? "Detecting Xtream provider..." : "Loading primary provider...");
+  startProviderProgress(username || password ? "Probing Xtream provider…" : "Loading primary provider…");
+  let response;
+  let data;
+  try {
+    response = await fetch("/api/load-url", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name, url, username, password})
+    });
+    data = await response.json();
+  } catch (error) {
+    finishProviderProgress({stage: "Provider request failed", detail: String(error), status: "failed"}, {hideAfter: 0});
+    setStatus("");
+    return alert("Could not contact the application while loading the provider.");
+  }
   if (!response.ok) {
+    finishProviderProgress({stage: "Provider load failed", detail: data.error || "URL load failed.", status: "failed"}, {hideAfter: 0});
     setStatus("");
     return alert(data.error || "URL load failed.");
   }
   applyChannelPayload(data);
+  providerSources = data.providers || [];
+  renderProviderSources();
   document.getElementById("m3uUrl").value = "";
+  document.getElementById("m3uUsername").value = "";
+  document.getElementById("m3uPassword").value = "";
   document.getElementById("modalUrlInput").value = "";
+  document.getElementById("modalUsernameInput").value = "";
+  document.getElementById("modalPasswordInput").value = "";
   setSourceMode("url");
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
   await loadSports();
+  finishProviderProgress({stage: "Primary provider loaded", detail: "Live-only channel catalog ready.", channel_count: channels.length, status: "complete"});
   setStatus(`Source loaded. ${channels.length} channels available.`);
 }
 
 async function uploadFile() {
+  if (currentSourceMode || providerSources.some(source => source.role === "primary")) {
+    return alert("Remove the current primary source before adding another one.");
+  }
   const file = document.getElementById("m3uFile").files[0];
   if (!file) return alert("Choose an M3U file first.");
   setStatus("Uploading file...");
@@ -393,6 +794,8 @@ async function uploadFile() {
     return alert(data.error || "Upload failed.");
   }
   applyChannelPayload(data);
+  providerSources = [];
+  renderProviderSources();
   document.getElementById("m3uFile").value = "";
   setSourceMode("file");
   if (activeGroupSlug) await setActiveGroup(activeGroupSlug);
@@ -405,7 +808,11 @@ async function loadInitialChannels({quiet = false} = {}) {
     const response = await fetch("/api/channels");
     const data = await response.json();
     applyChannelPayload(data);
-    if (data.source_mode) setSourceMode(data.source_mode);
+    if (Array.isArray(data.providers)) {
+      providerSources = data.providers;
+      renderProviderSources();
+    }
+    setSourceMode(data.source_mode || currentSourceMode);
     if (!quiet && channels.length > 0) setStatus(`Loaded ${channels.length} cached channels.`);
   } catch {
     if (!quiet) setStatus("Could not load cached channels.");
@@ -455,11 +862,45 @@ els.table.addEventListener("dblclick", event => {
 
 document.getElementById("loadUrlBtn").addEventListener("click", loadFromUrl);
 document.getElementById("uploadBtn").addEventListener("click", uploadFile);
+document.getElementById("addFallbackBtn")?.addEventListener("click", addFallbackProvider);
+document.getElementById("fallbackPassword")?.addEventListener("keydown", event => { if (event.key === "Enter") addFallbackProvider(); });
+document.getElementById("providerSources")?.addEventListener("click", event => {
+  const row = event.target.closest(".provider-source-row");
+  if (row && event.target.classList.contains("provider-remove-primary-btn")) {
+    removePrimarySource();
+    return;
+  }
+  if (row && event.target.classList.contains("provider-delete-btn")) {
+    deleteFallbackProvider(row.dataset.id);
+  }
+});
 document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyInputValue("playlistUrl", "copyPlaylistBtn"));
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
+document.getElementById("copyCombinedEpgBtn")?.addEventListener("click", () => copyInputValue("combinedEpgUrl", "copyCombinedEpgBtn"));
+document.getElementById("copySportsEpgBtn")?.addEventListener("click", () => copyInputValue("sportsEpgUrl", "copySportsEpgBtn"));
+document.getElementById("addEpgBtn")?.addEventListener("click", addEpgSource);
+document.getElementById("epgUrl")?.addEventListener("keydown", event => { if (event.key === "Enter") addEpgSource(); });
+document.getElementById("epgSources")?.addEventListener("click", event => {
+  const row = event.target.closest(".epg-source-row");
+  if (!row) return;
+  if (event.target.classList.contains("epg-delete-btn")) {
+    deleteEpgSource(row.dataset.id);
+    return;
+  }
+  if (event.target.classList.contains("epg-copy-btn")) {
+    const input = row.querySelector(".epg-served-cell input");
+    if (!input) return;
+    input.select();
+    try { navigator.clipboard.writeText(input.value); } catch {}
+    document.execCommand("copy");
+    event.target.textContent = "Copied!";
+    setTimeout(() => { event.target.textContent = "Copy"; }, 1500);
+  }
+});
 document.getElementById("modalLoadBtn").addEventListener("click", acceptModalUrl);
 document.getElementById("modalUrlInput").addEventListener("keydown", event => { if (event.key === "Enter") acceptModalUrl(); });
-document.getElementById("changeSourceBtn").addEventListener("click", () => { setSourceMode(""); setStatus("Source unlocked."); });
+document.getElementById("modalPasswordInput")?.addEventListener("keydown", event => { if (event.key === "Enter") acceptModalUrl(); });
+document.getElementById("removeFilePrimaryBtn")?.addEventListener("click", removePrimarySource);
 document.getElementById("createGroupBtn").addEventListener("click", createGroup);
 document.getElementById("newGroupName").addEventListener("keydown", event => { if (event.key === "Enter") createGroup(); });
 els.activeGroup.addEventListener("change", event => setActiveGroup(event.target.value));
@@ -661,6 +1102,19 @@ function formatNextUpdate(value) {
   return date.toLocaleString([], {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
 }
 
+function formatSportsClock(value) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return value || "—";
+  const date = new Date(2000, 0, 1, Number(match[1]), Number(match[2]));
+  return date.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+}
+
+function applySportsScheduleVisibility(mode) {
+  const interval = mode === "interval";
+  sportsElement("sportsDailyTimeField").classList.toggle("d-none", interval);
+  sportsElement("sportsIntervalHoursField").classList.toggle("d-none", !interval);
+}
+
 function formatScanDuration(startedAt, finishedAt = null) {
   const started = new Date(startedAt || "");
   const finished = finishedAt ? new Date(finishedAt) : new Date();
@@ -691,7 +1145,10 @@ function renderSportsScanStatus() {
     panel.classList.remove("d-none");
     panel.classList.add("is-running");
     dismiss.classList.add("d-none");
-    title.textContent = `Scanning and matching channels${".".repeat(sportsScanDotCount)}`;
+    const cancellationRequested = String(scan.stage || "").toLowerCase().includes("cancellation requested");
+    title.textContent = cancellationRequested
+      ? `Cancelling sports update${".".repeat(sportsScanDotCount)}`
+      : `Scanning and matching channels${".".repeat(sportsScanDotCount)}`;
     const stage = scan.stage || "Scanning and matching channels";
     const started = scan.started_at ? `Started ${formatNextUpdate(scan.started_at)}` : "";
     const elapsed = scan.started_at ? `Elapsed ${formatScanDuration(scan.started_at)}` : "";
@@ -730,6 +1187,15 @@ function renderSportsScanStatus() {
     details.textContent = [
       lastScan.message || "Existing sports channels were kept.",
       `Finished ${formatNextUpdate(lastScan.finished_at)}`,
+      duration ? `Duration ${duration}` : ""
+    ].filter(Boolean).join(" • ");
+  } else if (status === "cancelled") {
+    panel.classList.add("is-neutral");
+    title.textContent = "Sports update cancelled";
+    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
+    details.textContent = [
+      lastScan.message || "Existing sports channels were kept.",
+      `Stopped ${formatNextUpdate(lastScan.finished_at)}`,
       duration ? `Duration ${duration}` : ""
     ].filter(Boolean).join(" • ");
   } else {
@@ -772,7 +1238,11 @@ function applySportsState() {
   sportsElement("sportsBlockSize").value = settings.channels_per_event ?? 10;
   sportsElement("sportsGroupTitle").value = settings.group_title || "Sports Today";
   sportsElement("sportsTimezone").value = settings.timezone || "America/New_York";
+  const scheduleMode = settings.schedule_mode === "interval" ? "interval" : "daily";
+  sportsElement("sportsScheduleMode").value = scheduleMode;
   sportsElement("sportsRefreshTime").value = settings.refresh_time || "03:00";
+  sportsElement("sportsIntervalHours").value = settings.interval_hours ?? 2;
+  applySportsScheduleVisibility(scheduleMode);
   sportsElement("sportsEventWindow").value = settings.event_window || "today";
   sportsElement("sportsIncludeReplays").checked = Boolean(settings.include_replays);
   sportsElement("sportsIncludePregame").checked = Boolean(settings.include_pregame);
@@ -783,9 +1253,15 @@ function applySportsState() {
   sportsElement("sportsAutoUpdate").disabled = !enabled;
   const scanRunning = Boolean(sportsState.scan?.running);
   const scanButton = sportsElement("sportsRunScanBtn");
-  scanButton.disabled = !enabled || scanRunning;
+  const manualScanRunning = scanRunning && String(sportsState.scan?.trigger || "manual") === "manual";
+  const cancellationRequested = manualScanRunning && String(sportsState.scan?.stage || "").toLowerCase().includes("cancellation requested");
+  scanButton.disabled = !enabled || (scanRunning && (!manualScanRunning || cancellationRequested));
   scanButton.setAttribute("aria-busy", String(scanRunning));
-  scanButton.textContent = scanRunning ? "Scanning…" : "Update now";
+  scanButton.textContent = cancellationRequested
+    ? "Cancelling…"
+    : (manualScanRunning ? "Cancel scan" : (scanRunning ? "Scanning…" : "Update now"));
+  scanButton.classList.toggle("btn-danger", manualScanRunning);
+  scanButton.classList.toggle("btn-primary", !manualScanRunning);
 
   const numbering = sportsState.numbering || {};
   const capacity = Number(numbering.events_per_primary_block || 0);
@@ -795,10 +1271,13 @@ function applySportsState() {
   renderSportsBlockMap();
 
   const conflictCount = Number(sportsState.number_conflicts || 0);
+  const numberingAdjustment = sportsState.numbering_adjustment || {};
+  const effectiveStart = Number(numberingAdjustment.effective_start_channel || settings.start_channel || 1000);
+  const configuredStart = Number(numberingAdjustment.configured_start_channel || settings.start_channel || 1000);
   const warning = sportsElement("sportsNumberWarning");
   warning.classList.toggle("d-none", conflictCount === 0);
   warning.textContent = conflictCount
-    ? `Starting channel overlaps ${conflictCount} manually numbered channel${conflictCount === 1 ? "" : "s"}. Choose a higher start number.`
+    ? `Configured sports start ${configuredStart} overlaps ${conflictCount} manual channel${conflictCount === 1 ? "" : "s"}. Generated sports channels will start at ${effectiveStart} automatically so Jellyfin receives unique channel numbers.`
     : "";
 
   const generatedCount = (sportsState.generated || []).length;
@@ -807,7 +1286,7 @@ function applySportsState() {
     ? `${settings.everything_mode ? "Everything mode" : `${sportsState.rules.length} selection${sportsState.rules.length === 1 ? "" : "s"}`} • ${generatedCount} generated channel${generatedCount === 1 ? "" : "s"}`
     : cachedCount
       ? `Sports channels hidden • ${cachedCount} cached for 24-hour recovery`
-      : "Automatically build a daily sports channel block.";
+      : "Automatically build a scheduled sports channel block.";
 
   const everythingNotice = sportsElement("sportsEverythingModeNotice");
   everythingNotice.classList.toggle("d-none", !settings.everything_mode);
@@ -815,10 +1294,13 @@ function applySportsState() {
     ? `Everything Mode is active. Your ${sportsState.rules.length} curated selection${sportsState.rules.length === 1 ? " is" : "s are"} safely preserved. Scans may take for-fucking-ever.`
     : "";
 
+  const scheduleDescription = scheduleMode === "interval"
+    ? `Every ${Number(settings.interval_hours || 2)} hour${Number(settings.interval_hours || 2) === 1 ? "" : "s"}`
+    : `Daily at ${formatSportsClock(settings.refresh_time || "03:00")}`;
   sportsElement("sportsNextUpdate").textContent = !enabled
     ? "Sports automation disabled"
     : settings.auto_update
-      ? `Next update: ${formatNextUpdate(sportsState.next_update)}`
+      ? `Next update: ${formatNextUpdate(sportsState.next_update)} • ${scheduleDescription}`
       : "Automatic updates disabled";
 
   const lastScan = sportsState.last_scan;
@@ -1064,6 +1546,33 @@ async function deleteSportsRule(ruleId) {
   applySportsState();
 }
 
+async function cancelSportsScan() {
+  setSportsError("");
+  const button = sportsElement("sportsRunScanBtn");
+  button.disabled = true;
+  button.textContent = "Cancelling…";
+  try {
+    const response = await fetch("/api/sports/scan/cancel", {method: "POST"});
+    const data = await response.json();
+    if (data.sports) sportsState = data.sports;
+    if (!response.ok) throw new Error(data.error || data.message || "Could not cancel the scan.");
+    setStatus(data.message || "Cancellation requested.");
+    applySportsState();
+    scheduleSportsStatusPoll(500);
+  } catch (error) {
+    setSportsError(error.message);
+    await pollSportsStatus({reschedule: false});
+  }
+}
+
+async function handleSportsScanAction() {
+  if (sportsState.scan?.running) {
+    await cancelSportsScan();
+  } else {
+    await runSportsScan();
+  }
+}
+
 async function runSportsScan() {
   clearTimeout(sportsSaveTimer);
   const settingsSaved = await saveSportsSettings();
@@ -1095,7 +1604,8 @@ async function runSportsScan() {
     setStatus(data.result.message || `Generated ${data.result.count} sports channels.`);
   } catch (error) {
     await pollSportsStatus({reschedule: false});
-    if (!sportsState.scan?.running) setSportsError(error.message);
+    const cancelled = String(sportsState.last_scan?.status || "").toLowerCase() === "cancelled";
+    if (!sportsState.scan?.running && !cancelled) setSportsError(error.message);
   } finally {
     scheduleSportsStatusPoll();
   }
@@ -1149,6 +1659,16 @@ function bindSports() {
   sportsElement("sportsBlockSize").addEventListener("input", event => scheduleSportsSave({channels_per_event: Number(event.target.value)}));
   sportsElement("sportsGroupTitle").addEventListener("input", event => scheduleSportsSave({group_title: event.target.value}));
   sportsElement("sportsTimezone").addEventListener("change", event => scheduleSportsSave({timezone: event.target.value}));
+  sportsElement("sportsScheduleMode").addEventListener("change", event => {
+    const mode = event.target.value === "interval" ? "interval" : "daily";
+    applySportsScheduleVisibility(mode);
+    scheduleSportsSave({schedule_mode: mode});
+  });
+  sportsElement("sportsIntervalHours").addEventListener("change", event => {
+    const value = Math.min(24, Math.max(1, Number(event.target.value) || 2));
+    event.target.value = value;
+    scheduleSportsSave({interval_hours: value});
+  });
   sportsElement("sportsEventWindow").addEventListener("change", event => scheduleSportsSave({event_window: event.target.value}));
   sportsElement("sportsIncludeReplays").addEventListener("change", event => scheduleSportsSave({include_replays: event.target.checked}));
   sportsElement("sportsIncludePregame").addEventListener("change", event => scheduleSportsSave({include_pregame: event.target.checked}));
@@ -1205,11 +1725,17 @@ function bindSports() {
       deleteSportsRule(Number(row.dataset.id));
     }
   });
-  sportsElement("sportsRunScanBtn").addEventListener("click", runSportsScan);
+  sportsElement("sportsRunScanBtn").addEventListener("click", handleSportsScanAction);
 }
 
 async function initialize() {
-  await Promise.all([loadInitialChannels(), loadGroups(), loadSports()]);
+  // Load primary state deterministically. The former Promise.all allowed the
+  // channel and provider requests to race while both changed the source-form
+  // lock, which could leave only part of the primary form disabled.
+  await loadInitialChannels();
+  await loadProviderSources();
+  await Promise.all([loadGroups(), loadEpgSources(), loadSports()]);
+  setSourceMode(currentSourceMode);
   render();
   updateClearSearchButton();
   scheduleSportsStatusPoll();

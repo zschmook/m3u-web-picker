@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 os.environ["M3U_DISABLE_SCHEDULER"] = "true"
@@ -29,19 +30,28 @@ class SportsApiTests(unittest.TestCase):
         self.original_selected_ids = core.selected_ids
         self.original_source_mode = core.source_mode
         self.original_source_url = core.last_source_url
+        self.original_provider_sources = core.provider_sources
         self.original_playlist_path = core.PLAYLIST_PATH
         self.original_sports_epg_path = core.SPORTS_EPG_PATH
         self.original_combined_epg_path = core.COMBINED_EPG_PATH
         self.original_epg_cache_path = core.EPG_CACHE_PATH
+        self.original_master_cache_path = core.MASTER_CACHE_PATH
+        self.original_provider_dir = core.PROVIDER_DIR
+        self.original_config_path = core.CONFIG_PATH
         core.DB_PATH = Path(self.temp.name) / "api.db"
         core.PLAYLIST_PATH = Path(self.temp.name) / "custom.m3u"
         core.SPORTS_EPG_PATH = Path(self.temp.name) / "sports.xml"
         core.COMBINED_EPG_PATH = Path(self.temp.name) / "combined.xml"
         core.EPG_CACHE_PATH = Path(self.temp.name) / "provider.xml"
+        core.MASTER_CACHE_PATH = Path(self.temp.name) / "primary.m3u"
+        core.PROVIDER_DIR = Path(self.temp.name) / "providers"
+        core.PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
+        core.CONFIG_PATH = Path(self.temp.name) / "config.json"
         core.channels = []
         core.selected_ids = set()
         core.source_mode = ""
         core.last_source_url = ""
+        core.provider_sources = []
         sports.init_db(core.DB_PATH)
         self.client = app.test_client()
 
@@ -51,11 +61,48 @@ class SportsApiTests(unittest.TestCase):
         core.selected_ids = self.original_selected_ids
         core.source_mode = self.original_source_mode
         core.last_source_url = self.original_source_url
+        core.provider_sources = self.original_provider_sources
         core.PLAYLIST_PATH = self.original_playlist_path
         core.SPORTS_EPG_PATH = self.original_sports_epg_path
         core.COMBINED_EPG_PATH = self.original_combined_epg_path
         core.EPG_CACHE_PATH = self.original_epg_cache_path
+        core.MASTER_CACHE_PATH = self.original_master_cache_path
+        core.PROVIDER_DIR = self.original_provider_dir
+        core.CONFIG_PATH = self.original_config_path
         self.temp.cleanup()
+
+    def test_generated_sports_stream_uses_temporary_redirect(self):
+        source_url = "http://provider.test/user/pass/game.ts"
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        channels = core.parse_m3u_text(
+            f"""#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
+{source_url}
+"""
+        )
+        sports.update_settings(
+            core.DB_PATH,
+            {"enabled": True, "everything_mode": True, "timezone": "America/New_York"},
+        )
+        sports.scan_channels(core.DB_PATH, channels, now=now, trigger="test")
+        row = sports.generated_rows(core.DB_PATH)[0]
+
+        response = self.client.get(
+            sports.generated_stream_path(row["assigned_number"]),
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["Location"], source_url)
+        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
+
+        core.write_current_playlist()
+        playlist = self.client.get("/playlist/custom.m3u")
+        self.assertEqual(playlist.status_code, 200)
+        self.assertIn(
+            f"http://localhost{sports.generated_stream_path(row['assigned_number'])}",
+            playlist.get_data(as_text=True),
+        )
+        self.assertNotIn(source_url, playlist.get_data(as_text=True))
 
     def test_fresh_api_has_no_sports_rules(self):
         response = self.client.get("/api/sports/settings")
@@ -91,6 +138,25 @@ class SportsApiTests(unittest.TestCase):
         self.assertIn("valid time", bad.get_json()["error"])
         self.assertEqual(sports.get_settings(core.DB_PATH)["refresh_time"], "04:15")
 
+    def test_interval_schedule_settings_persist_and_validate(self):
+        good = self.client.patch(
+            "/api/sports/settings",
+            json={"schedule_mode": "interval", "interval_hours": 2},
+        )
+        self.assertEqual(good.status_code, 200)
+        settings = good.get_json()["settings"]
+        self.assertEqual(settings["schedule_mode"], "interval")
+        self.assertEqual(settings["interval_hours"], 2)
+        self.assertTrue(good.get_json()["next_update"])
+
+        bad = self.client.patch(
+            "/api/sports/settings",
+            json={"interval_hours": 99},
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("1 to 24", bad.get_json()["error"])
+        self.assertEqual(sports.get_settings(core.DB_PATH)["interval_hours"], 2)
+
     def test_batch_add_then_remove_all_stays_empty(self):
         added = self.client.post(
             "/api/sports/rules",
@@ -122,9 +188,96 @@ class SportsApiTests(unittest.TestCase):
         self.assertEqual(no_source.status_code, 409)
         self.assertIn("Load an M3U source", no_source.get_json()["error"])
 
+    def test_provider_api_hides_url_and_credentials(self):
+        fixture = """#EXTM3U
+#EXTINF:-1 group-title="News",Local News
+http://provider.test/news.ts
+"""
+        parsed = core.parse_m3u_text(fixture)
+        source = {
+            "id": "primary",
+            "name": "Primary",
+            "role": "primary",
+            "priority": 0,
+            "kind": "xtream",
+            "url": "https://provider.test:8443",
+            "username": "secret-user",
+            "password": "secret-password",
+            "output": "ts",
+            "xtream_api": True,
+            "channel_count": 1,
+            "account_status": "Active",
+            "expires_at": "2026-09-17T00:00:00-04:00",
+        }
+        core.install_primary_provider(source, fixture, parsed)
+
+        response = self.client.get("/api/providers")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()["sources"][0]
+        self.assertEqual(payload["role"], "primary")
+        self.assertTrue(payload["credentials_saved"])
+        self.assertEqual(payload["account_status"], "Active")
+        self.assertEqual(payload["expires_at"], "2026-09-17T00:00:00-04:00")
+        self.assertNotIn("url", payload)
+        self.assertNotIn("username", payload)
+        self.assertNotIn("password", payload)
+
+    def test_fallback_api_requires_url_primary(self):
+        core.channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="News",Local News
+http://provider.test/news.ts
+"""
+        )
+        core.source_mode = "file"
+        response = self.client.post(
+            "/api/providers/fallback",
+            json={"name": "Backup", "url": "https://backup.test/playlist.m3u"},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("URL primary", response.get_json()["error"])
+
+    def test_load_primary_accepts_separate_xtream_fields(self):
+        fixture = """#EXTM3U
+#EXTINF:-1 group-title="News",Local News
+http://provider.test/news.ts
+"""
+        parsed = core.parse_m3u_text(fixture)
+        detected = {
+            "id": "primary",
+            "name": "Primary",
+            "role": "primary",
+            "priority": 0,
+            "kind": "xtream",
+            "url": "https://provider.test:8443",
+            "username": "alice",
+            "password": "secret",
+            "output": "ts",
+            "xtream_api": True,
+            "channel_count": 1,
+        }
+        with patch("core.detect_provider_source", return_value=(detected, fixture, parsed)) as detect:
+            response = self.client.post(
+                "/api/load-url",
+                json={
+                    "name": "Primary",
+                    "url": "https://provider.test:8443",
+                    "username": "alice",
+                    "password": "secret",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        detect.assert_called_once_with(
+            "Primary",
+            "https://provider.test:8443",
+            username="alice",
+            password="secret",
+            role="primary",
+        )
+
     def test_master_switch_rewrites_served_outputs_and_restores_cached_rows(self):
         fixture = """#EXTM3U
-#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 19:05:00)
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
 http://provider.test/user/pass/100.ts
 #EXTINF:-1 tvg-id="PhiladelphiaPhillies.mlb" group-title="MLB / MiLB",MLB Philadelphia Phillies
 http://provider.test/user/pass/200.ts

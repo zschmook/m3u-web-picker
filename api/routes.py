@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import Response, jsonify, request, send_file
+from flask import Response, jsonify, redirect, request, send_file
 
 import core
 import sports
@@ -9,35 +9,41 @@ import sports
 def register_routes(app):
     @app.post("/api/load-url")
     def api_load_url():
+        if core.primary_provider_source() or core.source_mode == "file":
+            return jsonify(error="Remove the current primary source before adding another one."), 409
         data = request.get_json(force=True, silent=True) or {}
         url = str(data.get("url", "")).strip()
+        username = str(data.get("username", "") or "")
+        password = str(data.get("password", "") or "")
+        name = str(data.get("name", "") or "Primary")
         if not url.startswith(("http://", "https://")):
             return jsonify(error="URL must start with http:// or https://"), 400
 
         try:
-            text = core.download_m3u_text(url)
-            parsed = core.parse_m3u_text(text)
-            with core.state_lock:
-                core.atomic_write_text(core.MASTER_CACHE_PATH, text)
-                core.channels = parsed
-                core.last_source_url = url
-                core.source_mode = "url"
-                sports.discover_catalog_from_channels(core.DB_PATH, core.channels)
-                core.apply_saved_selections_to_loaded_channels()
-                core.last_refresh = datetime.now().astimezone().isoformat(timespec="seconds")
-                core.save_config()
-                core.write_current_playlist()
+            source, text, parsed = core.detect_provider_source(
+                name,
+                url,
+                username=username,
+                password=password,
+                role="primary",
+            )
+            core.install_primary_provider(source, text, parsed)
+        except ValueError as exc:
+            return jsonify(error=core.redact_url_credentials(str(exc))), 400
         except Exception as exc:
-            return jsonify(error=str(exc)), 500
+            return jsonify(error=core.redact_url_credentials(str(exc))), 500
 
         return jsonify(
             count=len(core.combined_channels_for_api()),
             channels=core.combined_channels_for_api(),
             selected_ids=core.selected_ids_payload(),
+            providers=core.provider_sources_payload(),
         )
 
     @app.post("/api/upload")
     def api_upload():
+        if core.primary_provider_source() or core.source_mode == "file":
+            return jsonify(error="Remove the current primary source before adding another one."), 409
         uploaded = request.files.get("file")
         if not uploaded:
             return jsonify(error="No file uploaded."), 400
@@ -48,6 +54,8 @@ def register_routes(app):
             with core.state_lock:
                 core.atomic_write_text(core.MASTER_CACHE_PATH, text)
                 core.channels = parsed
+                core.provider_sources = []
+                core.last_source_url = ""
                 core.source_mode = "file"
                 sports.discover_catalog_from_channels(core.DB_PATH, core.channels)
                 core.apply_saved_selections_to_loaded_channels()
@@ -102,7 +110,99 @@ def register_routes(app):
             selected_ids=core.selected_ids_payload(),
             source_mode=core.source_mode,
             source_url_configured=bool(core.last_source_url),
+            providers=core.provider_sources_payload(),
         )
+
+    @app.get("/api/providers")
+    def api_provider_sources():
+        return jsonify(sources=core.provider_sources_payload())
+
+    @app.get("/api/providers/progress")
+    def api_provider_progress():
+        return jsonify(core.provider_progress_payload())
+
+    @app.post("/api/providers/fallback")
+    def api_add_fallback_provider():
+        if not core.primary_provider_source():
+            return jsonify(error="Load a URL primary provider before adding fallbacks."), 409
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            source = core.add_fallback_provider(
+                str(data.get("name", "")),
+                str(data.get("url", "")),
+                username=str(data.get("username", "") or ""),
+                password=str(data.get("password", "") or ""),
+            )
+        except ValueError as exc:
+            return jsonify(error=core.redact_url_credentials(str(exc))), 400
+        except Exception as exc:
+            return jsonify(error=core.redact_url_credentials(str(exc))), 500
+        payload = next(
+            (item for item in core.provider_sources_payload() if item["id"] == source["id"]),
+            None,
+        )
+        return jsonify(source=payload, sources=core.provider_sources_payload()), 201
+
+    @app.delete("/api/providers/primary")
+    def api_remove_primary_provider():
+        if not core.remove_primary_source():
+            return jsonify(error="Primary source not found."), 404
+        return jsonify(
+            removed=True,
+            sources=core.provider_sources_payload(),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
+            source_mode=core.source_mode,
+        )
+
+    @app.delete("/api/providers/<source_id>")
+    def api_delete_fallback_provider(source_id: str):
+        if not core.delete_fallback_provider(source_id):
+            return jsonify(error="Fallback provider not found."), 404
+        return jsonify(deleted=True, sources=core.provider_sources_payload())
+
+    @app.get("/api/epg")
+    def api_epg_sources():
+        return jsonify(
+            sources=core.epg_sources_payload(),
+            builtins=core.epg_builtin_payload(),
+            schedule={
+                "after_m3u_minutes": core.EPG_REFRESH_OFFSET_MINUTES,
+                "hour": (core.SCHEDULE_HOUR + (core.SCHEDULE_MINUTE + core.EPG_REFRESH_OFFSET_MINUTES) // 60) % 24,
+                "minute": (core.SCHEDULE_MINUTE + core.EPG_REFRESH_OFFSET_MINUTES) % 60,
+            },
+        )
+
+    @app.post("/api/epg")
+    def api_add_epg_source():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            source = core.add_epg_source(
+                str(data.get("name", "")),
+                str(data.get("url", "")),
+            )
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        ok, message = core.refresh_epg_source(str(source.get("id", "")))
+        try:
+            core.ensure_epg_exports_current(force=True)
+        except Exception as exc:
+            print(f"Could not rebuild combined guide after EPG refresh: {exc}")
+        payload = next(
+            (item for item in core.epg_sources_payload() if item["id"] == source["id"]),
+            None,
+        )
+        return jsonify(source=payload, refreshed=ok, message=message)
+
+    @app.delete("/api/epg/<source_id>")
+    def api_delete_epg_source(source_id: str):
+        if not core.delete_epg_source(source_id):
+            return jsonify(error="EPG source not found."), 404
+        try:
+            core.ensure_epg_exports_current(force=True)
+        except Exception as exc:
+            print(f"Could not rebuild combined guide after EPG deletion: {exc}")
+        return jsonify(deleted=True, sources=core.epg_sources_payload())
 
     @app.get("/api/status")
     def api_status():
@@ -123,6 +223,8 @@ def register_routes(app):
             source_mode=core.source_mode,
             last_refresh=core.last_refresh,
             schedule={"hour": core.SCHEDULE_HOUR, "minute": core.SCHEDULE_MINUTE},
+            epg_sources=core.epg_sources_payload(),
+            data_dir=str(core.DATA_DIR),
         )
 
     @app.get("/api/groups")
@@ -164,8 +266,7 @@ def register_routes(app):
 
     @app.get("/api/sports/settings")
     def api_sports_settings():
-        payload = sports.status_payload(core.DB_PATH)
-        payload["number_conflicts"] = core.sports_number_conflicts()
+        payload = core.enrich_sports_status(sports.status_payload(core.DB_PATH))
         return jsonify(payload)
 
     @app.patch("/api/sports/settings")
@@ -183,7 +284,8 @@ def register_routes(app):
                 # Generated rows remain cached internally for 24 hours while off.
                 sports.rebuild_epg_exports(
                     core.DB_PATH,
-                    base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
+                    base_epg_path=core.active_base_epg_path(),
+                    base_channel_ids=core.selected_xmltv_ids(),
                     sports_epg_path=core.SPORTS_EPG_PATH,
                     combined_epg_path=core.COMBINED_EPG_PATH,
                 )
@@ -195,8 +297,7 @@ def register_routes(app):
             return jsonify(error="Could not save sports settings."), 500
         payload = sports.status_payload(core.DB_PATH)
         payload["settings"] = settings
-        payload["number_conflicts"] = core.sports_number_conflicts()
-        return jsonify(payload)
+        return jsonify(core.enrich_sports_status(payload))
 
     @app.get("/api/sports/catalog")
     def api_sports_catalog():
@@ -243,24 +344,30 @@ def register_routes(app):
         try:
             result = core.run_sports_scan(trigger="manual", refresh_source=True)
         except core.SportsScanError as exc:
-            return jsonify(error=str(exc), sports=sports.status_payload(core.DB_PATH)), 409
+            return jsonify(error=str(exc), sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH))), 409
         except Exception as exc:
             print(f"Unexpected sports update error: {exc}")
             return jsonify(
                 error="Sports update failed. Existing sports channels were kept.",
-                sports=sports.status_payload(core.DB_PATH),
+                sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH)),
             ), 500
         return jsonify(
             result=result,
-            sports=sports.status_payload(core.DB_PATH),
+            sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH)),
             channels=core.combined_channels_for_api(),
             selected_ids=core.selected_ids_payload(),
         )
 
+    @app.post("/api/sports/scan/cancel")
+    def api_cancel_sports_scan():
+        accepted, message = core.request_sports_scan_cancel()
+        payload = core.enrich_sports_status(sports.status_payload(core.DB_PATH))
+        status = 202 if accepted else 409
+        return jsonify(accepted=accepted, message=message, sports=payload), status
+
     @app.get("/api/sports/status")
     def api_sports_status():
-        payload = sports.status_payload(core.DB_PATH)
-        payload["number_conflicts"] = core.sports_number_conflicts()
+        payload = core.enrich_sports_status(sports.status_payload(core.DB_PATH))
         return jsonify(payload)
 
     @app.get("/api/sports/guide-check")
@@ -274,15 +381,54 @@ def register_routes(app):
             )
         )
 
+    def serve_named_epg(source_id: str):
+        source = core.find_epg_source(source_id)
+        if not source:
+            return Response(
+                "EPG source not found.\n",
+                content_type="text/plain; charset=utf-8",
+                status=404,
+            )
+        path = core.epg_cache_path(source_id)
+        if not path.exists():
+            ok, message = core.refresh_epg_source(source_id)
+            if not ok or not path.exists():
+                return Response(
+                    f"EPG cache could not be generated: {message}\n",
+                    content_type="text/plain; charset=utf-8",
+                    status=502,
+                )
+        response = send_file(
+            path,
+            mimetype="application/xml",
+            as_attachment=False,
+            download_name=f"{core.normalize_epg_id(source_id)}.xml",
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+    @app.get("/sports/stream/<int:assigned_number>")
+    def generated_sports_stream(assigned_number: int):
+        target = sports.generated_stream_target(core.DB_PATH, assigned_number)
+        if not target:
+            return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        response = redirect(target, code=307)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+    @app.get("/epg/<source_id>.xml")
+    def named_epg(source_id: str):
+        if source_id in {"sports", "combined"}:
+            return Response("Not found.\n", status=404)
+        return serve_named_epg(source_id)
+
     @app.get("/epg/sports.xml")
     def sports_epg():
-        if not core.SPORTS_EPG_PATH.exists():
-            sports.rebuild_epg_exports(
-                core.DB_PATH,
-                base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
-                sports_epg_path=core.SPORTS_EPG_PATH,
-                combined_epg_path=core.COMBINED_EPG_PATH,
-            )
+        core.ensure_epg_exports_current()
         response = send_file(
             core.SPORTS_EPG_PATH,
             mimetype="application/xml",
@@ -297,13 +443,7 @@ def register_routes(app):
 
     @app.get("/epg/combined.xml")
     def combined_epg():
-        if not core.COMBINED_EPG_PATH.exists():
-            sports.rebuild_epg_exports(
-                core.DB_PATH,
-                base_epg_path=core.EPG_CACHE_PATH if core.EPG_CACHE_PATH.exists() else None,
-                sports_epg_path=core.SPORTS_EPG_PATH,
-                combined_epg_path=core.COMBINED_EPG_PATH,
-            )
+        core.ensure_epg_exports_current()
         response = send_file(
             core.COMBINED_EPG_PATH,
             mimetype="application/xml",
@@ -329,6 +469,11 @@ def register_routes(app):
                 lines[0] = header
             else:
                 lines.insert(0, header)
+            base_url = request.url_root.rstrip("/")
+            lines = [
+                f"{base_url}{line}" if line.startswith("/sports/stream/") else line
+                for line in lines
+            ]
             text = "\n".join(lines) + "\n"
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

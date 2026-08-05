@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import gzip
+import hashlib
+import io
 import json
 import os
 import re
@@ -8,7 +11,9 @@ import sqlite3
 import threading
 import time
 import traceback
+import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -20,13 +25,22 @@ from backup import create_database_backup
 
 
 APP_DIR = Path(__file__).resolve().parent
-EXPORT_DIR = APP_DIR / "exports"
+# Runtime state can live outside the source tree. Docker Compose points this at
+# a persistent volume so rebuilding the container does not erase the database,
+# cached playlist, generated guide, or EPG source configuration.
+DATA_DIR = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR))).expanduser().resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+EXPORT_DIR = DATA_DIR / "exports"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+EPG_DIR = DATA_DIR / "epg"
+EPG_DIR.mkdir(parents=True, exist_ok=True)
+PROVIDER_DIR = DATA_DIR / "providers"
+PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = APP_DIR / "m3u_picker.db"
-CONFIG_PATH = APP_DIR / "config.json"
-MASTER_CACHE_PATH = APP_DIR / "master_playlist_cache.m3u"
-EPG_CACHE_PATH = APP_DIR / "epg_cache.xml"
+DB_PATH = DATA_DIR / "m3u_picker.db"
+CONFIG_PATH = DATA_DIR / "config.json"
+MASTER_CACHE_PATH = DATA_DIR / "master_playlist_cache.m3u"
+EPG_CACHE_PATH = DATA_DIR / "epg_cache.xml"
 SPORTS_EPG_PATH = EXPORT_DIR / "sports.xml"
 COMBINED_EPG_PATH = EXPORT_DIR / "combined.xml"
 
@@ -37,20 +51,91 @@ DEV_PORT = int(os.environ.get("M3U_DEV_PORT", "9998"))
 
 SCHEDULE_HOUR = int(os.environ.get("MASTER_REFRESH_HOUR", "3"))
 SCHEDULE_MINUTE = int(os.environ.get("MASTER_REFRESH_MINUTE", "0"))
+EPG_REFRESH_OFFSET_MINUTES = int(os.environ.get("EPG_REFRESH_OFFSET_MINUTES", "15"))
+MAX_PROVIDER_CHANNELS = int(os.environ.get("M3U_MAX_PROVIDER_CHANNELS", "50000"))
+PROVIDER_CHANNEL_WARNING = int(os.environ.get("M3U_PROVIDER_CHANNEL_WARNING", "20000"))
+MAX_PROVIDER_PLAYLIST_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_PLAYLIST_BYTES", str(96 * 1024 * 1024)))
+MAX_PROVIDER_JSON_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_JSON_BYTES", str(96 * 1024 * 1024)))
 
 channels: List[dict] = []
 selected_ids: set[int] = set()
 last_source_url = ""
 last_refresh: str | None = None
 source_mode = ""
+epg_sources: list[dict] = []
+provider_sources: list[dict] = []
 scheduler_started = False
+last_epg_refresh_date = ""
 
 state_lock = threading.RLock()
 scan_lock = threading.Lock()
+scan_cancel_event = threading.Event()
+provider_progress_lock = threading.Lock()
+provider_progress = {
+    "active": False,
+    "stage": "Idle",
+    "detail": "",
+    "channel_count": None,
+    "started_at": None,
+    "updated_at": None,
+    "status": "idle",
+}
 
 
 class SportsScanError(RuntimeError):
     """Safe, user-facing failure for an explicit sports update."""
+
+
+class SportsScanCancelled(SportsScanError):
+    """A manual sports update was cancelled without changing published outputs."""
+
+
+def _provider_progress_update(
+    stage: str,
+    *,
+    detail: str = "",
+    channel_count: int | None = None,
+    active: bool = True,
+    status: str = "running",
+) -> None:
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    with provider_progress_lock:
+        if active and not provider_progress.get("active"):
+            provider_progress["started_at"] = now
+        provider_progress.update(
+            {
+                "active": active,
+                "stage": str(stage or "Working"),
+                "detail": str(detail or ""),
+                "channel_count": channel_count,
+                "updated_at": now,
+                "status": status,
+            }
+        )
+
+
+def provider_progress_payload() -> dict:
+    with provider_progress_lock:
+        return dict(provider_progress)
+
+
+def fail_provider_progress(message: str) -> None:
+    _provider_progress_update(
+        "Provider load failed",
+        detail=redact_url_credentials(str(message or "Unknown provider error")),
+        active=False,
+        status="failed",
+    )
+
+
+def _provider_progress_complete(channel_count: int, detail: str = "") -> None:
+    _provider_progress_update(
+        "Provider ready",
+        detail=detail,
+        channel_count=channel_count,
+        active=False,
+        status="complete",
+    )
 
 
 @dataclass
@@ -78,14 +163,19 @@ def db_connect() -> sqlite3.Connection:
             name TEXT,
             group_title TEXT,
             url TEXT NOT NULL,
+            tvg_id TEXT NOT NULL DEFAULT '',
             sort_order INTEGER
         )
         """
     )
-    try:
-        conn.execute("ALTER TABLE selections ADD COLUMN sort_order INTEGER")
-    except sqlite3.OperationalError:
-        pass
+    for statement in (
+        "ALTER TABLE selections ADD COLUMN sort_order INTEGER",
+        "ALTER TABLE selections ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''",
+    ):
+        try:
+            conn.execute(statement)
+        except sqlite3.OperationalError:
+            pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_groups (
@@ -104,11 +194,16 @@ def db_connect() -> sqlite3.Connection:
             name TEXT,
             group_title TEXT,
             url TEXT NOT NULL,
+            tvg_id TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (group_id, channel_key),
             FOREIGN KEY (group_id) REFERENCES custom_groups(id) ON DELETE CASCADE
         )
         """
     )
+    try:
+        conn.execute("ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     sports.init_db(DB_PATH)
     return conn
@@ -129,8 +224,34 @@ def unique_slug(conn: sqlite3.Connection, name: str) -> str:
     return slug
 
 
+def legacy_channel_key(channel: dict) -> str:
+    """Return the pre-v21.9 manual identity used by existing databases."""
+    return str(channel.get("url", "") or "").strip()
+
+
 def channel_key(channel: dict) -> str:
-    return str(channel.get("url", "")).strip()
+    """Return a stable manual-channel identity that is independent of sports rows.
+
+    Older releases keyed manual selections only by stream URL. That collapses
+    distinct provider rows which happen to share a stream and makes a saved
+    manual channel vulnerable to being resolved as another row after refresh.
+    Manual rows now have their own namespace and include provider metadata in
+    the identity. Generated sports rows are never passed through this key.
+    """
+    existing = str(channel.get("key", "") or "").strip()
+    if existing.startswith("manual:"):
+        return existing
+    parts = [
+        legacy_channel_key(channel),
+        str(channel.get("tvg_id", "") or "").strip(),
+        str(channel.get("tvg_chno", "") or "").strip(),
+        str(channel.get("name", "") or "").strip(),
+        str(channel.get("group", "") or "").strip(),
+    ]
+    if not any(parts):
+        return ""
+    digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:32]
+    return f"manual:{digest}"
 
 
 def parse_extinf_attributes(line: str) -> dict[str, str]:
@@ -167,6 +288,167 @@ def atomic_write_text(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def atomic_write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(payload)
+    temporary.replace(path)
+
+
+def _selection_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    return conn.execute(
+        """
+        SELECT key, name, group_title, url, tvg_id, sort_order
+        FROM selections
+        ORDER BY sort_order IS NULL, sort_order, name
+        """
+    ).fetchall()
+
+
+def _match_saved_manual_row(row: sqlite3.Row, claimed: set[int]) -> dict | None:
+    """Resolve a saved v21.8-or-earlier URL key to one current provider row."""
+    exact_key = str(row["key"] or "")
+    for channel in channels:
+        channel_id = int(channel.get("id", -1))
+        if channel_id not in claimed and channel_key(channel) == exact_key:
+            return channel
+
+    saved_url = str(row["url"] or exact_key or "").strip()
+    candidates = [
+        channel
+        for channel in channels
+        if int(channel.get("id", -1)) not in claimed
+        and legacy_channel_key(channel) == saved_url
+    ]
+    if not candidates:
+        return None
+
+    saved_name = str(row["name"] or "").strip().casefold()
+    saved_group = str(row["group_title"] or "").strip().casefold()
+    saved_tvg_id = str(row["tvg_id"] or "").strip().casefold()
+
+    def score(channel: dict) -> tuple[int, int]:
+        matches = 0
+        if saved_tvg_id and str(channel.get("tvg_id", "") or "").strip().casefold() == saved_tvg_id:
+            matches += 8
+        if saved_name and str(channel.get("name", "") or "").strip().casefold() == saved_name:
+            matches += 4
+        if saved_group and str(channel.get("group", "") or "").strip().casefold() == saved_group:
+            matches += 2
+        # Stable tie-breaker follows provider playlist order.
+        return (matches, -int(channel.get("id", 0)))
+
+    return max(candidates, key=score)
+
+
+def migrate_saved_manual_keys() -> int:
+    """Upgrade URL-only selection/group keys without dropping manual channels."""
+    if not channels:
+        return 0
+    conn = db_connect()
+    migrated = 0
+    try:
+        rows = _selection_rows(conn)
+        claimed: set[int] = set()
+        rebuilt: list[tuple[str, str, str, str, str, int | None]] = []
+        changed = False
+        for row in rows:
+            channel = _match_saved_manual_row(row, claimed)
+            if channel is None:
+                rebuilt.append(
+                    (
+                        str(row["key"] or ""),
+                        str(row["name"] or ""),
+                        str(row["group_title"] or ""),
+                        str(row["url"] or ""),
+                        str(row["tvg_id"] or ""),
+                        row["sort_order"],
+                    )
+                )
+                continue
+            claimed.add(int(channel["id"]))
+            new_key = channel_key(channel)
+            rebuilt.append(
+                (
+                    new_key,
+                    str(channel.get("name", "") or ""),
+                    str(channel.get("group", "") or ""),
+                    legacy_channel_key(channel),
+                    str(channel.get("tvg_id", "") or ""),
+                    row["sort_order"],
+                )
+            )
+            if new_key != str(row["key"] or ""):
+                changed = True
+                migrated += 1
+
+        if changed:
+            conn.execute("DELETE FROM selections")
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO selections
+                    (key, name, group_title, url, tvg_id, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                rebuilt,
+            )
+
+        group_rows = conn.execute(
+            """
+            SELECT group_id, channel_key, name, group_title, url, tvg_id
+            FROM group_channels
+            """
+        ).fetchall()
+        group_rebuilt = []
+        group_changed = False
+        for group_row in group_rows:
+            row_dict = {
+                "key": group_row[1],
+                "name": group_row[2],
+                "group_title": group_row[3],
+                "url": group_row[4],
+                "tvg_id": group_row[5],
+            }
+            # sqlite.Row-like adapter for the shared resolver.
+            class SavedRow(dict):
+                def __getitem__(self, key):
+                    return self.get(key)
+            channel = _match_saved_manual_row(SavedRow(row_dict), set())
+            if channel is None:
+                group_rebuilt.append(tuple(group_row))
+                continue
+            new_key = channel_key(channel)
+            group_rebuilt.append(
+                (
+                    group_row[0],
+                    new_key,
+                    str(channel.get("name", "") or ""),
+                    str(channel.get("group", "") or ""),
+                    legacy_channel_key(channel),
+                    str(channel.get("tvg_id", "") or ""),
+                )
+            )
+            if new_key != str(group_row[1] or ""):
+                group_changed = True
+                migrated += 1
+
+        if group_changed:
+            conn.execute("DELETE FROM group_channels")
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO group_channels
+                    (group_id, channel_key, name, group_title, url, tvg_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                group_rebuilt,
+            )
+        conn.commit()
+        return migrated
+    finally:
+        conn.close()
+
+
 def load_selected_keys_from_db() -> set[str]:
     conn = db_connect()
     try:
@@ -199,14 +481,15 @@ def save_selected_channels_to_db(selected_channels: list[dict]) -> None:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO selections
-                    (key, name, group_title, url, sort_order)
-                VALUES (?, ?, ?, ?, ?)
+                    (key, name, group_title, url, tvg_id, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     key,
                     channel.get("name", ""),
                     channel.get("group", ""),
                     channel.get("url", ""),
+                    channel.get("tvg_id", ""),
                     sort_order,
                 ),
             )
@@ -226,6 +509,15 @@ def selected_channels_in_order() -> list[dict]:
         conn.close()
     current = channel_by_key_map()
     return [current[key] for key in ordered_keys if key in current]
+
+
+def selected_xmltv_ids() -> set[str]:
+    """Return exact XMLTV ids for manual channels currently in custom.m3u."""
+    return {
+        str(channel.get("tvg_id", "") or "").strip()
+        for channel in selected_channels_from_selected_ids_in_order()
+        if str(channel.get("tvg_id", "") or "").strip()
+    }
 
 
 def selected_channel_order_payload() -> list[dict]:
@@ -272,12 +564,119 @@ def save_channel_order(keys: list[str]) -> int:
 
 def apply_saved_selections_to_loaded_channels() -> None:
     global selected_ids
+    migrate_saved_manual_keys()
     saved_keys = load_selected_keys_from_db()
     selected_ids = {
         int(channel["id"])
         for channel in channels
         if channel_key(channel) in saved_keys
     }
+
+
+def normalize_provider_id(value: str) -> str:
+    return slugify(str(value or "").strip())
+
+
+def provider_cache_path(source_id: str) -> Path:
+    source_id = normalize_provider_id(source_id)
+    if source_id == "primary":
+        return MASTER_CACHE_PATH
+    return PROVIDER_DIR / f"{source_id}.m3u"
+
+
+def provider_epg_cache_path(source_id: str) -> Path:
+    source_id = normalize_provider_id(source_id)
+    if source_id == "primary":
+        return EPG_CACHE_PATH
+    return PROVIDER_DIR / f"{source_id}.xml"
+
+
+def normalize_provider_base_url(value: str) -> str:
+    """Normalize an Xtream server/base URL without embedding credentials."""
+    raw = str(value or "").strip()
+    parsed = urllib.parse.urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Provider URL must start with http:// or https://")
+    path = parsed.path or ""
+    known_endpoints = {"get.php", "player_api.php", "xmltv.php"}
+    segments = [segment for segment in path.split("/") if segment]
+    if segments and (
+        segments[-1].lower() in known_endpoints
+        or segments[-1].lower().endswith((".m3u", ".m3u8"))
+    ):
+        segments.pop()
+    normalized_path = "/" + "/".join(segments) if segments else ""
+    return urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, normalized_path.rstrip("/"), "", "", "")
+    ).rstrip("/")
+
+
+def provider_endpoint_url(source: dict, endpoint: str, **query_values: str) -> str:
+    base = normalize_provider_base_url(str(source.get("url", "")))
+    path = f"{base}/{endpoint.lstrip('/')}"
+    query = urllib.parse.urlencode(
+        {key: str(value) for key, value in query_values.items() if value is not None}
+    )
+    return f"{path}?{query}" if query else path
+
+
+def provider_playlist_url(source: dict) -> str:
+    kind = str(source.get("kind", "m3u") or "m3u").strip().lower()
+    if kind != "xtream":
+        return str(source.get("url", "") or "").strip()
+    username = str(source.get("username", "") or "")
+    password = str(source.get("password", "") or "")
+    return provider_endpoint_url(
+        source,
+        "get.php",
+        username=username,
+        password=password,
+        type="m3u_plus",
+        output=str(source.get("output", "ts") or "ts"),
+    )
+
+
+def provider_xmltv_url(source: dict) -> str:
+    if str(source.get("kind", "") or "").strip().lower() != "xtream":
+        return sports.derive_xmltv_url(str(source.get("url", "") or ""))
+    return provider_endpoint_url(
+        source,
+        "xmltv.php",
+        username=str(source.get("username", "") or ""),
+        password=str(source.get("password", "") or ""),
+    )
+
+
+def primary_provider_source() -> dict | None:
+    return next(
+        (source for source in provider_sources if source.get("role") == "primary"),
+        None,
+    )
+
+
+def find_provider_source(source_id: str) -> dict | None:
+    wanted = normalize_provider_id(source_id)
+    return next(
+        (
+            source
+            for source in provider_sources
+            if normalize_provider_id(source.get("id", "")) == wanted
+        ),
+        None,
+    )
+
+
+def unique_provider_id(name: str) -> str:
+    base = normalize_provider_id(name) or "provider"
+    if base == "primary":
+        base = "provider"
+    existing = {normalize_provider_id(source.get("id", "")) for source in provider_sources}
+    source_id = base
+    index = 2
+    while source_id in existing:
+        source_id = f"{base}-{index}"
+        index += 1
+    return source_id
 
 
 def load_config() -> dict:
@@ -290,21 +689,95 @@ def load_config() -> dict:
 
 
 def save_config() -> None:
+    primary = primary_provider_source()
     data = {
-        "source_url": last_source_url,
+        # Keep the legacy field for downgrade/migration support, but never put
+        # separately entered Xtream credentials back into a URL.
+        "source_url": (
+            str(primary.get("url", "") or "")
+            if primary
+            else last_source_url
+        ),
         "source_mode": source_mode,
         "last_refresh": last_refresh,
         "schedule": {"hour": SCHEDULE_HOUR, "minute": SCHEDULE_MINUTE},
+        "epg_sources": epg_sources,
+        "provider_sources": provider_sources,
     }
     atomic_write_text(CONFIG_PATH, json.dumps(data, indent=2))
+    try:
+        CONFIG_PATH.chmod(0o600)
+    except OSError:
+        # Some mounted filesystems (notably Windows-backed Docker volumes) do
+        # not support POSIX mode changes. The configuration is still kept out
+        # of every browser/API payload.
+        pass
 
 
 def restore_config() -> None:
-    global last_source_url, source_mode, last_refresh
+    global last_source_url, source_mode, last_refresh, epg_sources, provider_sources
     data = load_config()
-    last_source_url = str(data.get("source_url", "")).strip()
     source_mode = str(data.get("source_mode", "")).strip()
     last_refresh = data.get("last_refresh")
+    restored_sources = data.get("epg_sources", [])
+    epg_sources = [dict(item) for item in restored_sources if isinstance(item, dict)]
+    restored_providers = data.get("provider_sources", [])
+    provider_sources = [
+        dict(item)
+        for item in restored_providers
+        if isinstance(item, dict) and str(item.get("url", "") or "").strip()
+    ]
+
+    primary = primary_provider_source()
+    legacy_url = str(data.get("source_url", "") or "").strip()
+    if not primary and legacy_url and source_mode == "url":
+        primary = {
+            "id": "primary",
+            "name": "Primary",
+            "role": "primary",
+            "priority": 0,
+            "kind": "m3u",
+            "url": legacy_url,
+            "username": "",
+            "password": "",
+            "output": "ts",
+            "last_refresh": last_refresh,
+            "last_error": None,
+            "channel_count": 0,
+        }
+        provider_sources.insert(0, primary)
+
+    # Repair old/partial provider records. A provider list may intentionally
+    # contain only inactive fallbacks after the primary has been removed.
+    if provider_sources:
+        primary_index = next(
+            (index for index, item in enumerate(provider_sources) if item.get("role") == "primary"),
+            None,
+        )
+        # Older configurations sometimes omitted role metadata. Preserve their
+        # prior behavior only when the saved source mode still says URL.
+        if primary_index is None and source_mode == "url":
+            primary_index = 0
+        for index, item in enumerate(provider_sources):
+            is_primary = primary_index is not None and index == primary_index
+            item["id"] = "primary" if is_primary else normalize_provider_id(
+                item.get("id", "") or item.get("name", "") or f"fallback-{index}"
+            )
+            item["role"] = "primary" if is_primary else "fallback"
+            item.setdefault("name", "Primary" if is_primary else f"Fallback {index + 1}")
+            item.setdefault("kind", "m3u")
+            item.setdefault("username", "")
+            item.setdefault("password", "")
+            item.setdefault("output", "ts")
+            item.setdefault("last_refresh", None)
+            item.setdefault("last_error", None)
+            item.setdefault("channel_count", 0)
+            item.setdefault("deferred", item.get("role") == "fallback" and not provider_cache_path(str(item.get("id", ""))).exists())
+            item.setdefault("warning", None)
+        _renumber_provider_priorities()
+        primary = primary_provider_source()
+
+    last_source_url = provider_playlist_url(primary) if primary else (legacy_url if source_mode == "url" else "")
 
 
 def parse_m3u_text(text: str) -> list[dict]:
@@ -347,24 +820,479 @@ def parse_m3u_text(text: str) -> list[dict]:
             current = []
             attrs = {}
 
-    return [asdict(entry) for entry in parsed]
+    output = [asdict(entry) for entry in parsed]
+    for channel in output:
+        channel["key"] = channel_key(channel)
+    return output
 
 
-def download_url_bytes(url: str, timeout: int = 90) -> bytes:
+def download_url_bytes(
+    url: str,
+    timeout: int = 90,
+    cancel_check=None,
+    max_bytes: int | None = None,
+) -> bytes:
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "M3U-Web-Picker/2.0", "Accept": "*/*"},
     )
+    chunks = []
+    total = 0
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        while True:
+            if cancel_check and cancel_check():
+                raise sports.ScanCancelled("Sports update cancelled. Existing sports channels were kept.")
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                raise ValueError(
+                    f"Provider response exceeded the {max_bytes // (1024 * 1024)} MB safety limit."
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
-def download_url_text(url: str, timeout: int = 90) -> str:
-    return download_url_bytes(url, timeout).decode("utf-8-sig", errors="replace")
+def download_url_text(
+    url: str,
+    timeout: int = 90,
+    cancel_check=None,
+    max_bytes: int | None = None,
+) -> str:
+    return download_url_bytes(
+        url, timeout, cancel_check, max_bytes=max_bytes
+    ).decode("utf-8-sig", errors="replace")
 
 
-def download_m3u_text(url: str, timeout: int = 90) -> str:
-    return download_url_text(url, timeout=timeout)
+def download_m3u_text(
+    url: str,
+    timeout: int = 90,
+    cancel_check=None,
+    max_bytes: int | None = MAX_PROVIDER_PLAYLIST_BYTES,
+) -> str:
+    return download_url_text(
+        url, timeout=timeout, cancel_check=cancel_check, max_bytes=max_bytes
+    )
+
+
+def validate_m3u_text(text: str, *, max_channels: int | None = MAX_PROVIDER_CHANNELS) -> list[dict]:
+    if not str(text or "").lstrip("\ufeff\r\n\t ").startswith("#EXTM3U"):
+        raise ValueError("The provider response did not look like an M3U playlist.")
+    entry_count = str(text).count("#EXTINF")
+    if max_channels is not None and entry_count > max_channels:
+        raise ValueError(
+            f"Provider playlist contains about {entry_count:,} entries, above the "
+            f"{max_channels:,}-channel safety limit. For Xtream providers, use "
+            "separate credentials so the app can request live streams only."
+        )
+    parsed = parse_m3u_text(text)
+    if not parsed:
+        raise ValueError("The provider playlist did not contain any channels.")
+    if max_channels is not None and len(parsed) > max_channels:
+        raise ValueError(
+            f"Provider playlist contains {len(parsed):,} channels, above the "
+            f"{max_channels:,}-channel safety limit."
+        )
+    return parsed
+
+
+def _probe_m3u_header(url: str, timeout: int = 20, limit: int = 256 * 1024) -> None:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "M3U-Web-Picker/2.0",
+            "Accept": "audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain,*/*",
+            "Range": f"bytes=0-{limit - 1}",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        final_url = urllib.parse.urlparse(response.geturl())
+        initial_url = urllib.parse.urlparse(url)
+        if final_url.hostname and initial_url.hostname and final_url.hostname.lower() != initial_url.hostname.lower():
+            raise ValueError("Provider redirected credentials to a different host.")
+        raw = response.read(limit)
+    text = raw.decode("utf-8-sig", errors="replace")
+    if not text.lstrip("\ufeff\r\n\t ").startswith("#EXTM3U"):
+        raise ValueError("The provider response did not look like an M3U playlist.")
+
+
+def _download_probe_bytes(url: str, *, accept: str, timeout: int = 20, limit: int = 2 * 1024 * 1024) -> bytes:
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "M3U-Web-Picker/2.0", "Accept": accept},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        final_url = urllib.parse.urlparse(response.geturl())
+        initial_url = urllib.parse.urlparse(url)
+        if final_url.hostname and initial_url.hostname and final_url.hostname.lower() != initial_url.hostname.lower():
+            raise ValueError("Provider redirected credentials to a different host.")
+        raw = response.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("Provider probe response was unexpectedly large.")
+    return raw
+
+
+def _xtream_auth_is_valid(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    user_info = payload.get("user_info")
+    if not isinstance(user_info, dict):
+        return False
+    auth = user_info.get("auth")
+    if auth in {1, "1", True, "true", "True"}:
+        return True
+    return str(user_info.get("status", "") or "").strip().lower() in {
+        "active",
+        "enabled",
+    }
+
+
+def _xtream_account_metadata(payload: object) -> dict[str, str | None]:
+    """Return safe, provider-reported account details from player_api.php.
+
+    Xtream panels are not billing systems of record, so these values are kept
+    deliberately small and are presented as provider-reported status only.
+    Credentials and the raw API response never enter browser payloads.
+    """
+    if not isinstance(payload, dict):
+        return {"account_status": None, "expires_at": None}
+    user_info = payload.get("user_info")
+    if not isinstance(user_info, dict):
+        return {"account_status": None, "expires_at": None}
+
+    raw_status = str(user_info.get("status", "") or "").strip()
+    if raw_status:
+        account_status = raw_status[:64]
+    elif _xtream_auth_is_valid(payload):
+        account_status = "Active"
+    else:
+        account_status = None
+
+    expires_at = None
+    raw_expiry = user_info.get("exp_date")
+    try:
+        timestamp = int(str(raw_expiry or "0").strip())
+        # A few panels return milliseconds even though Xtream convention is
+        # seconds. Normalize both forms and ignore zero/unlimited accounts.
+        if timestamp > 10_000_000_000:
+            timestamp //= 1000
+        if timestamp > 0:
+            expires_at = datetime.fromtimestamp(
+                timestamp,
+                tz=ZoneInfo("UTC"),
+            ).astimezone().isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError, OSError):
+        expires_at = None
+
+    return {
+        "account_status": account_status,
+        "expires_at": expires_at,
+    }
+
+
+def _apply_xtream_account_metadata(source: dict, payload: object) -> None:
+    source.update(_xtream_account_metadata(payload))
+
+
+def refresh_xtream_account_metadata(source: dict, cancel_check=None) -> None:
+    """Refresh safe Xtream account status without failing playlist refreshes."""
+    if not source.get("xtream_api"):
+        return
+    try:
+        payload = _download_json(
+            _xtream_api_url(source),
+            timeout=20,
+            max_bytes=1024 * 1024,
+            cancel_check=cancel_check,
+        )
+        if _xtream_auth_is_valid(payload):
+            _apply_xtream_account_metadata(source, payload)
+    except sports.ScanCancelled:
+        raise
+    except Exception:
+        # Account metadata is informational. A panel that temporarily omits it
+        # must not block channel or sports refreshes.
+        return
+
+
+def _xtream_api_url(source: dict, action: str | None = None) -> str:
+    values = {
+        "username": str(source.get("username", "") or ""),
+        "password": str(source.get("password", "") or ""),
+    }
+    if action:
+        values["action"] = action
+    return provider_endpoint_url(source, "player_api.php", **values)
+
+
+def _download_json(url: str, *, timeout: int = 90, max_bytes: int = MAX_PROVIDER_JSON_BYTES, cancel_check=None):
+    raw = download_url_bytes(
+        url, timeout=timeout, cancel_check=cancel_check, max_bytes=max_bytes
+    )
+    return json.loads(raw.decode("utf-8-sig", errors="replace"))
+
+
+def _m3u_attribute(value: object) -> str:
+    return str(value or "").replace("&", "&amp;").replace('"', "&quot;")
+
+
+def _xtream_stream_url(source: dict, stream_id: object) -> str:
+    base = normalize_provider_base_url(str(source.get("url", "")))
+    username = urllib.parse.quote(str(source.get("username", "") or ""), safe="")
+    password = urllib.parse.quote(str(source.get("password", "") or ""), safe="")
+    output = str(source.get("output", "ts") or "ts").lstrip(".")
+    return f"{base}/live/{username}/{password}/{stream_id}.{output}"
+
+
+def xtream_live_playlist(source: dict, cancel_check=None) -> tuple[str, list[dict]]:
+    _provider_progress_update("Downloading Xtream live-stream list")
+    payload = _download_json(
+        _xtream_api_url(source, "get_live_streams"),
+        cancel_check=cancel_check,
+    )
+    if not isinstance(payload, list):
+        raise ValueError("Xtream live-stream endpoint did not return a channel list.")
+    if len(payload) > MAX_PROVIDER_CHANNELS:
+        raise ValueError(
+            f"Xtream returned {len(payload):,} live streams, above the "
+            f"{MAX_PROVIDER_CHANNELS:,}-channel safety limit."
+        )
+    _provider_progress_update(
+        "Loading live categories",
+        channel_count=len(payload),
+        detail=f"{len(payload):,} live streams reported",
+    )
+    categories: dict[str, str] = {}
+    try:
+        category_payload = _download_json(
+            _xtream_api_url(source, "get_live_categories"),
+            timeout=30,
+            max_bytes=8 * 1024 * 1024,
+            cancel_check=cancel_check,
+        )
+        if isinstance(category_payload, list):
+            categories = {
+                str(item.get("category_id", "")): str(item.get("category_name", "") or "Live TV")
+                for item in category_payload
+                if isinstance(item, dict)
+            }
+    except Exception:
+        categories = {}
+
+    _provider_progress_update(
+        "Building live-only playlist",
+        channel_count=len(payload),
+    )
+    lines = ["#EXTM3U"]
+    parsed: list[dict] = []
+    for item in payload:
+        if cancel_check and cancel_check():
+            raise sports.ScanCancelled("Sports update cancelled. Existing sports channels were kept.")
+        if not isinstance(item, dict):
+            continue
+        stream_type = str(item.get("stream_type", "live") or "live").strip().lower()
+        if stream_type and stream_type not in {"live", "created_live"}:
+            continue
+        stream_id = item.get("stream_id")
+        name = str(item.get("name", "") or "").strip()
+        if stream_id in {None, ""} or not name:
+            continue
+        category_id = str(item.get("category_id", "") or "")
+        group = categories.get(category_id) or str(item.get("category_name", "") or "Live TV")
+        tvg_id = str(item.get("epg_channel_id", "") or item.get("tvg_id", "") or "")
+        tvg_logo = str(item.get("stream_icon", "") or "")
+        tvg_chno = str(item.get("num", "") or "")
+        stream_url = _xtream_stream_url(source, stream_id)
+        attrs = {
+            "tvg-id": tvg_id,
+            "tvg-name": name,
+            "tvg-logo": tvg_logo,
+            "group-title": group,
+        }
+        if tvg_chno:
+            attrs["tvg-chno"] = tvg_chno
+        extinf = (
+            '#EXTINF:-1 '
+            f'tvg-id="{_m3u_attribute(tvg_id)}" '
+            f'tvg-name="{_m3u_attribute(name)}" '
+            f'tvg-logo="{_m3u_attribute(tvg_logo)}" '
+            f'group-title="{_m3u_attribute(group)}"'
+        )
+        if tvg_chno:
+            extinf += f' tvg-chno="{_m3u_attribute(tvg_chno)}"'
+        extinf += f",{name}"
+        raw = [extinf, stream_url]
+        channel = {
+            "id": len(parsed),
+            "name": name,
+            "group": group,
+            "url": stream_url,
+            "raw": raw,
+            "tvg_id": tvg_id,
+            "tvg_name": name,
+            "tvg_logo": tvg_logo,
+            "tvg_chno": tvg_chno,
+            "attrs": attrs,
+            "is_sports_generated": False,
+        }
+        channel["key"] = channel_key(channel)
+        parsed.append(channel)
+        lines.extend(raw)
+    if not parsed:
+        raise ValueError("Xtream live-stream endpoint returned no usable live channels.")
+    if len(parsed) > MAX_PROVIDER_CHANNELS:
+        raise ValueError(
+            f"Xtream returned {len(parsed):,} usable live channels, above the "
+            f"{MAX_PROVIDER_CHANNELS:,}-channel safety limit."
+        )
+    return "\n".join(lines) + "\n", parsed
+
+
+def load_provider_playlist(source: dict, cancel_check=None) -> tuple[str, list[dict]]:
+    if str(source.get("kind", "m3u") or "m3u").lower() == "xtream" and source.get("xtream_api"):
+        try:
+            return xtream_live_playlist(source, cancel_check=cancel_check)
+        except sports.ScanCancelled:
+            raise
+        except Exception as exc:
+            if "safety limit" in str(exc).lower():
+                raise
+            source["live_api_error"] = redact_url_credentials(str(exc))
+            _provider_progress_update(
+                "Live API unavailable; trying capped M3U fallback",
+                detail=source["live_api_error"],
+            )
+    _provider_progress_update("Downloading provider playlist")
+    text = download_m3u_text(
+        provider_playlist_url(source),
+        timeout=90,
+        cancel_check=cancel_check,
+        max_bytes=MAX_PROVIDER_PLAYLIST_BYTES,
+    )
+    _provider_progress_update("Checking playlist size")
+    parsed = validate_m3u_text(text)
+    return text, parsed
+
+
+def detect_provider_source(
+    name: str,
+    url: str,
+    *,
+    username: str = "",
+    password: str = "",
+    role: str = "fallback",
+    source_id: str | None = None,
+    load_channels: bool = True,
+) -> tuple[dict, str, list[dict]]:
+    """Validate a direct M3U or separate-field Xtream provider login.
+
+    Primary providers are loaded immediately. Fallbacks can be registered in
+    deferred mode and are not downloaded until Sports Update needs them.
+    Authenticated Xtream providers use get_live_streams first so VOD and series
+    entries never enter the sports channel set.
+    """
+    clean_name = str(name or "").strip() or ("Primary" if role == "primary" else "Fallback")
+    clean_url = str(url or "").strip()
+    clean_username = str(username or "")
+    clean_password = str(password or "")
+    if bool(clean_username) != bool(clean_password):
+        raise ValueError("Enter both the Xtream username and password, or leave both blank.")
+    if not clean_url.startswith(("http://", "https://")):
+        raise ValueError("Provider URL must start with http:// or https://")
+
+    _provider_progress_update(
+        "Preparing provider validation",
+        detail="Fallback channels will load only during Sports Update." if not load_channels else "",
+    )
+    resolved_id = "primary" if role == "primary" else (source_id or unique_provider_id(clean_name))
+    source = {
+        "id": normalize_provider_id(resolved_id),
+        "name": clean_name,
+        "role": "primary" if role == "primary" else "fallback",
+        "priority": 0,
+        "kind": "m3u",
+        "url": clean_url,
+        "username": "",
+        "password": "",
+        "output": "ts",
+        "xtream_api": False,
+        "deferred": not load_channels,
+        "last_refresh": None,
+        "last_error": None,
+        "channel_count": 0,
+        "account_status": None,
+        "expires_at": None,
+    }
+
+    try:
+        if clean_username and clean_password:
+            source.update(
+                {
+                    "kind": "xtream",
+                    "url": normalize_provider_base_url(clean_url),
+                    "username": clean_username,
+                    "password": clean_password,
+                }
+            )
+            _provider_progress_update("Probing Xtream authentication")
+            api_url = _xtream_api_url(source)
+            api_error: Exception | None = None
+            try:
+                raw = _download_probe_bytes(api_url, accept="application/json,*/*")
+                payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
+                if not _xtream_auth_is_valid(payload):
+                    user_info = payload.get("user_info") if isinstance(payload, dict) else None
+                    if isinstance(user_info, dict) and str(user_info.get("auth", "")) in {"0", "False", "false"}:
+                        raise ValueError("Xtream authentication was rejected by the provider.")
+                    raise ValueError("The provider did not return a valid Xtream authentication response.")
+                source["xtream_api"] = True
+                _apply_xtream_account_metadata(source, payload)
+            except ValueError as exc:
+                if "rejected" in str(exc).lower():
+                    raise
+                api_error = exc
+            except Exception as exc:
+                api_error = exc
+
+            if not load_channels:
+                if not source["xtream_api"]:
+                    _provider_progress_update("Probing Xtream-compatible M3U endpoint")
+                    for output in ("ts", "m3u8"):
+                        source["output"] = output
+                        try:
+                            _probe_m3u_header(provider_playlist_url(source))
+                            break
+                        except Exception as exc:
+                            api_error = exc
+                    else:
+                        safe = redact_url_credentials(str(api_error or "Unknown provider error"))
+                        raise ValueError(f"Xtream login could not be validated: {safe}")
+                _provider_progress_complete(0, "Saved for live-only loading during Sports Update.")
+                return source, "", []
+
+            text, parsed = load_provider_playlist(source)
+            source["channel_count"] = len(parsed)
+            if len(parsed) >= PROVIDER_CHANNEL_WARNING:
+                source["warning"] = f"Large live channel set: {len(parsed):,} channels."
+            _provider_progress_complete(len(parsed), "Live-only channels loaded." if source.get("xtream_api") else "Capped M3U loaded.")
+            return source, text, parsed
+
+        if not load_channels:
+            _provider_progress_update("Probing direct M3U source")
+            _probe_m3u_header(clean_url)
+            _provider_progress_complete(0, "Saved for loading during Sports Update.")
+            return source, "", []
+
+        text, parsed = load_provider_playlist(source)
+        source["channel_count"] = len(parsed)
+        if len(parsed) >= PROVIDER_CHANNEL_WARNING:
+            source["warning"] = f"Large channel set: {len(parsed):,} channels."
+        _provider_progress_complete(len(parsed), "Provider playlist loaded.")
+        return source, text, parsed
+    except Exception as exc:
+        fail_provider_progress(str(exc))
+        raise
 
 
 def selected_channels_from_selected_ids_in_order() -> list[dict]:
@@ -394,6 +1322,10 @@ def write_current_playlist() -> int:
     with state_lock:
         manual_channels = selected_channels_from_selected_ids_in_order()
         generated = sports.generated_rows(DB_PATH)
+        # Manual/static and generated sports channels intentionally coexist.
+        # Never deduplicate across these namespaces, even when their stream URL
+        # or provider tvg-id is identical. Jellyfin distinguishes the generated
+        # row by its unique m3u-picker-sports tvg-id and channel number.
         lines = ["#EXTM3U"]
         for number, channel in enumerate(manual_channels, start=1):
             lines.extend(apply_channel_number(channel, number))
@@ -410,9 +1342,15 @@ def channel_by_key_map() -> dict[str, dict]:
 
 def combined_channels_for_api() -> list[dict]:
     # Keep provider/manual channels above generated sports and event channels in
-    # the Channel Manager. Generated rows retain negative IDs so the existing
+    # the Channel Manager. These are separate namespaces: matching URLs or tvg-id
+    # values never suppress either row. Generated rows retain negative IDs so the
     # selection endpoint never treats them as editable manual selections.
-    return [*channels, *sports.generated_channel_payloads(DB_PATH)]
+    manual_payload = []
+    for channel in channels:
+        item = dict(channel)
+        item["key"] = channel_key(item)
+        manual_payload.append(item)
+    return [*manual_payload, *sports.generated_channel_payloads(DB_PATH)]
 
 
 def selected_ids_payload() -> list[int]:
@@ -530,10 +1468,17 @@ def add_channels_to_group(slug: str, keys: Iterable[str]) -> int:
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO group_channels
-                    (group_id, channel_key, name, group_title, url)
-                VALUES (?, ?, ?, ?, ?)
+                    (group_id, channel_key, name, group_title, url, tvg_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (group[0], key, channel.get("name", ""), channel.get("group", ""), channel.get("url", "")),
+                (
+                    group[0],
+                    key,
+                    channel.get("name", ""),
+                    channel.get("group", ""),
+                    channel.get("url", ""),
+                    channel.get("tvg_id", ""),
+                ),
             )
             added += cursor.rowcount
         conn.commit()
@@ -573,25 +1518,542 @@ def m3u_from_channels(items: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def refresh_master_from_url() -> tuple[bool, str]:
-    global channels, last_refresh, source_mode
-    if not last_source_url:
-        return False, "No source URL configured."
+def normalize_epg_id(source_id: str) -> str:
+    return slugify(str(source_id or "").removesuffix(".xml"))
+
+
+def epg_cache_path(source_id: str) -> Path:
+    return EPG_DIR / f"{normalize_epg_id(source_id)}.xml"
+
+
+def epg_public_url(source_id: str) -> str:
+    return f"/epg/{normalize_epg_id(source_id)}.xml"
+
+
+def redact_url_credentials(value: str) -> str:
+    text = str(value or "")
+    # Remove complete URL query values and common credential-bearing path
+    # segments from errors before they reach the browser or logs.
+    text = re.sub(r"([?&](?:username|user|password|pass|token|auth)=)[^&\s]+", r"\1REDACTED", text, flags=re.I)
+    text = re.sub(r"(https?://[^/\s]+)/(?:[^/\s]+)/(?:[^/\s]+)(/[^\s]*)", r"\1/REDACTED/REDACTED\2", text, flags=re.I)
+    return text
+
+
+def friendly_source_label(url: str) -> str:
     try:
-        text = download_m3u_text(last_source_url)
-        parsed = parse_m3u_text(text)
-        with state_lock:
-            atomic_write_text(MASTER_CACHE_PATH, text)
-            channels = parsed
-            sports.discover_catalog_from_channels(DB_PATH, channels)
-            apply_saved_selections_to_loaded_channels()
-            last_refresh = datetime.now().astimezone().isoformat(timespec="seconds")
-            source_mode = "url"
-            save_config()
-            write_current_playlist()
-        return True, f"Refreshed {len(channels)} channels."
+        hostname = urllib.parse.urlparse(str(url or "")).hostname or ""
+    except Exception:
+        hostname = ""
+    hostname = hostname.lower().removeprefix("www.")
+    if not hostname or re.fullmatch(r"[\d.:]+", hostname):
+        return "Provider"
+    if re.search(r"(^|\.)astranettv\.", hostname, flags=re.I) or re.search(
+        r"(^|\.)astranet\.", hostname, flags=re.I
+    ):
+        return "AstraNet"
+    parts = [part for part in hostname.split(".") if part]
+    common = {"api", "cdn", "edge", "live", "media", "stream", "streams", "tv"}
+    while len(parts) > 2 and parts[0] in common:
+        parts.pop(0)
+    candidate = parts[-2] if len(parts) >= 2 else parts[0]
+    label = re.sub(r"[-_]+", " ", candidate).strip().title()
+    return label or "Provider"
+
+
+def provider_sources_payload() -> list[dict]:
+    payload = []
+    for source in sorted(provider_sources, key=lambda item: int(item.get("priority", 999))):
+        source_id = normalize_provider_id(source.get("id", ""))
+        cache = provider_cache_path(source_id)
+        payload.append(
+            {
+                "id": source_id,
+                "name": str(source.get("name", "") or source_id),
+                "role": str(source.get("role", "fallback") or "fallback"),
+                "priority": int(source.get("priority", 999)),
+                "source_label": friendly_source_label(str(source.get("url", ""))),
+                "kind": str(source.get("kind", "m3u") or "m3u"),
+                "xtream_api": bool(source.get("xtream_api")),
+                "credentials_saved": bool(source.get("username") and source.get("password")),
+                "cached": cache.exists(),
+                "channel_count": int(source.get("channel_count", 0) or 0),
+                "deferred": bool(source.get("deferred")),
+                "warning": source.get("warning"),
+                "last_refresh": source.get("last_refresh"),
+                "last_error": source.get("last_error"),
+                "account_status": source.get("account_status"),
+                "expires_at": source.get("expires_at"),
+            }
+        )
+    return payload
+
+
+def _renumber_provider_priorities() -> None:
+    primary = primary_provider_source()
+    provider_sources.sort(
+        key=lambda item: (
+            0 if item.get("role") == "primary" else 1,
+            int(item.get("priority", 999)),
+        )
+    )
+    fallback_priority = 1
+    for source in provider_sources:
+        if primary is not None and source is primary:
+            source["priority"] = 0
+            source["role"] = "primary"
+            source["id"] = "primary"
+            continue
+        source["priority"] = fallback_priority
+        source["role"] = "fallback"
+        fallback_priority += 1
+
+
+def install_primary_provider(source: dict, text: str, parsed: list[dict]) -> None:
+    global channels, last_source_url, source_mode, last_refresh, provider_sources
+    with state_lock:
+        fallback_sources = [item for item in provider_sources if item.get("role") != "primary"]
+        source = dict(source)
+        source["id"] = "primary"
+        source["role"] = "primary"
+        source["priority"] = 0
+        source["last_refresh"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        source["last_error"] = None
+        source["channel_count"] = len(parsed)
+        provider_sources = [source, *fallback_sources]
+        _renumber_provider_priorities()
+        atomic_write_text(MASTER_CACHE_PATH, text)
+        channels = parsed
+        last_source_url = provider_playlist_url(source)
+        source_mode = "url"
+        last_refresh = source["last_refresh"]
+        sports.discover_catalog_from_channels(DB_PATH, channels)
+        apply_saved_selections_to_loaded_channels()
+        save_config()
+        write_current_playlist()
+
+
+def add_fallback_provider(
+    name: str,
+    url: str,
+    *,
+    username: str = "",
+    password: str = "",
+) -> dict:
+    if not primary_provider_source():
+        raise ValueError("Load a URL primary provider before adding fallbacks.")
+    source, text, parsed = detect_provider_source(
+        name,
+        url,
+        username=username,
+        password=password,
+        role="fallback",
+        load_channels=False,
+    )
+    source["last_refresh"] = None
+    source["channel_count"] = 0
+    source["priority"] = len(provider_sources)
+    provider_sources.append(source)
+    _renumber_provider_priorities()
+    save_config()
+    return source
+
+
+def delete_fallback_provider(source_id: str) -> bool:
+    global provider_sources
+    wanted = normalize_provider_id(source_id)
+    source = find_provider_source(wanted)
+    if not source or source.get("role") == "primary":
+        return False
+    provider_sources = [
+        item
+        for item in provider_sources
+        if normalize_provider_id(item.get("id", "")) != wanted
+    ]
+    provider_cache_path(wanted).unlink(missing_ok=True)
+    provider_epg_cache_path(wanted).unlink(missing_ok=True)
+    _renumber_provider_priorities()
+    save_config()
+    return True
+
+
+def remove_primary_source() -> bool:
+    """Remove the active primary while preserving inactive fallback settings."""
+    global channels, selected_ids, last_source_url, last_refresh, source_mode, provider_sources
+    with state_lock:
+        primary = primary_provider_source()
+        has_file_primary = source_mode == "file"
+        if not primary and not has_file_primary:
+            return False
+
+        provider_sources = [
+            item for item in provider_sources if item.get("role") != "primary"
+        ]
+        _renumber_provider_priorities()
+        channels = []
+        selected_ids = set()
+        last_source_url = ""
+        last_refresh = None
+        source_mode = ""
+
+        MASTER_CACHE_PATH.unlink(missing_ok=True)
+        EPG_CACHE_PATH.unlink(missing_ok=True)
+        sports.clear_generated_channels(DB_PATH)
+        save_config()
+        write_current_playlist()
+        try:
+            ensure_epg_exports_current(force=True)
+        except Exception as exc:
+            print(f"Could not rebuild guides after primary removal: {exc}")
+    return True
+
+
+def refresh_provider_source(source: dict, cancel_check=None) -> tuple[bool, str, list[dict]]:
+    source_id = normalize_provider_id(source.get("id", ""))
+    try:
+        refresh_xtream_account_metadata(source, cancel_check=cancel_check)
+        text, parsed = load_provider_playlist(source, cancel_check=cancel_check)
+        atomic_write_text(provider_cache_path(source_id), text)
+        source["last_refresh"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        source["last_error"] = None
+        source["deferred"] = False
+        source["channel_count"] = len(parsed)
+        source["warning"] = (
+            f"Large channel set: {len(parsed):,} channels."
+            if len(parsed) >= PROVIDER_CHANNEL_WARNING
+            else None
+        )
+        save_config()
+        _provider_progress_complete(len(parsed), f"Refreshed {len(parsed):,} live channels.")
+        return True, f"Refreshed {len(parsed)} live channels.", parsed
+    except sports.ScanCancelled:
+        raise
     except Exception as exc:
-        return False, str(exc)
+        safe_error = redact_url_credentials(str(exc))
+        source["last_error"] = safe_error
+        fail_provider_progress(safe_error)
+        save_config()
+        return False, safe_error, []
+
+
+def refresh_provider_epg(source: dict, cancel_check=None) -> tuple[bool, str]:
+    url = provider_xmltv_url(source)
+    if not url:
+        return False, "No Xtream XMLTV URL could be derived."
+    try:
+        raw = sports.download_xmltv_bytes(url, cancel_check=cancel_check)
+        atomic_write_bytes(provider_epg_cache_path(str(source.get("id", ""))), raw)
+        return True, f"Cached {len(raw)} bytes of XMLTV data."
+    except sports.ScanCancelled:
+        raise
+    except Exception as exc:
+        return False, redact_url_credentials(str(exc))
+
+
+def _load_provider_cache(source: dict) -> list[dict]:
+    path = provider_cache_path(str(source.get("id", "")))
+    if not path.exists():
+        return []
+    try:
+        return validate_m3u_text(path.read_text(encoding="utf-8-sig", errors="replace"))
+    except Exception:
+        return []
+
+
+def sports_provider_channel_sets() -> list[tuple[dict, list[dict]]]:
+    """Return primary/fallback channel sets annotated for sports precedence."""
+    primary = primary_provider_source()
+    if primary is None:
+        if not channels:
+            return []
+        # File uploads and pre-migration state remain a valid single primary.
+        annotated = []
+        for channel in channels:
+            item = dict(channel)
+            item["_provider_source_id"] = "primary"
+            item["_provider_priority"] = 0
+            item["_provider_role"] = "primary"
+            annotated.append(item)
+        return [({"id": "primary", "role": "primary", "priority": 0}, annotated)]
+
+    sets: list[tuple[dict, list[dict]]] = []
+    for source in sorted(provider_sources, key=lambda item: int(item.get("priority", 999))):
+        source_channels = channels if source.get("role") == "primary" else _load_provider_cache(source)
+        if not source_channels:
+            continue
+        annotated: list[dict] = []
+        for channel in source_channels:
+            item = dict(channel)
+            item["_provider_source_id"] = normalize_provider_id(source.get("id", ""))
+            item["_provider_priority"] = int(source.get("priority", 999))
+            item["_provider_role"] = str(source.get("role", "fallback"))
+            annotated.append(item)
+        sets.append((source, annotated))
+    return sets
+
+
+def find_epg_source(source_id: str) -> dict | None:
+    wanted = normalize_epg_id(source_id)
+    return next(
+        (
+            item
+            for item in epg_sources
+            if normalize_epg_id(item.get("id", "")) == wanted
+        ),
+        None,
+    )
+
+
+def epg_sources_payload() -> list[dict]:
+    payload = []
+    for source in epg_sources:
+        source_id = normalize_epg_id(source.get("id", ""))
+        item = {
+            "id": source_id,
+            "name": str(source.get("name", "") or source_id),
+            "source_label": friendly_source_label(str(source.get("url", ""))),
+            "url_path": epg_public_url(source_id),
+            "cached": epg_cache_path(source_id).exists(),
+            "last_refresh": source.get("last_refresh"),
+            "last_error": source.get("last_error"),
+        }
+        payload.append(item)
+    return payload
+
+
+def epg_builtin_payload() -> list[dict]:
+    guides = (
+        ("combined", "Combined", COMBINED_EPG_PATH, "/epg/combined.xml"),
+        ("sports", "Sports", SPORTS_EPG_PATH, "/epg/sports.xml"),
+    )
+    payload: list[dict] = []
+    for guide_id, name, path, url_path in guides:
+        cached = path.exists() and path.is_file()
+        last_refresh = None
+        size_bytes = 0
+        if cached:
+            try:
+                stat = path.stat()
+                last_refresh = datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
+                size_bytes = int(stat.st_size)
+            except OSError:
+                cached = False
+        payload.append(
+            {
+                "id": guide_id,
+                "name": name,
+                "source_label": "Built-in",
+                "url_path": url_path,
+                "cached": cached,
+                "last_refresh": last_refresh,
+                "size_bytes": size_bytes,
+            }
+        )
+    return payload
+
+
+def unique_epg_id(name: str) -> str:
+    base = normalize_epg_id(name)
+    existing = {normalize_epg_id(source.get("id", "")) for source in epg_sources}
+    source_id = base
+    index = 2
+    while source_id in existing:
+        source_id = f"{base}-{index}"
+        index += 1
+    return source_id
+
+
+def add_epg_source(name: str, url: str) -> dict:
+    clean_name = str(name or "").strip()
+    clean_url = str(url or "").strip()
+    if not clean_name:
+        raise ValueError("EPG name is required.")
+    if not clean_url.startswith(("http://", "https://")):
+        raise ValueError("EPG URL must start with http:// or https://")
+    source = {
+        "id": unique_epg_id(clean_name),
+        "name": clean_name,
+        "url": clean_url,
+        "last_refresh": None,
+        "last_error": None,
+    }
+    epg_sources.append(source)
+    save_config()
+    return source
+
+
+def delete_epg_source(source_id: str) -> bool:
+    global epg_sources
+    wanted = normalize_epg_id(source_id)
+    before = len(epg_sources)
+    epg_sources = [
+        source
+        for source in epg_sources
+        if normalize_epg_id(source.get("id", "")) != wanted
+    ]
+    epg_cache_path(wanted).unlink(missing_ok=True)
+    save_config()
+    return len(epg_sources) != before
+
+
+def download_epg_bytes(url: str, timeout: int = 90) -> bytes:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "M3U-Web-Picker/2.0",
+            "Accept": "application/xml,text/xml,*/*",
+            "Accept-Encoding": "gzip",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+        content_encoding = str(response.headers.get("Content-Encoding", "")).lower()
+    if content_encoding == "gzip" or raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    elif raw[:4] == b"PK\x03\x04":
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            members = [name for name in archive.namelist() if not name.endswith("/")]
+            if not members:
+                raise ValueError("The EPG archive was empty.")
+            raw = archive.read(members[0])
+    if b"<tv" not in raw[:10000]:
+        raise ValueError("The provider response did not look like XMLTV data.")
+    return raw
+
+
+def refresh_epg_source(source_id: str) -> tuple[bool, str]:
+    source = find_epg_source(source_id)
+    if not source:
+        return False, "EPG source not found."
+    try:
+        raw = download_epg_bytes(str(source.get("url", "")))
+        atomic_write_bytes(epg_cache_path(str(source.get("id", ""))), raw)
+        source["last_refresh"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        source["last_error"] = None
+        save_config()
+        return True, f"Refreshed {source.get('name', 'EPG source')}."
+    except Exception as exc:
+        safe_error = redact_url_credentials(str(exc))
+        source["last_error"] = safe_error
+        save_config()
+        return False, safe_error
+
+
+def refresh_all_epg_sources() -> dict:
+    results = []
+    ok_count = 0
+    for source in list(epg_sources):
+        ok, message = refresh_epg_source(str(source.get("id", "")))
+        ok_count += 1 if ok else 0
+        results.append(
+            {
+                "id": source.get("id"),
+                "name": source.get("name"),
+                "ok": ok,
+                "message": message,
+            }
+        )
+    return {"count": len(results), "ok_count": ok_count, "results": results}
+
+
+def _valid_xmltv_file(path: Path | None) -> bool:
+    if not path or not path.exists() or path.stat().st_size == 0:
+        return False
+    try:
+        return b"<tv" in path.read_bytes()[:10000]
+    except Exception:
+        return False
+
+
+def active_base_epg_path() -> Path | None:
+    # Prefer the automatically derived Xtream guide. A manually configured EPG
+    # source is a fallback for providers whose playlist URL does not expose the
+    # conventional xmltv.php endpoint.
+    if _valid_xmltv_file(EPG_CACHE_PATH):
+        return EPG_CACHE_PATH
+    for source in epg_sources:
+        candidate = epg_cache_path(str(source.get("id", "")))
+        if _valid_xmltv_file(candidate):
+            return candidate
+    return None
+
+
+def _latest_generated_timestamp() -> float:
+    rows = sports.generated_rows(DB_PATH, include_cached=True)
+    values = []
+    for row in rows:
+        try:
+            values.append(datetime.fromisoformat(str(row.get("generated_at", ""))).timestamp())
+        except Exception:
+            pass
+    return max(values, default=0.0)
+
+
+def guide_export_needs_rebuild(path: Path, *, combined: bool = False) -> bool:
+    rows = sports.generated_rows(DB_PATH)
+    if not path.exists():
+        return True
+    try:
+        payload = path.read_bytes()
+    except Exception:
+        return True
+    marker_present = b"m3u-picker-sports-" in payload
+    if rows and not marker_present:
+        return True
+    if not rows and marker_present:
+        return True
+    newest_input = _latest_generated_timestamp()
+    base_path = active_base_epg_path() if combined else None
+    if base_path and base_path.exists():
+        newest_input = max(newest_input, base_path.stat().st_mtime)
+    if combined and PLAYLIST_PATH.exists():
+        newest_input = max(newest_input, PLAYLIST_PATH.stat().st_mtime)
+    return bool(newest_input and path.stat().st_mtime + 0.001 < newest_input)
+
+
+def ensure_epg_exports_current(*, force: bool = False) -> None:
+    if not force and not (
+        guide_export_needs_rebuild(SPORTS_EPG_PATH)
+        or guide_export_needs_rebuild(COMBINED_EPG_PATH, combined=True)
+    ):
+        return
+    sports.rebuild_epg_exports(
+        DB_PATH,
+        base_epg_path=active_base_epg_path(),
+        base_channel_ids=selected_xmltv_ids(),
+        sports_epg_path=SPORTS_EPG_PATH,
+        combined_epg_path=COMBINED_EPG_PATH,
+    )
+
+
+def refresh_master_from_url(cancel_check=None) -> tuple[bool, str]:
+    global channels, last_source_url, last_refresh, source_mode
+    primary = primary_provider_source()
+    if not primary:
+        return False, "No source URL configured."
+    ok, message, parsed = refresh_provider_source(primary, cancel_check=cancel_check)
+    if not ok:
+        return False, message
+    with state_lock:
+        channels = parsed
+        last_source_url = provider_playlist_url(primary)
+        last_refresh = primary.get("last_refresh")
+        source_mode = "url"
+        sports.discover_catalog_from_channels(DB_PATH, channels)
+        apply_saved_selections_to_loaded_channels()
+        save_config()
+        write_current_playlist()
+    return True, f"Refreshed {len(channels)} channels."
+
+
+def request_sports_scan_cancel() -> tuple[bool, str]:
+    state = sports.scan_state(DB_PATH)
+    if not state.get("running"):
+        return False, "No sports update is currently running."
+    if str(state.get("trigger") or "manual") != "manual":
+        return False, "Scheduled sports updates cannot be cancelled from the browser."
+    scan_cancel_event.set()
+    sports.update_scan_stage(DB_PATH, "Cancellation requested")
+    return True, "Cancellation requested. The scan will stop at the next safe checkpoint."
 
 
 def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> dict:
@@ -602,9 +2064,12 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         raise SportsScanError("Load an M3U source before updating sports channels.")
     if not scan_lock.acquire(blocking=False):
         raise SportsScanError("A sports update is already running.")
+    scan_cancel_event.clear()
     scan_started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     failure_recorded = False
     scan_state_started = False
+    provider_warnings: list[str] = []
+    cancel_check = scan_cancel_event.is_set if trigger == "manual" else None
     try:
         sports.begin_scan_state(
             DB_PATH,
@@ -613,40 +2078,85 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             stage="Starting sports update",
         )
         scan_state_started = True
-        if refresh_source and source_mode == "url" and last_source_url:
-            sports.update_scan_stage(DB_PATH, "Refreshing provider playlist")
-            refreshed, message = refresh_master_from_url()
-            if not refreshed:
-                sports.record_scan_failure(
-                    DB_PATH,
-                    "Provider playlist refresh failed.",
-                    trigger,
-                    started_at=scan_started_at,
-                )
-                failure_recorded = True
-                print("Provider refresh failed during sports update.")
-                raise SportsScanError(
-                    "Could not refresh the provider playlist. Existing sports channels were kept."
-                )
+        if scan_cancel_event.is_set():
+            raise sports.ScanCancelled()
+        if source_mode == "url" and primary_provider_source():
+            if refresh_source:
+                sports.update_scan_stage(DB_PATH, "Refreshing primary provider")
+                refreshed, message = refresh_master_from_url(cancel_check)
+                if not refreshed:
+                    sports.record_scan_failure(
+                        DB_PATH,
+                        "Provider playlist refresh failed.",
+                        trigger,
+                        started_at=scan_started_at,
+                    )
+                    failure_recorded = True
+                    print("Provider refresh failed during sports update.")
+                    raise SportsScanError(
+                        "Could not refresh the primary provider playlist. Existing sports channels were kept."
+                    )
+
+            # Even when the scheduler already refreshed the primary at the
+            # master-playlist boundary, fallback caches still need their own
+            # refresh before this sports scan.
+            for source in [item for item in provider_sources if item.get("role") == "fallback"]:
+                sports.update_scan_stage(DB_PATH, f"Refreshing fallback: {source.get('name', 'Provider')}")
+                ok, fallback_message, _parsed = refresh_provider_source(source, cancel_check=cancel_check)
+                if not ok:
+                    provider_warnings.append(
+                        f"{source.get('name', 'Fallback provider')}: {fallback_message}"
+                    )
 
         # EPG is enrichment. A failed XMLTV refresh falls back to the cached EPG
         # and then to M3U-only matching; it does not delete yesterday's channels.
-        if last_source_url:
+        if provider_sources:
+            sports.update_scan_stage(DB_PATH, "Refreshing provider guide data")
+            for source in provider_sources:
+                if not provider_xmltv_url(source):
+                    continue
+                ok, epg_message = refresh_provider_epg(source, cancel_check=cancel_check)
+                if not ok and source.get("role") == "fallback":
+                    provider_warnings.append(
+                        f"{source.get('name', 'Fallback provider')} guide: {epg_message}"
+                    )
+        elif last_source_url:
             sports.update_scan_stage(DB_PATH, "Refreshing guide data")
-            sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH)
+            sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH, cancel_check=cancel_check)
+        if scan_cancel_event.is_set():
+            raise sports.ScanCancelled()
+
+        provider_sets = sports_provider_channel_sets()
+        sports_channels = [channel for _source, source_channels in provider_sets for channel in source_channels]
+        provider_epg_sources: list[tuple[Path, list[dict]]] = []
+        for source, source_channels in provider_sets:
+            candidate = provider_epg_cache_path(str(source.get("id", "")))
+            if source.get("role") == "primary" and not _valid_xmltv_file(candidate):
+                candidate = active_base_epg_path() or candidate
+            if _valid_xmltv_file(candidate):
+                provider_epg_sources.append((candidate, source_channels))
 
         sports.update_scan_stage(DB_PATH, "Discovering sports catalog")
-        sports.discover_catalog_from_channels(DB_PATH, channels)
+        sports.discover_catalog_from_channels(DB_PATH, sports_channels)
+        if scan_cancel_event.is_set():
+            raise sports.ScanCancelled()
         sports.update_scan_stage(DB_PATH, "Scanning and matching channels")
         result = sports.scan_channels(
             DB_PATH,
-            list(channels),
-            EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+            sports_channels,
+            active_base_epg_path(),
+            provider_epg_sources=provider_epg_sources,
             sports_epg_path=SPORTS_EPG_PATH,
             combined_epg_path=COMBINED_EPG_PATH,
             trigger=trigger,
             started_at=scan_started_at,
+            base_channel_ids=selected_xmltv_ids(),
+            manual_channel_count=len(selected_channels_from_selected_ids_in_order()),
+            cancel_check=cancel_check,
         )
+        result["provider_warnings"] = provider_warnings
+        if provider_warnings:
+            result["message"] += f" {len(provider_warnings)} fallback provider warning{'s' if len(provider_warnings) != 1 else ''}."
         sports.update_scan_stage(DB_PATH, "Writing playlist and validating guide")
         write_current_playlist()
         guide_check = sports.validate_guide_exports(
@@ -659,6 +2169,13 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         if not guide_check["ok"]:
             print(f"Generated sports guide validation failed: {guide_check}")
         return result
+    except sports.ScanCancelled as exc:
+        sports.record_scan_cancelled(
+            DB_PATH,
+            trigger=trigger,
+            started_at=scan_started_at,
+        )
+        raise SportsScanCancelled(str(exc) or "Sports update cancelled.") from exc
     except SportsScanError:
         raise
     except Exception as exc:
@@ -699,14 +2216,40 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         except Exception as exc:
             print(f"Could not finalize persistent sports scan status: {type(exc).__name__}.")
         finally:
+            scan_cancel_event.clear()
             scan_lock.release()
 
 
-def sports_number_conflicts() -> int:
+def sports_numbering_adjustment() -> dict:
     settings = sports.get_settings(DB_PATH)
-    start = int(settings.get("start_channel", 1000))
+    configured_start = int(settings.get("start_channel", 1000))
     manual_count = len(selected_channels_from_selected_ids_in_order())
-    return max(0, manual_count - start + 1)
+    effective_start = sports.effective_start_channel(configured_start, manual_count)
+    return {
+        "configured_start_channel": configured_start,
+        "effective_start_channel": effective_start,
+        "manual_channel_count": manual_count,
+        "overlap_count": max(0, manual_count - configured_start + 1),
+        "auto_shifted": effective_start != configured_start,
+    }
+
+
+def sports_number_conflicts() -> int:
+    return int(sports_numbering_adjustment()["overlap_count"])
+
+
+def enrich_sports_status(payload: dict) -> dict:
+    adjustment = sports_numbering_adjustment()
+    payload["number_conflicts"] = adjustment["overlap_count"]
+    payload["numbering_adjustment"] = adjustment
+    settings = dict(payload.get("settings") or sports.get_settings(DB_PATH))
+    settings["start_channel"] = adjustment["effective_start_channel"]
+    payload["numbering"] = sports.numbering_plan(settings)
+    payload["numbering"]["configured_start_channel"] = adjustment["configured_start_channel"]
+    payload["numbering"]["effective_start_channel"] = adjustment["effective_start_channel"]
+    payload["numbering"]["manual_channel_count"] = adjustment["manual_channel_count"]
+    payload["numbering"]["auto_shifted"] = adjustment["auto_shifted"]
+    return payload
 
 
 def _date_from_iso(value: str | None) -> str:
@@ -719,6 +2262,7 @@ def _date_from_iso(value: str | None) -> str:
 
 
 def scheduler_loop() -> None:
+    global last_epg_refresh_date
     last_backup_date = ""
     while True:
         try:
@@ -728,7 +2272,8 @@ def scheduler_loop() -> None:
             if sports.purge_expired_disabled_cache(DB_PATH, now):
                 sports.rebuild_epg_exports(
                     DB_PATH,
-                    base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+                    base_epg_path=active_base_epg_path(),
+                    base_channel_ids=selected_xmltv_ids(),
                     sports_epg_path=SPORTS_EPG_PATH,
                     combined_epg_path=COMBINED_EPG_PATH,
                 )
@@ -753,6 +2298,18 @@ def scheduler_loop() -> None:
                     )
                 except Exception as exc:
                     print(f"Scheduled sports scan failed: {exc}")
+
+            epg_refresh_minute_total = SCHEDULE_MINUTE + EPG_REFRESH_OFFSET_MINUTES
+            epg_refresh_hour = (SCHEDULE_HOUR + epg_refresh_minute_total // 60) % 24
+            epg_refresh_minute = epg_refresh_minute_total % 60
+            if (
+                epg_sources
+                and (now.hour, now.minute) == (epg_refresh_hour, epg_refresh_minute)
+                and last_epg_refresh_date != today
+            ):
+                refresh_all_epg_sources()
+                ensure_epg_exports_current(force=True)
+                last_epg_refresh_date = today
 
             backup_enabled = os.environ.get("M3U_BACKUP_ENABLED", "false").lower() in {
                 "1", "true", "yes", "on"
@@ -805,7 +2362,8 @@ def load_cached_master_playlist_on_startup() -> None:
         try:
             sports.rebuild_epg_exports(
                 DB_PATH,
-                base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+                base_epg_path=active_base_epg_path(),
+                base_channel_ids=selected_xmltv_ids(),
                 sports_epg_path=SPORTS_EPG_PATH,
                 combined_epg_path=COMBINED_EPG_PATH,
             )
@@ -815,12 +2373,19 @@ def load_cached_master_playlist_on_startup() -> None:
     try:
         text = MASTER_CACHE_PATH.read_text(encoding="utf-8-sig", errors="replace")
         channels = parse_m3u_text(text)
+        primary = primary_provider_source()
+        if primary:
+            primary["channel_count"] = len(channels)
+            if not primary.get("last_refresh"):
+                primary["last_refresh"] = last_refresh
+            save_config()
         sports.discover_catalog_from_channels(DB_PATH, channels)
         apply_saved_selections_to_loaded_channels()
         write_current_playlist()
         sports.rebuild_epg_exports(
             DB_PATH,
-            base_epg_path=EPG_CACHE_PATH if EPG_CACHE_PATH.exists() else None,
+            base_epg_path=active_base_epg_path(),
+            base_channel_ids=selected_xmltv_ids(),
             sports_epg_path=SPORTS_EPG_PATH,
             combined_epg_path=COMBINED_EPG_PATH,
         )

@@ -13,3 +13,7 @@ data/
 .env
 .vscode/
 .idea/
+
+debug-data/
+
+!debug-data/.gitkeep

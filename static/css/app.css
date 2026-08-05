@@ -765,3 +765,275 @@ thead th {
     top: 0;
   }
 }
+
+/* v21.7 unified EPG manager */
+.epg-manager-heading h2 {
+  color: #f8fafc;
+  font-weight: 800;
+  letter-spacing: .015em;
+}
+
+.epg-table-wrap {
+  overflow: auto;
+  border: 1px solid #475569;
+  border-radius: .55rem;
+  background: #111827;
+}
+
+.epg-manager-table {
+  width: 100%;
+  min-width: 980px;
+  table-layout: fixed;
+  font-size: .88rem;
+}
+
+.epg-manager-table .epg-col-name { width: 19%; }
+.epg-manager-table .epg-col-type { width: 13%; }
+.epg-manager-table .epg-col-url { width: 38%; }
+.epg-manager-table .epg-col-status { width: 20%; }
+.epg-manager-table .epg-col-action { width: 10%; }
+
+.epg-manager-table th,
+.epg-manager-table td {
+  padding: .55rem .65rem;
+  vertical-align: middle;
+}
+
+.epg-manager-table thead th {
+  color: #cbd5e1;
+  background: #172033 !important;
+  border-bottom-color: #475569;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.epg-manager-table tbody + tbody tr:first-child td {
+  border-top-width: 1px;
+}
+
+.epg-add-source-row td {
+  background: #172033;
+  border-bottom-color: #475569;
+}
+
+.epg-built-in-row td {
+  background: #111827;
+}
+
+.epg-name-cell,
+.epg-status-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.epg-name-cell {
+  white-space: nowrap;
+}
+
+.epg-status-primary,
+.epg-status-secondary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epg-status-secondary {
+  color: #94a3b8;
+  font-size: .76rem;
+  margin-top: .08rem;
+}
+
+.epg-served-cell {
+  min-width: 0;
+}
+
+.epg-served-cell .input-group,
+.epg-add-source-row .form-control {
+  width: 100%;
+  min-width: 0;
+}
+
+.epg-served-cell .form-control,
+.epg-add-source-row .form-control {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epg-type-badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.epg-type-built-in {
+  color: #dbeafe;
+  background: #1e3a5f;
+  border-color: #3b82f6;
+}
+
+.epg-type-external {
+  color: #e2e8f0;
+  background: #334155;
+  border-color: #64748b;
+}
+
+.epg-action-btn {
+  min-width: 64px;
+}
+
+.epg-managed-label {
+  color: #94a3b8;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.epg-empty-row td {
+  padding: .65rem;
+  color: #94a3b8;
+  background: #111827;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .epg-manager-table {
+    min-width: 920px;
+  }
+}
+
+.provider-entry-panel,
+.provider-fallback-panel {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.provider-source-table th:first-child,
+.provider-source-table td:first-child {
+  width: 110px;
+}
+
+.provider-source-table th:nth-child(4),
+.provider-source-table td:nth-child(4) {
+  width: 100px;
+  text-align: right;
+}
+
+.provider-source-table th:last-child,
+.provider-source-table td:last-child {
+  width: 90px;
+}
+
+/* Provider source labels need explicit contrast because Bootstrap heading and
+   label variables otherwise inherit light-theme colors inside the dark card. */
+.provider-field-heading,
+.provider-entry-panel .form-label,
+.provider-fallback-panel .form-label,
+.provider-fallback-panel h3,
+.provider-source-table thead th {
+  color: #f3f4f6 !important;
+  font-weight: 700;
+}
+
+.provider-source-table th:nth-child(4),
+.provider-source-table td:nth-child(4) {
+  text-align: right;
+}
+
+
+.provider-operation-status {
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  border-radius: 0.5rem;
+  background: rgba(30, 64, 175, 0.16);
+  padding: 0.75rem 0.9rem;
+  color: #f8fafc;
+}
+
+.provider-operation-status.is-complete {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(22, 101, 52, 0.18);
+}
+
+.provider-operation-status.is-failed {
+  border-color: rgba(248, 113, 113, 0.65);
+  background: rgba(127, 29, 29, 0.2);
+}
+
+/* v21.10-debug3: keep provider headings aligned and prevent the live-channel
+   heading from visually merging with Last Updated / Status. */
+.provider-source-table {
+  min-width: 1040px;
+}
+
+.provider-source-table col.provider-col-priority {
+  width: 120px;
+}
+
+.provider-source-table col.provider-col-name {
+  width: 250px;
+}
+
+.provider-source-table col.provider-col-type {
+  width: 180px;
+}
+
+.provider-source-table col.provider-col-channels {
+  width: 145px;
+}
+
+.provider-source-table col.provider-col-status {
+  width: auto;
+}
+
+.provider-source-table col.provider-col-action {
+  width: 100px;
+}
+
+.provider-source-table thead th {
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.provider-source-table th:nth-child(4),
+.provider-source-table td:nth-child(4) {
+  width: 145px;
+  min-width: 145px;
+  padding-right: 1rem;
+}
+
+.provider-source-table th:nth-child(5),
+.provider-source-table td:nth-child(5) {
+  min-width: 260px;
+  padding-left: 1rem;
+}
+
+.provider-source-table th:last-child,
+.provider-source-table td:last-child {
+  width: 100px;
+  min-width: 100px;
+  white-space: nowrap;
+}
+
+/* v22.0: one lock controls every add-primary input, including fields that
+   password managers may try to repopulate after the provider table loads. */
+#primaryProviderFieldset[disabled] .form-control,
+#primaryProviderFieldset[disabled] .btn {
+  cursor: not-allowed;
+}
+
+.provider-account-status {
+  margin-top: 0.2rem;
+  font-weight: 600;
+}

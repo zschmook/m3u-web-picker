@@ -32,12 +32,17 @@ services:
       # Keep nightly host backups disabled in the disposable debug instance.
       # The normal docker-compose.yml enables them for the long-running app.
       M3U_BACKUP_ENABLED: "false"
+      M3U_DATA_DIR: /app/debug-data
+      M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
+      M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
+      M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
+      M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
 
     # Override the production Waitress command and enable Flask debug mode.
     command: ["python", "app.py", "--dev"]
 
-    # Mount only application source files/directories for real debug reloads.
-    # Runtime state such as m3u_picker.db remains in the container's /app layer.
+    # Mount application source files/directories for real debug reloads.
+    # Runtime state lives in ./debug-data so --force-recreate no longer erases it.
     volumes:
       - type: bind
         source: ./app.py
@@ -60,5 +65,8 @@ services:
       - type: bind
         source: ./templates
         target: /app/templates
+      - type: bind
+        source: ./debug-data
+        target: /app/debug-data
 
     restart: unless-stopped

@@ -17,7 +17,7 @@ COPY . ./
 
 # /backups is the fixed path inside the container. docker-compose.yml maps a
 # user-selected host directory to it. The live SQLite DB remains in /app.
-RUN mkdir -p /app/exports /backups
+RUN mkdir -p /app/exports /app/data /app/debug-data /backups
 
 EXPOSE 9999 9998
 
