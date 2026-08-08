@@ -39,7 +39,17 @@ DEFAULT_SETTINGS = {
     "include_pregame": False,
     "use_backup_feeds": True,
     "exclude_sd": False,
+    # Optional authoritative schedule source. The API key itself is stored in
+    # an internal sports_settings row and is never returned to the browser.
+    "schedule_api_enabled": False,
+    "schedule_api_url": "",
 }
+
+SCHEDULE_API_KEY_SETTING = "__schedule_api_key"
+SCHEDULE_API_SOURCE = "api-sports-baseball"
+SCHEDULE_API_LEAGUE_ID = "mlb"
+SCHEDULE_API_REMOTE_LEAGUE_ID = 1
+SCHEDULE_API_PROVIDER_NAME = "API-BASEBALL"
 
 SCOPE_TYPES = {"league", "team", "conference", "sport"}
 RULE_PRIORITY = {"team": 0, "conference": 1, "league": 2, "sport": 3}
@@ -382,6 +392,17 @@ TEAM_MATCHUP_LEAGUES = {
 
 REPLAY_RE = re.compile(r"\b(replay|encore|classic|rewind|repeat)\b", re.I)
 PREGAME_RE = re.compile(r"\b(pre[- ]?game|post[- ]?game|pregame|postgame)\b", re.I)
+# When a schedule API supplies a canonical game ID/time, provider rows become
+# candidate airings of that game.  A fairly generous window allows normal TV
+# clock differences and delayed starts without letting a same-matchup replay
+# several hours later become a second logical game.
+SCHEDULE_API_LIVE_CANDIDATE_WINDOW = timedelta(hours=3)
+SCHEDULE_API_MATCH_WINDOW = timedelta(hours=18)
+SCHEDULE_API_SUPPORT_RE = re.compile(
+    r"\b(?:pre[- ]?game|post[- ]?game|gameday|in[- ]game|squeeze[ -]?play|"
+    r"bet(?:ting)?|wager(?:ing)?|odds|player props?|preview|recap|studio show)\b",
+    re.I,
+)
 PLACEHOLDER_RE = re.compile(
     r"(?:^|\s)(?:zzz|tba|placeholder)(?:$|\s)|2098-12-31|^\s*$", re.I
 )
@@ -389,7 +410,7 @@ PLACEHOLDER_RE = re.compile(
 # sporting events. Keep real adjacent programming (podcasts, studio shows,
 # pregame coverage when enabled, etc.) eligible for normal sports matching.
 CLEAR_OFF_AIR_RE = re.compile(
-    r"(?:^|[\s|:—–-])(?:no[\W_]+events?[\W_]+today|signing[\W_]+off)[\s.!?]*$",
+    r"(?:^|[\s|:—–-])(?:no[\W_]+(?:events?|game)[\W_]+today|signing[\W_]+off)[\s.!?]*$",
     re.I,
 )
 DATE_RE = re.compile(
@@ -770,6 +791,44 @@ def init_db(db_path: Path | str) -> None:
             CREATE TABLE IF NOT EXISTS sports_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sports_schedule_api_cache (
+                source TEXT NOT NULL,
+                league_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                schedule_date TEXT NOT NULL,
+                fetched_on TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                remaining_quota INTEGER,
+                PRIMARY KEY (source, league_id, season, schedule_date)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sports_schedule_events (
+                source TEXT NOT NULL,
+                api_event_id TEXT NOT NULL,
+                league_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                schedule_date TEXT NOT NULL,
+                scheduled_start TEXT NOT NULL,
+                status_short TEXT NOT NULL DEFAULT '',
+                status_long TEXT NOT NULL DEFAULT '',
+                home_api_id TEXT NOT NULL DEFAULT '',
+                home_name TEXT NOT NULL DEFAULT '',
+                home_logo TEXT NOT NULL DEFAULT '',
+                away_api_id TEXT NOT NULL DEFAULT '',
+                away_name TEXT NOT NULL DEFAULT '',
+                away_logo TEXT NOT NULL DEFAULT '',
+                raw_json TEXT NOT NULL DEFAULT '{}',
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (source, api_event_id)
             )
             """
         )
@@ -1258,6 +1317,7 @@ def update_settings(db_path: Path | str, changes: dict) -> dict:
         "include_pregame",
         "use_backup_feeds",
         "exclude_sd",
+        "schedule_api_enabled",
     ):
         if key in clean:
             clean[key] = bool(clean[key])
@@ -1711,6 +1771,452 @@ def next_update_at(db_path: Path | str, now: datetime | None = None) -> datetime
     if target <= local_now:
         target += timedelta(days=1)
     return target
+
+
+
+def _schedule_api_secret(db_path: Path | str) -> str:
+    init_db(db_path)
+    with closing(_connect(db_path)) as conn:
+        row = conn.execute(
+            "SELECT value FROM sports_settings WHERE key = ?",
+            (SCHEDULE_API_KEY_SETTING,),
+        ).fetchone()
+    if not row:
+        return ""
+    return str(_json_load(row["value"], row["value"]) or "").strip()
+
+
+def schedule_api_status(db_path: Path | str) -> dict:
+    """Return credential-free schedule API state for the browser."""
+    settings = get_settings(db_path)
+    api_key = _schedule_api_secret(db_path)
+    url = str(settings.get("schedule_api_url", "") or "").strip()
+    enabled = bool(settings.get("schedule_api_enabled"))
+    with closing(_connect(db_path)) as conn:
+        last = conn.execute(
+            """
+            SELECT schedule_date, fetched_at, result_count, remaining_quota
+            FROM sports_schedule_api_cache
+            WHERE source = ? AND league_id = ?
+            ORDER BY fetched_at DESC
+            LIMIT 1
+            """,
+            (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
+        ).fetchone()
+        cached_dates = [
+            row["schedule_date"]
+            for row in conn.execute(
+                """
+                SELECT schedule_date
+                FROM sports_schedule_api_cache
+                WHERE source = ? AND league_id = ?
+                ORDER BY schedule_date
+                """,
+                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
+            ).fetchall()
+        ]
+        cached_event_count = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM sports_schedule_events
+                WHERE source = ? AND league_id = ?
+                """,
+                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
+            ).fetchone()[0]
+        )
+    configured = bool(url and api_key)
+    effective = bool(enabled and configured)
+    api_entry = None
+    if url or api_key:
+        api_entry = {
+            "id": SCHEDULE_API_SOURCE,
+            "provider": SCHEDULE_API_PROVIDER_NAME,
+            "scope": "MLB",
+            "url": url,
+            "enabled": enabled,
+            "configured": configured,
+            "effective": effective,
+            "key_configured": bool(api_key),
+            "last_fetch_at": last["fetched_at"] if last else None,
+            "last_result_count": int(last["result_count"] or 0) if last else 0,
+            "cached_event_count": cached_event_count,
+            "remaining_quota": last["remaining_quota"] if last else None,
+        }
+    return {
+        "enabled": enabled,
+        "configured": configured,
+        "effective": effective,
+        "provider": SCHEDULE_API_PROVIDER_NAME,
+        "league": "MLB",
+        "url": url,
+        "key_configured": bool(api_key),
+        "last_fetch_at": last["fetched_at"] if last else None,
+        "last_fetch_date": last["schedule_date"] if last else None,
+        "last_result_count": int(last["result_count"] or 0) if last else 0,
+        "cached_event_count": cached_event_count,
+        "remaining_quota": last["remaining_quota"] if last else None,
+        "cached_dates": cached_dates,
+        "fallback_mode": not effective,
+        "apis": [api_entry] if api_entry else [],
+    }
+
+
+def update_schedule_api_config(
+    db_path: Path | str,
+    *,
+    enabled: bool | None = None,
+    url: str | None = None,
+    api_key: str | None = None,
+    clear_key: bool = False,
+) -> dict:
+    """Persist the optional schedule source without exposing its API key."""
+    init_db(db_path)
+    changes = {}
+    if enabled is not None:
+        changes["schedule_api_enabled"] = bool(enabled)
+    if url is not None:
+        cleaned_url = str(url or "").strip().rstrip("/")
+        if cleaned_url and not re.match(r"^https?://", cleaned_url, re.I):
+            raise ValueError("Schedule API URL must start with http:// or https://.")
+        changes["schedule_api_url"] = cleaned_url
+    if changes:
+        update_settings(db_path, changes)
+    with closing(_connect(db_path)) as conn:
+        if clear_key:
+            conn.execute("DELETE FROM sports_settings WHERE key = ?", (SCHEDULE_API_KEY_SETTING,))
+        elif api_key is not None and str(api_key).strip():
+            conn.execute(
+                "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+                (SCHEDULE_API_KEY_SETTING, json.dumps(str(api_key).strip())),
+            )
+        conn.commit()
+    return schedule_api_status(db_path)
+
+
+def _schedule_api_required_dates(scan_anchor: datetime, settings: dict) -> list[date]:
+    window_start, window_end, _sports_date = _target_window(scan_anchor, settings)
+    last_instant = window_end - timedelta(microseconds=1)
+    current = window_start.date()
+    end_date = last_instant.date()
+    values = []
+    while current <= end_date:
+        values.append(current)
+        current += timedelta(days=1)
+    return values
+
+
+def _schedule_api_games_url(base_url: str, *, schedule_date: date, season: int, timezone: str) -> str:
+    parsed = urllib.parse.urlparse(str(base_url or "").strip())
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError("Schedule API URL is invalid.")
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/games"):
+        path = f"{path}/games" if path else "/games"
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    # API-BASEBALL's free endpoint is most reliable with date + timezone.
+    # Fetch the day's baseball slate once and filter MLB (league id 1) locally.
+    # This also leaves the cached response strategy reusable for other baseball
+    # leagues without spending one request per league.
+    query.pop("league", None)
+    query.pop("season", None)
+    query.update(
+        {
+            "date": [schedule_date.isoformat()],
+            "timezone": [timezone],
+        }
+    )
+    encoded = urllib.parse.urlencode(query, doseq=True)
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, path, "", encoded, ""))
+
+
+def _fetch_schedule_api_date(
+    db_path: Path | str,
+    *,
+    base_url: str,
+    api_key: str,
+    schedule_date: date,
+    season: int,
+    timezone: str,
+    fetched_on: str,
+    cancel_check: CancelCheck = None,
+) -> dict:
+    _raise_if_cancelled(cancel_check)
+    url = _schedule_api_games_url(
+        base_url,
+        schedule_date=schedule_date,
+        season=season,
+        timezone=timezone,
+    )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "x-apisports-key": api_key,
+            "Accept": "application/json",
+            "User-Agent": "M3U-Web-Picker/22.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("Schedule API response exceeded the 8 MB safety limit.")
+            remaining_header = response.headers.get("x-ratelimit-requests-remaining")
+    except Exception as exc:
+        raise ValueError(f"Could not fetch MLB schedule for {schedule_date.isoformat()}.") from exc
+    _raise_if_cancelled(cancel_check)
+    try:
+        payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
+    except Exception as exc:
+        raise ValueError("Schedule API returned invalid JSON.") from exc
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    if errors:
+        raise ValueError("Schedule API reported an error.")
+    games = payload.get("response") if isinstance(payload, dict) else None
+    if not isinstance(games, list):
+        raise ValueError("Schedule API did not return a games list.")
+    fetched_at = _now_iso()
+    remaining = None
+    try:
+        if remaining_header is not None:
+            remaining = int(remaining_header)
+    except (TypeError, ValueError):
+        remaining = None
+    with closing(_connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            DELETE FROM sports_schedule_events
+            WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
+            """,
+            (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID, season, schedule_date.isoformat()),
+        )
+        stored = 0
+        for game in games:
+            if not isinstance(game, dict):
+                continue
+            league = game.get("league") or {}
+            if int(league.get("id") or 0) != SCHEDULE_API_REMOTE_LEAGUE_ID:
+                continue
+            event_id = str(game.get("id") or "").strip()
+            scheduled_start = str(game.get("date") or "").strip()
+            if not event_id or not scheduled_start:
+                continue
+            teams = game.get("teams") or {}
+            home = teams.get("home") or {}
+            away = teams.get("away") or {}
+            status = game.get("status") or {}
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO sports_schedule_events
+                    (source, api_event_id, league_id, season, schedule_date,
+                     scheduled_start, status_short, status_long,
+                     home_api_id, home_name, home_logo,
+                     away_api_id, away_name, away_logo,
+                     raw_json, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    SCHEDULE_API_SOURCE,
+                    event_id,
+                    SCHEDULE_API_LEAGUE_ID,
+                    season,
+                    schedule_date.isoformat(),
+                    scheduled_start,
+                    str(status.get("short") or ""),
+                    str(status.get("long") or ""),
+                    str(home.get("id") or ""),
+                    str(home.get("name") or ""),
+                    str(home.get("logo") or ""),
+                    str(away.get("id") or ""),
+                    str(away.get("name") or ""),
+                    str(away.get("logo") or ""),
+                    json.dumps(game, separators=(",", ":")),
+                    fetched_at,
+                ),
+            )
+            stored += 1
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sports_schedule_api_cache
+                (source, league_id, season, schedule_date, fetched_on,
+                 fetched_at, result_count, remaining_quota)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                SCHEDULE_API_SOURCE,
+                SCHEDULE_API_LEAGUE_ID,
+                season,
+                schedule_date.isoformat(),
+                fetched_on,
+                fetched_at,
+                stored,
+                remaining,
+            ),
+        )
+        conn.commit()
+    return {
+        "date": schedule_date.isoformat(),
+        "games": stored,
+        "remaining_quota": remaining,
+        "fetched_at": fetched_at,
+    }
+
+
+def refresh_schedule_api_if_due(
+    db_path: Path | str,
+    scan_anchor: datetime | None = None,
+    *,
+    force: bool = False,
+    cancel_check: CancelCheck = None,
+) -> dict:
+    """Refresh MLB schedule cache at most once per local day unless forced.
+
+    This is intentionally the first step in a Sports Automation cycle. If the
+    optional API is disabled, blank, unavailable, or over quota, the normal
+    provider-derived matching path remains available.
+    """
+    settings = get_settings(db_path)
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
+    state = schedule_api_status(db_path)
+    if not state.get("effective"):
+        return {"enabled": False, "used": False, "fetched": [], "cached": [], "warning": ""}
+    api_key = _schedule_api_secret(db_path)
+    base_url = str(settings.get("schedule_api_url", "") or "").strip()
+    season = local_now.year
+    required_dates = _schedule_api_required_dates(local_now, settings)
+    fetched_on = local_now.date().isoformat()
+    fetched = []
+    cached = []
+    warning = ""
+    for schedule_date in required_dates:
+        _raise_if_cancelled(cancel_check)
+        with closing(_connect(db_path)) as conn:
+            row = conn.execute(
+                """
+                SELECT fetched_on FROM sports_schedule_api_cache
+                WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
+                """,
+                (
+                    SCHEDULE_API_SOURCE,
+                    SCHEDULE_API_LEAGUE_ID,
+                    season,
+                    schedule_date.isoformat(),
+                ),
+            ).fetchone()
+        if not force and row and str(row["fetched_on"] or "") == fetched_on:
+            cached.append(schedule_date.isoformat())
+            continue
+        try:
+            fetched.append(
+                _fetch_schedule_api_date(
+                    db_path,
+                    base_url=base_url,
+                    api_key=api_key,
+                    schedule_date=schedule_date,
+                    season=season,
+                    timezone=str(settings.get("timezone", "America/New_York")),
+                    fetched_on=fetched_on,
+                    cancel_check=cancel_check,
+                )
+            )
+        except ValueError as exc:
+            # A schedule service outage must not take the user's television
+            # lineup down. Cached canonical events are used when available;
+            # otherwise the legacy provider-discovery path remains authoritative.
+            warning = str(exc)
+            cached.append(schedule_date.isoformat())
+    with closing(_connect(db_path)) as conn:
+        available = int(
+            conn.execute(
+                """
+                SELECT COUNT(*) FROM sports_schedule_events
+                WHERE source = ? AND league_id = ? AND season = ?
+                """,
+                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID, season),
+            ).fetchone()[0]
+        )
+    return {
+        "enabled": True,
+        "used": available > 0,
+        "fetched": fetched,
+        "cached": cached,
+        "warning": warning,
+        "canonical_events_available": available,
+    }
+
+
+def schedule_api_events_for_window(
+    db_path: Path | str,
+    scan_anchor: datetime | None = None,
+) -> list[dict]:
+    settings = get_settings(db_path)
+    if not schedule_api_status(db_path).get("effective"):
+        return []
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
+    window_start, window_end, _ = _target_window(local_now, settings)
+    required_dates = [value.isoformat() for value in _schedule_api_required_dates(local_now, settings)]
+    if not required_dates:
+        return []
+    placeholders = ",".join("?" for _ in required_dates)
+    with closing(_connect(db_path)) as conn:
+        # Only dates that belong to the current Sports Automation window can
+        # supply canonical anchors. This prevents an older cached matchup from
+        # hijacking a new provider event when today's optional API fetch is
+        # unavailable. Missing dates simply use the legacy provider-derived path.
+        rows = conn.execute(
+            f"""
+            SELECT e.*
+            FROM sports_schedule_events e
+            INNER JOIN sports_schedule_api_cache c
+              ON c.source = e.source
+             AND c.league_id = e.league_id
+             AND c.season = e.season
+             AND c.schedule_date = e.schedule_date
+            WHERE e.source = ? AND e.league_id = ?
+              AND e.season IN (?, ?)
+              AND e.schedule_date IN ({placeholders})
+            ORDER BY e.scheduled_start
+            """,
+            (
+                SCHEDULE_API_SOURCE,
+                SCHEDULE_API_LEAGUE_ID,
+                local_now.year - 1,
+                local_now.year,
+                *required_dates,
+            ),
+        ).fetchall()
+    output = []
+    for row in rows:
+        try:
+            start = datetime.fromisoformat(str(row["scheduled_start"]))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone)
+            start = start.astimezone(timezone)
+        except Exception:
+            continue
+        # Keep a generous edge around the current window so replay/time-shifted
+        # provider rows can still be assigned to the correct canonical game.
+        if not (window_start - timedelta(hours=18) <= start < window_end + timedelta(hours=18)):
+            continue
+        output.append({
+            "api_source": str(row["source"]),
+            "api_event_id": str(row["api_event_id"]),
+            "league_id": SCHEDULE_API_LEAGUE_ID,
+            "season": int(row["season"]),
+            "scheduled_start": start,
+            "status_short": str(row["status_short"] or ""),
+            "status_long": str(row["status_long"] or ""),
+            "home_api_id": str(row["home_api_id"] or ""),
+            "home_name": str(row["home_name"] or ""),
+            "home_logo": str(row["home_logo"] or ""),
+            "away_api_id": str(row["away_api_id"] or ""),
+            "away_name": str(row["away_name"] or ""),
+            "away_logo": str(row["away_logo"] or ""),
+        })
+    return output
 
 
 def should_run_scheduled(db_path: Path | str, now: datetime | None = None) -> bool:
@@ -2404,6 +2910,15 @@ def _m3u_events(
     return events
 
 
+def _iterparse_xmltv(path: Path, *, events=("end",)):
+    """Iterparse plain or gzip XMLTV without expanding gzip sources to disk."""
+    if path.suffix.lower() == ".gz":
+        with gzip.open(path, "rb") as handle:
+            yield from ElementTree.iterparse(handle, events=events)
+        return
+    yield from ElementTree.iterparse(path, events=events)
+
+
 def _epg_events(
     db_path: Path | str,
     epg_path: Path | None,
@@ -2414,6 +2929,7 @@ def _epg_events(
     cancel_check: CancelCheck = None,
     *,
     team_lookup: dict | None = None,
+    source_priority: int = 0,
 ) -> list[dict]:
     if not epg_path or not epg_path.exists() or epg_path.stat().st_size == 0:
         return []
@@ -2437,7 +2953,7 @@ def _epg_events(
     output: list[dict] = []
     try:
         for index, (_event, element) in enumerate(
-            ElementTree.iterparse(epg_path, events=("end",))
+            _iterparse_xmltv(epg_path, events=("end",))
         ):
             if index % 500 == 0:
                 _raise_if_cancelled(cancel_check)
@@ -2455,6 +2971,21 @@ def _epg_events(
                 continue
 
             channel_id = element.attrib.get("channel", "")
+
+            # Reject unrelated XMLTV channels before parsing timestamps or
+            # programme fields. Public country guides can contain more than a
+            # million programmes, while only a small fraction of their channel
+            # IDs/names exist in the loaded IPTV catalog. This ordering keeps
+            # the fallback scan streaming/linear without doing date parsing for
+            # every unrelated programme in a 500+ MB guide.
+            source_channels = list(by_tvg_id.get(channel_id, []))
+            if not source_channels:
+                for display_name in xml_names.get(channel_id, []):
+                    source_channels.extend(by_name.get(_normalize(display_name), []))
+            if not source_channels:
+                element.clear()
+                continue
+
             raw_start = element.attrib.get("start", "")
             raw_stop = element.attrib.get("stop", "")
             try:
@@ -2476,8 +3007,8 @@ def _epg_events(
                 element.clear()
                 continue
 
-            # Cheap prefilter before resolving channel/title details. The exact
-            # sport-specific duration is applied after classification below.
+            # Cheap time-window prefilter before resolving title/details. The
+            # exact sport-specific duration is applied after classification.
             rough_end = stop or (start + MAX_ESTIMATED_EVENT_DURATION)
             try:
                 rough_start_local = start.astimezone(window_start.tzinfo)
@@ -2489,14 +3020,6 @@ def _epg_events(
                 rough_start_local < window_end
                 and rough_end_local + REPLAY_ATTACH_WINDOW > window_start
             ):
-                element.clear()
-                continue
-
-            source_channels = list(by_tvg_id.get(channel_id, []))
-            if not source_channels:
-                for display_name in xml_names.get(channel_id, []):
-                    source_channels.extend(by_name.get(_normalize(display_name), []))
-            if not source_channels:
                 element.clear()
                 continue
 
@@ -2568,6 +3091,7 @@ def _epg_events(
                     "is_new": "new" in programme_markers,
                     "current_at_scan": current_at_scan,
                     "source_channel_id": channel_id,
+                    "source_priority": int(source_priority),
                 }
                 parsed["is_replay"] = bool(parsed.get("is_replay") or programme_is_replay)
                 output.append(parsed)
@@ -2665,24 +3189,22 @@ def _previous_generated_event_anchors(
 
 
 def _timing_rank(event: dict) -> int:
-    return {"untimed": 0, "embedded": 1, "xmltv": 2}.get(
+    return {"untimed": 0, "embedded": 1, "xmltv": 2, "schedule_api": 3}.get(
         str(event.get("timing_source") or "untimed"), 0
     )
 
 
-def _epg_programme_quality(event: dict) -> tuple[int, int, int, int, int]:
-    """Rank XMLTV programme provenance without widening its time interval.
-
-    Multiple provider channels can describe the same game with slightly
-    different metadata. Prefer the programme that was current when the scan
-    began, then one with a real stop time and explicit live/replay metadata.
-    The selected record remains intact so a 6:30-9:30 programme does not turn
-    into an artificial union of several nearby provider windows.
-    """
+def _epg_programme_quality(event: dict) -> tuple[int, int, int, int, int, int]:
+    """Rank XMLTV metadata while preserving ordered EPG-source precedence."""
     programme = event.get("epg_programme")
     if not isinstance(programme, dict) or not programme:
-        return (0, 0, 0, 0, 0)
+        return (-1_000_000, 0, 0, 0, 0, 0)
+    try:
+        source_priority = int(programme.get("source_priority", 0))
+    except (TypeError, ValueError):
+        source_priority = 0
     return (
+        -source_priority,
         1 if programme.get("current_at_scan") else 0,
         1 if isinstance(programme.get("stop"), datetime) else 0,
         1 if programme.get("is_live") else 0,
@@ -2717,6 +3239,17 @@ def _merge_event_records(existing: dict, incoming: dict) -> dict:
 
     existing_rank = _timing_rank(existing)
     incoming_rank = _timing_rank(incoming)
+    # The schedule API owns canonical game time/identity, while provider XMLTV
+    # remains the richer guide source. Preserve that programme metadata without
+    # allowing a replay/time-shifted XMLTV start to redefine the game.
+    if existing_rank == 3 and incoming_rank == 2 and _epg_programme_quality(incoming) > _epg_programme_quality(existing):
+        programme = incoming.get("epg_programme")
+        if isinstance(programme, dict) and programme:
+            existing["epg_programme"] = dict(programme)
+    elif incoming_rank == 3 and existing_rank == 2 and _epg_programme_quality(existing) > _epg_programme_quality(incoming):
+        programme = existing.get("epg_programme")
+        if isinstance(programme, dict) and programme:
+            incoming["epg_programme"] = dict(programme)
     if incoming_rank > existing_rank:
         _adopt_event_timing(existing, incoming)
     elif incoming_rank == existing_rank and incoming_rank > 0:
@@ -2744,6 +3277,23 @@ def _merge_event_records(existing: dict, incoming: dict) -> dict:
     existing["has_embedded_anchor"] = bool(
         existing.get("has_embedded_anchor") or incoming.get("has_embedded_anchor")
     )
+    existing["has_schedule_api_anchor"] = bool(
+        existing.get("has_schedule_api_anchor") or incoming.get("has_schedule_api_anchor")
+    )
+    # Preserve canonical schedule identity/metadata when an API anchor is
+    # enriched with provider M3U/XMLTV data.  Provider rows may improve guide
+    # text and supply playback sources, but they never redefine the API game.
+    for key in (
+        "api_event_id",
+        "api_source",
+        "api_canonical_start",
+        "api_status_short",
+        "api_status_long",
+        "api_home_id",
+        "api_away_id",
+    ):
+        if not existing.get(key) and incoming.get(key):
+            existing[key] = incoming.get(key)
     source_kinds = set(existing.get("source_kinds", []))
     source_kinds.add(str(existing.get("source_kind") or ""))
     source_kinds.update(incoming.get("source_kinds", []))
@@ -2782,6 +3332,180 @@ def _event_is_live_airing(event: dict) -> bool:
 def _event_is_replay_airing(event: dict) -> bool:
     programme = _event_programme(event)
     return bool(event.get("is_replay") or programme.get("is_replay"))
+
+
+def _schedule_api_candidate_text(event: dict) -> str:
+    programme = _event_programme(event)
+    return " ".join(
+        str(value or "")
+        for value in (
+            event.get("source_text"),
+            programme.get("title"),
+            programme.get("description"),
+        )
+    )
+
+
+def _schedule_api_supporting_content(event: dict) -> bool:
+    """Return True for same-matchup studio/betting/support rows, not the game.
+
+    This is deliberately scoped to API-assisted canonicalization.  These rows
+    remain valid EPG content elsewhere; they simply must not be promoted to the
+    live stream for a canonical game merely because both team names appear.
+    """
+    return bool(SCHEDULE_API_SUPPORT_RE.search(_schedule_api_candidate_text(event)))
+
+
+def _schedule_api_candidate_duration(event: dict) -> timedelta | None:
+    start = event.get("start")
+    if not isinstance(start, datetime):
+        return None
+    programme = _event_programme(event)
+    stop = programme.get("stop")
+    if isinstance(stop, datetime) and stop > start:
+        return stop - start
+    end = event.get("end")
+    if isinstance(end, datetime) and end > start:
+        return end - start
+    estimated = _primary_event_end(event)
+    if isinstance(estimated, datetime) and estimated > start:
+        return estimated - start
+    return None
+
+
+def _schedule_api_live_candidate_score(
+    event: dict,
+    canonical_start: datetime,
+) -> tuple | None:
+    """Rank one provider airing as the live representation of an API game.
+
+    Team identity was already matched by _apply_schedule_api_identity.  Here we
+    choose the provider row closest to the API start, preferring actual live /
+    full-game programming and rejecting studio, wagering, pre/postgame, and
+    similar support content.  Rows several hours away are replay/support
+    candidates, never a second live game.
+    """
+    start = event.get("start")
+    if not isinstance(start, datetime):
+        return None
+    try:
+        delta = abs(start - canonical_start)
+    except Exception:
+        return None
+    if delta > SCHEDULE_API_LIVE_CANDIDATE_WINDOW:
+        return None
+    if _event_is_replay_airing(event) or _schedule_api_supporting_content(event):
+        return None
+
+    programme = _event_programme(event)
+    duration = _schedule_api_candidate_duration(event)
+    duration_seconds = duration.total_seconds() if duration is not None else 0
+    # 90+ minutes is a useful generic signal for a full team-sport broadcast;
+    # exact API-time proximity still dominates for sports with shorter games.
+    full_game = 1 if duration_seconds >= 90 * 60 else 0
+    live = 1 if programme.get("is_live") else 0
+    current = 1 if programme.get("current_at_scan") else 0
+    return (
+        -delta.total_seconds(),
+        live,
+        full_game,
+        current,
+        _timing_rank(event),
+        _epg_programme_quality(event),
+    )
+
+
+def _schedule_api_provider_clusters(events: list[dict]) -> list[dict]:
+    """Merge only provider rows that describe the same airing slot.
+
+    Schedule API anchors are intentionally excluded by the caller.  Keeping the
+    anchor out of the ordinary 10-minute provider merge prevents a 6:00 PM
+    betting show from donating its stream URL to a 6:05 PM canonical game.
+    """
+    timed = sorted(
+        (event for event in events if _event_has_usable_timing(event)),
+        key=lambda event: event["start"],
+    )
+    clusters: list[dict] = []
+    for event in timed:
+        same_slot = False
+        if clusters:
+            left = clusters[-1].get("start")
+            right = event.get("start")
+            if isinstance(left, datetime) and isinstance(right, datetime):
+                try:
+                    # API matching needs a much tighter airing merge than the
+                    # legacy 10-minute tolerance.  A 6:00 betting show and a
+                    # 6:05 first pitch are distinct candidates even though
+                    # they mention the same teams.
+                    same_slot = abs((left - right).total_seconds()) <= 90
+                except Exception:
+                    same_slot = False
+        if same_slot:
+            _merge_event_records(clusters[-1], event)
+        else:
+            clusters.append(event)
+    return clusters
+
+
+def _merge_schedule_api_group(
+    group: list[dict],
+    *,
+    include_replays: bool,
+) -> dict | None:
+    """Collapse every provider airing of one API event into one logical game."""
+    api_anchors = [event for event in group if event.get("has_schedule_api_anchor")]
+    if not api_anchors:
+        return None
+    # An API event ID is unique, so there should be exactly one anchor.  Keep
+    # deterministic behavior if duplicate cache rows ever appear.
+    anchor = min(
+        api_anchors,
+        key=lambda event: event.get("start")
+        or datetime.max.replace(tzinfo=ZoneInfo("UTC")),
+    )
+    canonical_start = anchor.get("start")
+    if not isinstance(canonical_start, datetime):
+        return None
+
+    provider_events = [
+        event
+        for event in group
+        if event is not anchor and not event.get("has_schedule_api_anchor")
+    ]
+    clusters = _schedule_api_provider_clusters(provider_events)
+
+    scored: list[tuple[tuple, dict]] = []
+    for cluster in clusters:
+        score = _schedule_api_live_candidate_score(cluster, canonical_start)
+        if score is not None:
+            scored.append((score, cluster))
+    if scored:
+        # Score's first component is negative absolute start delta, so max()
+        # prefers the closest clean candidate.  The remaining terms break ties
+        # in favor of live/full-game/high-quality provider metadata.
+        _score, live_cluster = max(scored, key=lambda item: item[0])
+        _merge_event_records(anchor, live_cluster)
+
+    if include_replays:
+        replay_cutoff = canonical_start + SCHEDULE_API_LIVE_CANDIDATE_WINDOW
+        for cluster in clusters:
+            if scored and cluster is live_cluster:
+                continue
+            start = cluster.get("start")
+            if not isinstance(start, datetime) or start <= canonical_start:
+                continue
+            # Later same-matchup rows outside the canonical live window are
+            # replays/encores even when the provider incorrectly marks them
+            # <live/>.  Studio/betting support rows are not replay airings.
+            if start >= replay_cutoff and not _schedule_api_supporting_content(cluster):
+                _append_replay_airing(
+                    anchor,
+                    cluster,
+                    inferred=not _event_is_replay_airing(cluster),
+                )
+
+    return anchor
 
 
 def _programme_identity(programme: dict) -> tuple[str, str, str, str]:
@@ -2869,6 +3593,21 @@ def _assign_merged_event_keys(
         ),
     ):
         start = event.get("start")
+        api_event_id = str(event.get("api_event_id") or "").strip()
+        if api_event_id:
+            candidate = f"{str(event.get('api_source') or SCHEDULE_API_SOURCE)}:{api_event_id}"
+            serial = 2
+            unique = candidate
+            while unique in used:
+                unique = f"{candidate}-{serial}"
+                serial += 1
+            event["event_key"] = unique
+            event["event_base_key"] = candidate
+            if isinstance(start, datetime):
+                local_start = start if start.tzinfo is not None else start.replace(tzinfo=event_timezone)
+                event["event_date"] = local_start.astimezone(event_timezone).date().isoformat()
+            used.add(unique)
+            continue
         identity = str(event.get("event_identity") or "sports")
         if isinstance(start, datetime):
             local_start = (
@@ -2922,7 +3661,9 @@ def _cluster_is_history(event: dict) -> bool:
 
 def _bucket_has_schedule_anchor(events: list[dict]) -> bool:
     return any(
-        _event_has_embedded_anchor(event) or _cluster_is_history(event)
+        event.get("has_schedule_api_anchor")
+        or _event_has_embedded_anchor(event)
+        or _cluster_is_history(event)
         for event in events
     )
 
@@ -2939,12 +3680,14 @@ def _canonical_bucket_anchor(events: list[dict]) -> dict:
         events,
         key=lambda event: (
             0
-            if _event_has_embedded_anchor(event) and not _cluster_is_history(event)
+            if event.get("has_schedule_api_anchor")
             else 1
-            if _cluster_is_history(event)
+            if _event_has_embedded_anchor(event) and not _cluster_is_history(event)
             else 2
+            if _cluster_is_history(event)
+            else 3
             if _event_current_at_scan(event)
-            else 3,
+            else 4,
             event.get("start") or datetime.max.replace(tzinfo=ZoneInfo("UTC")),
         ),
     )
@@ -2975,6 +3718,136 @@ def _is_overnight_repeat(anchor: dict, candidate: dict, timezone_name: str) -> b
         and candidate_local.date() > anchor_local.date()
         and candidate_local.hour < LOGICAL_EVENT_DAY_ROLLOVER_HOUR
     )
+
+
+
+def _schedule_api_anchor_events(
+    raw_events: list[dict],
+    settings: dict,
+    team_lookup: dict,
+) -> list[dict]:
+    teams = team_lookup.get("teams", [])
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    anchors = []
+    for item in raw_events:
+        start = item.get("scheduled_start")
+        if not isinstance(start, datetime):
+            continue
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone)
+        start = start.astimezone(timezone)
+        away_id, away_name = _find_team_id(
+            str(item.get("away_name", "")), SCHEDULE_API_LEAGUE_ID, teams, team_lookup
+        )
+        home_id, home_name = _find_team_id(
+            str(item.get("home_name", "")), SCHEDULE_API_LEAGUE_ID, teams, team_lookup
+        )
+        if not away_id or not home_id:
+            continue
+        event_id = str(item.get("api_event_id") or "").strip()
+        if not event_id:
+            continue
+        status_short = str(item.get("status_short") or "").upper()
+        identity = f"{SCHEDULE_API_SOURCE}:{event_id}"
+        anchors.append({
+            "event_key": identity,
+            "event_base_key": identity,
+            "event_identity": identity,
+            "event_date": start.date().isoformat(),
+            "league_id": SCHEDULE_API_LEAGUE_ID,
+            "sport_id": "baseball",
+            "sport_tags": ["baseball"],
+            "display_name": f"{away_name} at {home_name}",
+            "away_team_id": away_id,
+            "away_team_name": away_name,
+            "home_team_id": home_id,
+            "home_team_name": home_name,
+            "start": start,
+            "end": None,
+            "time_is_explicit": True,
+            "timing_source": "schedule_api",
+            "source_kind": "schedule_api",
+            "source_kinds": ["schedule_api"],
+            "source_channels": [],
+            "source_text": f"MLB {away_name} at {home_name}",
+            "has_schedule_api_anchor": True,
+            "api_event_id": event_id,
+            "api_source": str(item.get("api_source") or SCHEDULE_API_SOURCE),
+            "api_status_short": status_short,
+            "api_status_long": str(item.get("status_long") or ""),
+            "api_home_id": str(item.get("home_api_id") or ""),
+            "api_away_id": str(item.get("away_api_id") or ""),
+        })
+    return anchors
+
+
+def _apply_schedule_api_identity(
+    provider_events: list[dict],
+    api_anchors: list[dict],
+) -> list[dict]:
+    """Map provider airings to canonical API game IDs before logical merging."""
+    if not api_anchors:
+        return provider_events
+    by_matchup: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    for anchor in api_anchors:
+        key = (
+            str(anchor.get("league_id") or ""),
+            str(anchor.get("away_team_id") or ""),
+            str(anchor.get("home_team_id") or ""),
+        )
+        by_matchup[key].append(anchor)
+    output = []
+    for event in provider_events:
+        if str(event.get("league_id") or "") != SCHEDULE_API_LEAGUE_ID:
+            output.append(event)
+            continue
+        away_id = str(event.get("away_team_id") or "")
+        home_id = str(event.get("home_team_id") or "")
+        candidates = list(by_matchup.get((SCHEDULE_API_LEAGUE_ID, away_id, home_id), []))
+        if not candidates:
+            # Some providers reverse vs/at semantics. Team identity is still
+            # strong enough to find the canonical game, while the API retains
+            # authoritative home/away roles for feed preference.
+            candidates = list(by_matchup.get((SCHEDULE_API_LEAGUE_ID, home_id, away_id), []))
+        if not candidates:
+            output.append(event)
+            continue
+        event_start = event.get("start")
+        if isinstance(event_start, datetime):
+            ranked = []
+            for anchor in candidates:
+                anchor_start = anchor.get("start")
+                if not isinstance(anchor_start, datetime):
+                    continue
+                delta = abs((event_start - anchor_start).total_seconds())
+                if delta <= SCHEDULE_API_MATCH_WINDOW.total_seconds():
+                    ranked.append((delta, anchor_start, anchor))
+            if not ranked:
+                output.append(event)
+                continue
+            _delta, _start, match = min(ranked, key=lambda item: (item[0], item[1]))
+        elif len(candidates) == 1:
+            match = candidates[0]
+        else:
+            output.append(event)
+            continue
+        if str(match.get("api_status_short") or "").upper() in {"POST", "CANC", "ABD", "SUSP"}:
+            continue
+        event["event_identity"] = match["event_identity"]
+        event["event_base_key"] = match["event_base_key"]
+        event["event_date"] = match["event_date"]
+        event["api_event_id"] = match["api_event_id"]
+        event["api_source"] = match["api_source"]
+        event["api_canonical_start"] = match["start"]
+        event["has_schedule_api_identity"] = True
+        # API-BASEBALL is authoritative for home/away identity.
+        event["away_team_id"] = match["away_team_id"]
+        event["away_team_name"] = match["away_team_name"]
+        event["home_team_id"] = match["home_team_id"]
+        event["home_team_name"] = match["home_team_name"]
+        event["display_name"] = match["display_name"]
+        output.append(event)
+    return output
 
 
 def _merge_events(
@@ -3016,6 +3889,22 @@ def _merge_events(
     for group_index, group in enumerate(grouped.values()):
         if group_index % 100 == 0:
             _raise_if_cancelled(cancel_check)
+
+        # A schedule API event ID is the logical game identity.  Do not split
+        # its provider airings by start time or broadcast day: 6:05 PM live,
+        # 11:00 PM rebroadcast, and an overnight encore are all representations
+        # of the same API game.  The API-specific merger chooses one clean live
+        # provider candidate and optionally attaches later replays as programme
+        # windows on that same generated channel identity.
+        if any(event.get("has_schedule_api_anchor") for event in group):
+            api_event = _merge_schedule_api_group(
+                group,
+                include_replays=include_replays,
+            )
+            if api_event is not None:
+                merged.append(api_event)
+            continue
+
         timed = sorted(
             (event for event in group if _event_has_usable_timing(event)),
             key=lambda event: event["start"],
@@ -3283,7 +4172,19 @@ def _build_feeds(
             "provider_priority": _provider_priority(channel),
         }
         existing = candidates_by_url.get(url)
-        if existing is None or candidate["provider_priority"] < existing["provider_priority"]:
+        if (
+            existing is None
+            or candidate["provider_priority"] < existing["provider_priority"]
+            or (
+                candidate["provider_priority"] == existing["provider_priority"]
+                and candidate.get("team_id")
+                and not existing.get("team_id")
+            )
+        ):
+            # The same stream may first arrive through XMLTV as a generic
+            # event source and later through the fixed team-feed index. Keep
+            # provider precedence, but prefer the team-aware classification at
+            # equal priority so home/away labels are not lost.
             candidates_by_url[url] = candidate
 
     for source in event.get("source_channels", []):
@@ -3879,17 +4780,19 @@ def _filtered_provider_xmltv(
     allowed_channel_ids: set[str],
     *,
     cancel_check: CancelCheck = None,
-) -> tuple[dict[str, str], list[bytes], list[bytes]]:
-    """Stream a large provider XMLTV file and retain only selected channel ids."""
+) -> tuple[dict[str, str], list[bytes], list[bytes], set[str], set[str]]:
+    """Stream a large plain/gzip XMLTV file and retain selected channel ids."""
     root_attributes: dict[str, str] = {}
     channel_fragments: list[bytes] = []
     programme_fragments: list[bytes] = []
+    found_channels: set[str] = set()
+    found_programmes: set[str] = set()
     allowed = {str(value).strip() for value in allowed_channel_ids if str(value).strip()}
 
     document_root = None
     try:
         for index, (event, element) in enumerate(
-            ElementTree.iterparse(base_epg_path, events=("start", "end"))
+            _iterparse_xmltv(base_epg_path, events=("start", "end"))
         ):
             if index % 1000 == 0:
                 _raise_if_cancelled(cancel_check)
@@ -3901,20 +4804,24 @@ def _filtered_provider_xmltv(
             if event != "end":
                 continue
             if tag == "channel":
-                if str(element.attrib.get("id", "")).strip() in allowed:
+                channel_id = str(element.attrib.get("id", "")).strip()
+                if channel_id in allowed:
                     channel_fragments.append(ElementTree.tostring(element, encoding="utf-8"))
+                    found_channels.add(channel_id)
                 element.clear()
                 if document_root is not None:
                     document_root.clear()
             elif tag == "programme":
-                if str(element.attrib.get("channel", "")).strip() in allowed:
+                channel_id = str(element.attrib.get("channel", "")).strip()
+                if channel_id in allowed:
                     programme_fragments.append(ElementTree.tostring(element, encoding="utf-8"))
+                    found_programmes.add(channel_id)
                 element.clear()
                 if document_root is not None:
                     document_root.clear()
-    except (ElementTree.ParseError, OSError):
-        return {}, [], []
-    return root_attributes, channel_fragments, programme_fragments
+    except (ElementTree.ParseError, OSError, EOFError):
+        return {}, [], [], set(), set()
+    return root_attributes, channel_fragments, programme_fragments, found_channels, found_programmes
 
 
 def build_combined_xmltv(
@@ -3922,27 +4829,104 @@ def build_combined_xmltv(
     sports_xmltv: bytes,
     allowed_base_channel_ids: set[str] | None = None,
     *,
+    fallback_epg_paths: Iterable[Path] | None = None,
     cancel_check: CancelCheck = None,
 ) -> bytes:
-    """Build a Jellyfin-sized combined guide from selected manual plus sports ids.
+    """Build a Jellyfin-sized combined guide with ordered fallback XMLTV sources.
 
-    When ``allowed_base_channel_ids`` is supplied, the provider guide is streamed
-    and only exact matching ``channel/@id`` and ``programme/@channel`` elements
-    are retained. This prevents a full provider XMLTV catalog from ballooning a
-    small custom lineup into a 100+ MB combined guide.
+    The first/base EPG has precedence. Later configured/public guides are
+    system-wide fallbacks for every selected manual channel: they can fill
+    uncovered time windows, but never replace a higher-priority programme that
+    overlaps the same channel/time. Gzip inputs are streamed.
     """
     _raise_if_cancelled(cancel_check)
-    if not base_epg_path or not base_epg_path.exists() or base_epg_path.stat().st_size == 0:
-        return sports_xmltv
+    fallback_paths = [Path(path) for path in (fallback_epg_paths or []) if path]
+    valid_base = bool(base_epg_path and base_epg_path.exists() and base_epg_path.stat().st_size)
     if allowed_base_channel_ids is None:
-        return _unfiltered_combined_xmltv(base_epg_path, sports_xmltv)
+        if valid_base:
+            return _unfiltered_combined_xmltv(base_epg_path, sports_xmltv)
+        return sports_xmltv
 
-    attrs, provider_channels, provider_programmes = _filtered_provider_xmltv(
-        base_epg_path,
-        allowed_base_channel_ids,
-        cancel_check=cancel_check,
-    )
-    _raise_if_cancelled(cancel_check)
+    allowed = {str(value).strip() for value in allowed_base_channel_ids if str(value).strip()}
+    attrs: dict[str, str] = {}
+    provider_channels: list[bytes] = []
+    provider_programmes: list[bytes] = []
+    supplied_channels: set[str] = set()
+    supplied_programmes: set[str] = set()
+    # Intervals accepted from higher-priority XMLTV sources. Lower-priority
+    # configured/public guides may fill uncovered windows on the same channel,
+    # but an overlapping entry never displaces provider data.
+    accepted_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+    xmltv_default_tz = ZoneInfo("UTC")
+
+    def programme_window(fragment: bytes) -> tuple[str, datetime | None, datetime | None]:
+        try:
+            element = ElementTree.fromstring(fragment)
+            cid = str(element.attrib.get("channel", "")).strip()
+            start = _parse_xmltv_time(str(element.attrib.get("start", "") or ""), xmltv_default_tz)
+            stop = _parse_xmltv_time(str(element.attrib.get("stop", "") or ""), xmltv_default_tz)
+            if start and stop and stop > start:
+                return cid, start, stop
+            return cid, None, None
+        except Exception:
+            return "", None, None
+
+    def overlaps_higher_priority(cid: str, start: datetime, stop: datetime, higher: dict[str, list[tuple[datetime, datetime]]]) -> bool:
+        return any(start < existing_stop and stop > existing_start for existing_start, existing_stop in higher.get(cid, []))
+
+    ordered_sources: list[Path] = []
+    if valid_base:
+        ordered_sources.append(Path(base_epg_path))
+    for candidate in fallback_paths:
+        if candidate.exists() and candidate.stat().st_size:
+            if not any(candidate.resolve() == existing.resolve() for existing in ordered_sources):
+                ordered_sources.append(candidate)
+
+    for source_index, source_path in enumerate(ordered_sources):
+        _raise_if_cancelled(cancel_check)
+        # Parse all selected IDs from every fallback source. The compact public
+        # caches make this cheap, and it allows a public guide to fill an evening
+        # hole even when the provider already supplied morning listings.
+        source_attrs, channels, programmes, channel_ids, _programme_ids = _filtered_provider_xmltv(
+            source_path,
+            allowed,
+            cancel_check=cancel_check,
+        )
+        if source_index == 0 and source_attrs:
+            attrs = source_attrs
+        for fragment in channels:
+            try:
+                element = ElementTree.fromstring(fragment)
+                cid = str(element.attrib.get("id", "")).strip()
+            except Exception:
+                cid = ""
+            if cid and cid not in supplied_channels:
+                provider_channels.append(fragment)
+                supplied_channels.add(cid)
+        supplied_channels.update(channel_ids)
+
+        # Snapshot only the prior sources for overlap checks so odd overlaps
+        # inside one provider's own guide are preserved exactly as supplied.
+        higher_priority_intervals = {cid: list(values) for cid, values in accepted_intervals.items()}
+        source_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
+        for fragment in programmes:
+            cid, start, stop = programme_window(fragment)
+            if not cid:
+                continue
+            if source_index > 0:
+                if start and stop:
+                    if overlaps_higher_priority(cid, start, stop, higher_priority_intervals):
+                        continue
+                elif cid in supplied_programmes:
+                    # Untimed fallback rows cannot be proven to fill a gap, so
+                    # keep the higher-priority guide when one already exists.
+                    continue
+            provider_programmes.append(fragment)
+            supplied_programmes.add(cid)
+            if start and stop:
+                source_intervals[cid].append((start, stop))
+        for cid, windows in source_intervals.items():
+            accepted_intervals[cid].extend(windows)
 
     overlay_root = ElementTree.fromstring(sports_xmltv)
     sports_channels = [
@@ -3958,7 +4942,7 @@ def build_combined_xmltv(
 
     root = ElementTree.Element("tv", attrs or {
         "generator-info-name": XMLTV_GENERATOR_NAME,
-        "source-info-name": "Filtered provider guide plus generated sports guide",
+        "source-info-name": "Filtered provider/public guide plus generated sports guide",
     })
     shell = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
     if shell.endswith(b" />"):
@@ -3966,15 +4950,11 @@ def build_combined_xmltv(
     else:
         opening = shell.rsplit(b"</tv>", 1)[0]
 
-    fragments = [
-        *provider_channels,
-        *sports_channels,
-        *provider_programmes,
-        *sports_programmes,
-    ]
+    fragments = [*provider_channels, *sports_channels, *provider_programmes, *sports_programmes]
     if not fragments:
         return opening + b"</tv>"
     return opening + b"\n" + b"\n".join(fragments) + b"\n</tv>"
+
 
 def _write_prepared_epg_files(
     generated: list[dict],
@@ -3982,6 +4962,7 @@ def _write_prepared_epg_files(
     *,
     base_epg_path: Path | None,
     base_channel_ids: set[str] | None,
+    fallback_epg_paths: Iterable[Path] | None = None,
     sports_epg_path: Path | None,
     combined_epg_path: Path | None,
     generated_at: datetime,
@@ -4001,6 +4982,7 @@ def _write_prepared_epg_files(
                     base_epg_path,
                     sports_bytes,
                     base_channel_ids,
+                    fallback_epg_paths=fallback_epg_paths,
                     cancel_check=cancel_check,
                 ),
             ),
@@ -4025,6 +5007,7 @@ def rebuild_epg_exports(
     *,
     base_epg_path: Path | None,
     base_channel_ids: set[str] | None = None,
+    fallback_epg_paths: Iterable[Path] | None = None,
     sports_epg_path: Path,
     combined_epg_path: Path,
 ) -> None:
@@ -4037,6 +5020,7 @@ def rebuild_epg_exports(
         settings,
         base_epg_path=base_epg_path,
         base_channel_ids=base_channel_ids,
+        fallback_epg_paths=fallback_epg_paths,
         sports_epg_path=sports_epg_path,
         combined_epg_path=combined_epg_path,
         generated_at=generated_at,
@@ -4064,7 +5048,11 @@ def _xmltv_index(path: Path | None, fallback_tz: ZoneInfo) -> dict:
     try:
         result["size"] = path.stat().st_size
         result["modified"] = datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
-        root = ElementTree.parse(path).getroot()
+        if path.suffix.lower() == ".gz":
+            with gzip.open(path, "rb") as handle:
+                root = ElementTree.parse(handle).getroot()
+        else:
+            root = ElementTree.parse(path).getroot()
         for child in root:
             tag = _local_xml_name(child.tag)
             if tag == "channel":
@@ -4488,11 +5476,13 @@ def scan_channels(
     now: datetime | None = None,
     started_at: str | None = None,
     base_channel_ids: set[str] | None = None,
+    fallback_epg_paths: Iterable[Path] | None = None,
     manual_channel_count: int = 0,
     cancel_check: CancelCheck = None,
 ) -> dict:
     scan_clock = perf_counter()
     scan_timings: dict[str, float] = {}
+    pipeline_trace: list[str] = []
 
     def record_timing(name: str, started: float) -> None:
         scan_timings[name] = round(perf_counter() - started, 3)
@@ -4569,6 +5559,7 @@ def scan_channels(
                     diagnostics,
                     cancel_check,
                     team_lookup=team_lookup,
+                    source_priority=source_index,
                 )
             )
 
@@ -4596,9 +5587,25 @@ def scan_channels(
     )
     record_timing("history_anchors", history_started)
 
+    api_started = perf_counter()
+    schedule_rows = schedule_api_events_for_window(db_path, scan_anchor)
+    api_anchors = _schedule_api_anchor_events(schedule_rows, settings, team_lookup)
+    provider_events = _apply_schedule_api_identity(
+        [*previous_anchors, *m3u_events, *epg_events],
+        api_anchors,
+    )
+    # Cancelled/postponed API events never become generated channels. Active
+    # canonical games are included as authoritative timing anchors, even when
+    # the provider exposes only static team feeds rather than timed event rows.
+    active_api_anchors = [
+        event for event in api_anchors
+        if str(event.get("api_status_short") or "").upper() not in {"POST", "CANC", "ABD", "SUSP"}
+    ]
+    record_timing("schedule_mapping", api_started)
+
     merge_started = perf_counter()
     events = _merge_events(
-        [*previous_anchors, *m3u_events, *epg_events],
+        [*active_api_anchors, *provider_events],
         cancel_check,
         settings,
     )
@@ -4644,6 +5651,7 @@ def scan_channels(
             event["expanded_feeds"] = expanded_feeds
         selected_events.append(event)
     record_timing("rule_matching", rules_started)
+    pipeline_trace.append("sports_scan_match")
 
     classification_ids = {_classification_id(event) for event in selected_events}
     classification_blocks = _block_index_map(classification_ids)
@@ -4724,6 +5732,7 @@ def scan_channels(
             item["raw"] = _generated_raw(channel, item)
             generated.append(item)
     record_timing("feed_selection", feed_started)
+    pipeline_trace.append("channel_build")
 
     generated_at_dt = scan_anchor.astimezone()
     generated_at = generated_at_dt.isoformat(timespec="seconds")
@@ -4733,6 +5742,7 @@ def scan_channels(
         settings,
         base_epg_path=epg_path,
         base_channel_ids=base_channel_ids,
+        fallback_epg_paths=fallback_epg_paths,
         sports_epg_path=sports_epg_path,
         combined_epg_path=combined_epg_path,
         generated_at=generated_at_dt,
@@ -4812,6 +5822,7 @@ def scan_channels(
                 if backup_path:
                     backup_path.unlink(missing_ok=True)
     record_timing("persist", persist_started)
+    pipeline_trace.append("epg_publish")
     scan_timings["total"] = round(perf_counter() - scan_clock, 3)
 
     malformed_count = _malformed_count(diagnostics)
@@ -4835,7 +5846,7 @@ def scan_channels(
           f"{team_lookup.get('cache_misses', 0)} misses"
         + f"; provider_channels={len(channels)}; epg_events={len(epg_events)}; "
           f"m3u_events={len(m3u_events)}; history_anchors={len(previous_anchors)}; "
-          f"logical_events={len(events)}; "
+          f"schedule_api_events={len(api_anchors)}; logical_events={len(events)}; "
           f"selected_events={len(selected_events)}; generated_channels={len(generated)}"
     )
     _record_scan(
@@ -4862,11 +5873,13 @@ def scan_channels(
         "guide_channels": len(generated),
         "everything_mode": everything_mode,
         "timings": scan_timings,
+        "pipeline_trace": pipeline_trace,
         "scan_metrics": {
             "provider_channels": len(channels),
             "epg_events": len(epg_events),
             "m3u_events": len(m3u_events),
             "history_anchors": len(previous_anchors),
+            "schedule_api_events": len(api_anchors),
             "logical_events": len(events),
             "selected_events": len(selected_events),
             "generated_channels": len(generated),
@@ -5009,4 +6022,5 @@ def status_payload(db_path: Path | str, now: datetime | None = None) -> dict:
         "next_update": next_run.isoformat(),
         "disabled_cache": cache,
         "numbering": numbering_plan(settings),
+        "schedule_api": schedule_api_status(db_path),
     }

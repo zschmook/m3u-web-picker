@@ -1,4 +1,4 @@
-# Sports v21.10-debug9 QA checklist
+# Sports v22.1-rc2 QA checklist
 
 ## Startup and layout
 
@@ -36,23 +36,20 @@
 
 ## Scan behavior
 
-1. Turn Auto update off while Sports Automation remains enabled. **Update now** must still work.
-2. Select **Once daily**, choose a refresh time a few minutes ahead, and confirm the displayed next-update time changes immediately and the scan runs once at that minute.
-3. Select **Every X hours**, set `2`, and confirm the displayed next-update time is two hours after the last completed attempt.
-4. Run **Update now** and confirm the two-hour interval resets from that completion time.
-5. Simulate a failed interval scan and confirm the next attempt waits the full configured interval instead of retrying every scheduler poll.
-6. Change the interval and confirm the next-update display recalculates without restarting the app.
-2. Click Update now and confirm the button becomes disabled while a persistent status card cycles `.` → `..` → `...` and shows stage plus elapsed time.
-3. Run twice with different source data and confirm sports rows are replaced rather than accumulated.
-4. Simulate a failed provider refresh and confirm the previous generated lineup remains.
-5. Perform a successful scan with zero matches and confirm stale sports output is cleared.
-6. Add an impossible M3U time such as `99:99:00`; valid events must continue processing.
-7. Repeat with an invalid XMLTV timestamp; later valid programmes must still process.
-8. Close the browser tab during a long scan, reopen the UI, and confirm the running status returns from the backend.
-9. Wait for completion and confirm a persistent success result shows channels, events, completion time, and duration.
-10. Start a scan and attempt another manual update; confirm the duplicate request reports the already-running scan and clears automatically when finished.
-11. While a manual scan is running, confirm **Update now** becomes **Cancel scan**. Click it and confirm the status changes to cancellation requested, the incomplete replacement is discarded, and the previously published M3U/XMLTV remain unchanged.
-12. Restart the app during a scan and confirm the stale running state becomes a visible interrupted-scan failure.
+1. Confirm the only user-facing automatic clock is **Master Update** below the M3U URL and that a fresh state defaults to 03:00 local time.
+2. Change the Master Update time a few minutes ahead and confirm the displayed next-update time changes immediately and the complete pipeline runs once at that minute.
+3. Run **Update Now** and confirm it executes immediately without moving the next configured daily update.
+4. Confirm the button is disabled/changes state while a persistent status card shows stage and elapsed time.
+5. Run twice with different source data and confirm sports rows are replaced rather than accumulated.
+6. Simulate a failed provider refresh and confirm the previous generated lineup remains.
+7. Perform a successful scan with zero matches and confirm stale sports output is cleared.
+8. Add an impossible M3U time such as `99:99:00`; valid events must continue processing.
+9. Repeat with an invalid XMLTV timestamp; later valid programmes must still process.
+10. Close the browser tab during a long update, reopen the UI, and confirm the running status returns from the backend.
+11. Wait for completion and confirm a persistent success result shows channels, events, completion time, and duration.
+12. Start an update and attempt another manual update; confirm the duplicate request reports the already-running scan and clears automatically when finished.
+13. While a manual update is running, confirm **Update Now** becomes a cancel action. Cancel it and confirm the incomplete replacement is discarded and the previously published M3U/XMLTV remain unchanged.
+14. Restart the app during an update and confirm the stale running state becomes a visible interrupted-scan failure.
 
 ## SD filtering
 
@@ -71,13 +68,22 @@
 ## XMLTV and Jellyfin
 
 1. Configure Jellyfin with `/playlist/custom.m3u`.
-2. Add `/epg/combined.xml` as the XMLTV guide source, or add `/epg/sports.xml` when the provider guide is configured separately.
+2. Add only `/epg/combined.xml` as the XMLTV guide source. The sports-only XMLTV remains an internal diagnostic output and is not a normal Jellyfin guide source.
 3. Confirm every generated M3U `tvg-id` has a matching XMLTV `<channel>` and at least one `<programme>`.
 4. Confirm generated XMLTV `<channel>` elements appear before the first `<programme>` in `combined.xml`.
 5. Open `/api/sports/guide-check` and confirm `ok` is true after a successful populated scan.
 6. Add a provider XMLTV containing many unrelated channels. Confirm `combined.xml` includes only exact `tvg-id` matches for manual channels in `custom.m3u`, plus generated sports channels and programmes.
 7. Confirm `combined.xml` remains reasonably sized instead of copying the provider's full XMLTV catalog.
 8. Run another update with different events occupying the same numbered slots and confirm Jellyfin keeps guide mapping.
+
+
+## Public EPG system-wide fallback
+
+1. Select at least one ordinary non-sports manual channel (for example a local NBC affiliate) and enable the appropriate public country guide.
+2. Confirm `combined.xml` can use the public guide when the provider/configured guide has no programme data for that selected channel.
+3. Give the provider guide one programme window and the public guide a later non-overlapping window for the same channel; confirm both appear in `combined.xml`.
+4. Give the public guide a programme that overlaps the provider programme; confirm the provider programme wins and the overlapping public programme is omitted.
+5. Confirm unselected public-guide channels are still filtered out and the full country XMLTV is never copied into `combined.xml`.
 
 ## Disabled recovery cache
 
@@ -92,14 +98,14 @@
 1. Confirm the EPG Manager appears between Source Manager and Channel Manager.
 2. Add a named XMLTV URL and confirm the UI displays only a friendly Source badge, never the stored URL or credentials.
 3. Confirm the served named EPG URL downloads valid XMLTV.
-4. Confirm `/epg/combined.xml` and `/epg/sports.xml` rebuild automatically when a stale empty file exists but generated sports rows are present.
+4. Confirm `/epg/combined.xml` rebuilds automatically when a stale empty file exists but generated sports rows are present; the internal sports-only diagnostic guide may also rebuild.
 5. Run `docker compose -f docker-compose.sports-debug.yml up -d --build --force-recreate` twice and confirm source configuration, sports rules, generated rows, and guide exports survive in `./debug-data`.
 
 
 ## v21.7 EPG Manager layout
 
 1. Confirm the EPG Manager uses one unified table with Name, Type, Served URL, Status, and Action columns.
-2. Confirm the add-source inputs line up exactly with the same columns used by Combined, Sports, and external source rows.
+2. Confirm the add-source inputs line up exactly with the same columns used by Combined and external source rows; no Sports-only built-in row is advertised.
 3. Confirm long names, source labels, URLs, and status text truncate without shifting any column.
 4. Confirm Combined and Sports rows expose Copy buttons and show generated-file timestamp/size when available.
 5. Confirm external rows expose only the app-served URL and friendly source badge; the original provider URL and credentials never reappear.
@@ -177,8 +183,8 @@
 3. Confirm the provider table headers read Priority, Name, Type, Live Channels, Last Updated / Status, and Action.
 4. Confirm primary URL and file controls are disabled after a primary is loaded.
 5. Remove the primary and confirm primary controls become available again.
-6. Add a fallback and confirm it saves quickly with `Ready — loads during Sports Update` and a zero count before the first sports scan.
-7. Run Sports Update and confirm the fallback changes from deferred to a live-channel count only.
+6. Add a fallback and confirm it saves quickly with `Ready — loads during Master Update` and a zero count before the first sports scan.
+7. Run Master Update and confirm the fallback changes from deferred to a live-channel count only.
 8. Confirm a fallback response above the safety limit fails cleanly without restarting the container or replacing its previous cache.
 9. Confirm removing a primary preserves configured fallbacks as inactive rows until a replacement primary is added.
 
@@ -192,7 +198,7 @@
 5. Enable replays and scan the same data. Confirm the same channel block remains and the later airings appear as XMLTV programmes labeled `Replay:` with `<previously-shown/>`.
 6. Confirm no extra 10-channel event blocks are allocated for those replay windows.
 7. Provide two same-matchup programmes both marked `<live/>`. Confirm they remain distinct logical events so a true doubleheader is not collapsed.
-8. Run a follow-up interval scan after the canonical live game ends but before an overnight replay. Confirm recent canonical programme context prevents the replay from resurrecting duplicate channels when replays are disabled.
+8. Run a follow-up Master Update after the canonical live game ends but before an overnight replay. Confirm recent canonical programme context prevents the replay from resurrecting duplicate channels when replays are disabled.
 9. Confirm every generated `— Event window` programme lasts no more than 90 minutes and ends before the next retained replay begins.
 10. Restart and rebuild XMLTV from SQLite. Confirm attached replay airings remain on the original generated channel IDs.
 
@@ -211,7 +217,7 @@
 ## v21.10-debug10 migrated-replay cleanup checks
 
 1. Upgrade from debug8/debug9 with the existing `debug-data` directory that already contains `1000–1002`, `1010–1012`, and `1020–1022` for one matchup.
-2. Keep **Replays and encores** disabled and run Sports Update. Confirm the next successful scan replaces those rows with only one channel block.
+2. Keep **Replays and encores** disabled and run Master Update. Confirm the next successful scan replaces those rows with only one channel block.
 3. Confirm the canonical block uses the evening game start, while the 12:30 AM and 6:00 AM provider airings do not allocate channels.
 4. Enable replays and rescan. Confirm later XMLTV airings appear as `Replay:` programmes on the original channel IDs rather than new channel blocks.
 5. Confirm a same-matchup game on the following evening remains a separate logical event.
@@ -244,8 +250,71 @@
 5. Confirm overlapping team/league rules produce one logical game block.
 6. Verify replay behavior both disabled and enabled, including cross-midnight repeats.
 7. Confirm manual/static channels remain intact when generated sports channels reuse the same provider stream.
-8. Verify once-daily and every-X-hours scheduling, next-run display, and manual Update now reset behavior.
+8. Verify the single daily Master Update defaults to 03:00 local, can be changed, shows the next run, and manual Update Now does not shift the scheduled time.
 9. Verify the 90-minute postgame grace period and narrow placeholder filtering.
 10. Validate `playlist/custom.m3u`, `epg/sports.xml`, and `epg/combined.xml` directly before evaluating Jellyfin cache behavior.
 11. Review `Sports scan timings:` and compare with the current 4m30s–4m50s baseline.
 12. Confirm the production Compose stack defaults to host port 9999 and the sports debug stack remains isolated on host port 10000.
+
+
+## v22.1 schedule API and ordered-cycle checks
+
+1. Start with fresh `debug-data`; load the primary provider and enable Sports Automation.
+2. Leave **Use schedule API** off. Run Update now and confirm the legacy provider-derived scan still completes normally.
+3. Enable the API switch with blank URL/key and confirm the UI says provider-derived matching is active.
+4. Enter `https://v1.baseball.api-sports.io` and a valid API-SPORTS key, save, and confirm the key field clears and reports **API key saved**.
+5. Run Update Now. Watch the stages progress in order from schedule cache through provider refresh, guide refresh, matching/build, publish, and validation. Confirm `cycle_check.order_ok` is true in the result/logging path.
+6. Confirm the first run stores MLB games for the current event-window dates and shows the last fetch/game count in the API status line.
+7. Run Update now again on the same local day. Confirm it reuses the cached schedule instead of issuing another request for already-covered dates.
+8. With an MLB team + MLB league rule, confirm both resolve through one canonical API game ID and do not create duplicate channel blocks.
+9. Enable replays and confirm later provider airings attach to the canonical game channels; disable replays and confirm those later airings do not allocate channels.
+10. Temporarily use an invalid API URL or key after a cache exists; confirm the scan warns but uses cache/provider fallback and keeps the working lineup.
+11. Disable the API switch and confirm MLB returns to the legacy provider-derived matching path.
+12. Confirm Provider Sources has separate **Last Updated** and **Status** columns and Xtream expiration remains on one Status line.
+13. Verify no independent sports/provider/EPG timer remains visible; the single Master Update owns the whole dependency chain.
+
+## v22.1-debug2 Master Update / public EPG checks
+
+1. Start fresh and confirm **Master Update** appears directly below the M3U copy URL, is enabled, and defaults to **03:00** local time.
+2. Change the daily time, reload the page, and confirm the new time persists and the next-run display updates.
+3. Run **Update Now** and confirm the next scheduled daily run remains at the configured clock time rather than being reset from the manual run.
+4. Expand **Free Public EPG — By Country** under EPG Manager. Confirm United States is checked by default and all other countries are unchecked.
+5. Check/uncheck a country and confirm it persists immediately without a Save button. Unchecked countries must not be downloaded.
+6. Confirm the built-in public URL for US resolves internally to `https://iptv-epg.org/files/epg-us.xml.gz`; no public-guide URL field is shown in the UI.
+7. After a successful Master Update, confirm the cached public guide remains `.xml.gz` on disk and no full expanded `epg-us.xml` is created in the runtime data directory.
+8. Run Master Update again on the same local day and confirm the fresh public EPG cache is reused instead of redownloaded.
+9. With a selected channel lacking provider programme data but present in the public guide, confirm public XMLTV fills the hole in `combined.xml`.
+10. When both provider and public guides contain programming for the same selected channel, confirm provider programme data wins and the public copy does not duplicate/overwrite it.
+11. Confirm `combined.xml` contains only relevant selected manual/generated sports records, not the complete public-country guide.
+12. Confirm the cycle trace is exactly `schedule_api → provider_refresh → epg_refresh → sports_scan_match → channel_build → epg_publish → m3u_publish`.
+13. Turn the schedule API off or leave URL/key incomplete and confirm the same Master Update completes through legacy provider-derived sports matching.
+14. Confirm filler titles `No Event Today`, `No Events Today`, `No Game Today`, and `Signing Off` are ignored while legitimate podcast/studio titles remain eligible.
+
+
+## v22.1-debug3 Schedule API UI checks
+
+- Toggle Use schedule API on, reload the page, and verify it remains on. Toggle it off, reload, and verify it remains off.
+- Verify API URL, API key, and Save API are disabled while the schedule API switch is off and become usable when it is on.
+- Save API-BASEBALL credentials and verify a row appears under Loaded schedule APIs with API, Scope, URL, Status, Last Updated, and Remove.
+- Disable the API without removing it and verify the row remains with Disabled status while provider-derived matching is active.
+- Remove the API and verify the row disappears and no API secret is returned to the browser.
+- Expand Free Public EPG — By Country in dark mode and verify the section title, disclosure marker, and all country names are readable.
+
+
+## v22.1-debug4 Master Update progress
+
+1. Click **Update Now** and verify a spinner plus elapsed timer appears immediately beside the Master Update controls and increments once per second.
+2. Let the update finish and verify the spinner disappears and the status row includes **Took <duration>**.
+3. Reload the page and verify the last duration remains visible.
+4. During a scheduled daily run, verify the same progress indicator shows **Automatic update** with an elapsed timer.
+5. Confirm manual Update Now still does not move the next scheduled daily run.
+
+## v22.1-debug5 API canonical airing validation
+
+- [x] API event ID is one logical game regardless of later provider airing times.
+- [x] 6:00 PM Phillies Gameday/wagering support row does not become a game feed.
+- [x] 6:05 PM Phillies live programme is selected for API event 179771.
+- [x] 11:00 PM Phillies rebroadcast does not allocate another channel block with replays off.
+- [x] Replays on attaches the 11:00 PM airing to the same API event/channel IDs with replay semantics.
+- [x] Earlier Dodgers Squeeze Play content does not become the 8:10 PM Dodgers/Diamondbacks game.
+- [x] Real three-file MLB fixture resolves 15 API games → 15 logical events → 17 feeds for MLB + Phillies.

@@ -166,11 +166,8 @@ def register_routes(app):
         return jsonify(
             sources=core.epg_sources_payload(),
             builtins=core.epg_builtin_payload(),
-            schedule={
-                "after_m3u_minutes": core.EPG_REFRESH_OFFSET_MINUTES,
-                "hour": (core.SCHEDULE_HOUR + (core.SCHEDULE_MINUTE + core.EPG_REFRESH_OFFSET_MINUTES) // 60) % 24,
-                "minute": (core.SCHEDULE_MINUTE + core.EPG_REFRESH_OFFSET_MINUTES) % 60,
-            },
+            public_epg=core.public_epg_payload(),
+            master_update=core.master_update_payload(),
         )
 
     @app.post("/api/epg")
@@ -204,6 +201,65 @@ def register_routes(app):
             print(f"Could not rebuild combined guide after EPG deletion: {exc}")
         return jsonify(deleted=True, sources=core.epg_sources_payload())
 
+    @app.get("/api/master-update")
+    def api_master_update():
+        return jsonify(master_update=core.master_update_payload())
+
+    @app.patch("/api/master-update")
+    def api_update_master_update():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            payload = core.update_master_settings(
+                enabled=data.get("enabled") if "enabled" in data else None,
+                refresh_time=data.get("time") if "time" in data else None,
+            )
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not save master update settings: {exc}")
+            return jsonify(error="Could not save master update settings."), 500
+        return jsonify(master_update=payload)
+
+    @app.post("/api/master-update/run")
+    def api_run_master_update():
+        try:
+            result = core.run_master_update(trigger="manual")
+        except core.SportsScanError as exc:
+            return jsonify(error=str(exc), master_update=core.master_update_payload()), 409
+        except Exception as exc:
+            print(f"Unexpected master update error: {exc}")
+            return jsonify(
+                error="Master update failed. Existing outputs were kept.",
+                master_update=core.master_update_payload(),
+            ), 500
+        return jsonify(
+            result=result,
+            master_update=core.master_update_payload(),
+            sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH)),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
+        )
+
+    @app.get("/api/public-epg")
+    def api_public_epg():
+        return jsonify(public_epg=core.public_epg_payload())
+
+    @app.patch("/api/public-epg")
+    def api_update_public_epg():
+        data = request.get_json(force=True, silent=True) or {}
+        enabled_codes = data.get("enabled_codes")
+        if not isinstance(enabled_codes, list):
+            return jsonify(error="enabled_codes must be a list of country codes."), 400
+        try:
+            payload = core.update_public_epg_countries(enabled_codes)
+            core.ensure_epg_exports_current(force=True)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not save public EPG settings: {exc}")
+            return jsonify(error="Could not save public EPG settings."), 500
+        return jsonify(public_epg=payload)
+
     @app.get("/api/status")
     def api_status():
         generated_count = len(sports.generated_rows(core.DB_PATH))
@@ -222,7 +278,8 @@ def register_routes(app):
             source_url_configured=bool(core.last_source_url),
             source_mode=core.source_mode,
             last_refresh=core.last_refresh,
-            schedule={"hour": core.SCHEDULE_HOUR, "minute": core.SCHEDULE_MINUTE},
+            master_update=core.master_update_payload(),
+            public_epg=core.public_epg_payload(),
             epg_sources=core.epg_sources_payload(),
             data_dir=str(core.DATA_DIR),
         )
@@ -286,6 +343,7 @@ def register_routes(app):
                     core.DB_PATH,
                     base_epg_path=core.active_base_epg_path(),
                     base_channel_ids=core.selected_xmltv_ids(),
+                    fallback_epg_paths=core.configured_epg_fallback_paths(core.active_base_epg_path()),
                     sports_epg_path=core.SPORTS_EPG_PATH,
                     combined_epg_path=core.COMBINED_EPG_PATH,
                 )
@@ -298,6 +356,28 @@ def register_routes(app):
         payload = sports.status_payload(core.DB_PATH)
         payload["settings"] = settings
         return jsonify(core.enrich_sports_status(payload))
+
+    @app.get("/api/sports/schedule-api")
+    def api_sports_schedule_api():
+        return jsonify(schedule_api=sports.schedule_api_status(core.DB_PATH))
+
+    @app.patch("/api/sports/schedule-api")
+    def api_update_sports_schedule_api():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            payload = sports.update_schedule_api_config(
+                core.DB_PATH,
+                enabled=data.get("enabled") if "enabled" in data else None,
+                url=data.get("url") if "url" in data else None,
+                api_key=data.get("api_key") if "api_key" in data else None,
+                clear_key=bool(data.get("clear_key", False)),
+            )
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not save schedule API settings: {exc}")
+            return jsonify(error="Could not save schedule API settings."), 500
+        return jsonify(schedule_api=payload)
 
     @app.get("/api/sports/catalog")
     def api_sports_catalog():
@@ -342,7 +422,7 @@ def register_routes(app):
     @app.post("/api/sports/scan")
     def api_sports_scan():
         try:
-            result = core.run_sports_scan(trigger="manual", refresh_source=True)
+            result = core.run_master_update(trigger="manual")
         except core.SportsScanError as exc:
             return jsonify(error=str(exc), sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH))), 409
         except Exception as exc:

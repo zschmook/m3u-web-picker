@@ -275,6 +275,24 @@ http://provider.test/news.ts
             role="primary",
         )
 
+    def test_schedule_api_settings_route_never_returns_secret(self):
+        response = self.client.patch(
+            "/api/sports/schedule-api",
+            json={
+                "enabled": True,
+                "url": "https://v1.baseball.api-sports.io",
+                "api_key": "secret-key",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()["schedule_api"]
+        self.assertTrue(payload["effective"])
+        self.assertTrue(payload["key_configured"])
+        self.assertNotIn("api_key", payload)
+        status = self.client.get("/api/sports/settings").get_json()
+        self.assertTrue(status["schedule_api"]["key_configured"])
+        self.assertNotIn("api_key", status["schedule_api"])
+
     def test_master_switch_rewrites_served_outputs_and_restores_cached_rows(self):
         fixture = """#EXTM3U
 #EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)

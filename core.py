@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -36,6 +37,8 @@ EPG_DIR = DATA_DIR / "epg"
 EPG_DIR.mkdir(parents=True, exist_ok=True)
 PROVIDER_DIR = DATA_DIR / "providers"
 PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
+PUBLIC_EPG_DIR = DATA_DIR / "public_epg"
+PUBLIC_EPG_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "m3u_picker.db"
 CONFIG_PATH = DATA_DIR / "config.json"
@@ -51,7 +54,6 @@ DEV_PORT = int(os.environ.get("M3U_DEV_PORT", "9998"))
 
 SCHEDULE_HOUR = int(os.environ.get("MASTER_REFRESH_HOUR", "3"))
 SCHEDULE_MINUTE = int(os.environ.get("MASTER_REFRESH_MINUTE", "0"))
-EPG_REFRESH_OFFSET_MINUTES = int(os.environ.get("EPG_REFRESH_OFFSET_MINUTES", "15"))
 MAX_PROVIDER_CHANNELS = int(os.environ.get("M3U_MAX_PROVIDER_CHANNELS", "50000"))
 PROVIDER_CHANNEL_WARNING = int(os.environ.get("M3U_PROVIDER_CHANNEL_WARNING", "20000"))
 MAX_PROVIDER_PLAYLIST_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_PLAYLIST_BYTES", str(96 * 1024 * 1024)))
@@ -64,8 +66,57 @@ last_refresh: str | None = None
 source_mode = ""
 epg_sources: list[dict] = []
 provider_sources: list[dict] = []
+
+# One application-wide daily update clock.  It intentionally lives outside
+# Sports Automation so provider/EPG refreshes still happen when sports is off.
+master_auto_update = True
+master_refresh_time = "03:00"
+last_master_update: str | None = None
+last_master_duration_seconds: float | None = None
+last_master_trigger: str | None = None
+master_update_runtime = {"running": False, "started_at": None, "trigger": None, "started_monotonic": None}
+
+# IPTV-EPG country feeds are optional system-wide fallback/enrichment sources.
+# They apply to every selected manual channel in Combined XMLTV and are also
+# available to Sports Automation for corroboration. Fresh installs enable the
+# U.S. guide only; all URLs are owned internally and use the provider's gzip
+# form to avoid downloading hundreds of megabytes of XML.
+PUBLIC_EPG_REGISTRY = [
+    ("AL", "Albania"), ("AR", "Argentina"), ("AM", "Armenia"),
+    ("AU", "Australia"), ("AT", "Austria"), ("BS", "Bahamas"),
+    ("BY", "Belarus"), ("BE", "Belgium"), ("BO", "Bolivia"),
+    ("BA", "Bosnia & Herzegovina"), ("BR", "Brazil"), ("BG", "Bulgaria"),
+    ("CA", "Canada"), ("CL", "Chile"), ("CO", "Colombia"),
+    ("CR", "Costa Rica"), ("HR", "Croatia"), ("CW", "Curacao"),
+    ("CZ", "Czech Republic"), ("DK", "Denmark"), ("DO", "Dominican Republic"),
+    ("EG", "Egypt"), ("SV", "El Salvador"), ("FI", "Finland"),
+    ("FR", "France"), ("GE", "Georgia"), ("DE", "Germany"),
+    ("GH", "Ghana"), ("GR", "Greece"), ("GT", "Guatemala"),
+    ("HN", "Honduras"), ("HK", "Hong Kong"), ("HU", "Hungary"),
+    ("IS", "Iceland"), ("IN", "India"), ("ID", "Indonesia"),
+    ("IL", "Israel"), ("IT", "Italy"), ("JM", "Jamaica"),
+    ("LV", "Latvia"), ("LB", "Lebanon"), ("LT", "Lithuania"),
+    ("LU", "Luxembourg"), ("MK", "Macedonia"), ("MY", "Malaysia"),
+    ("MT", "Malta"), ("MX", "Mexico"), ("ME", "Montenegro"),
+    ("NL", "Netherlands"), ("NZ", "New Zealand"), ("NI", "Nicaragua"),
+    ("NG", "Nigeria"), ("NO", "Norway"), ("PA", "Panama"),
+    ("PY", "Paraguay"), ("PE", "Peru"), ("PH", "Philippines"),
+    ("PL", "Poland"), ("PT", "Portugal"), ("RO", "Romania"),
+    ("RU", "Russia"), ("RS", "Serbia"), ("SG", "Singapore"),
+    ("SI", "Slovenia"), ("ZA", "South Africa"), ("KR", "South Korea"),
+    ("ES", "Spain"), ("SE", "Sweden"), ("CH", "Switzerland"),
+    ("TW", "Taiwan"), ("TH", "Thailand"), ("TT", "Trinidad & Tobago"),
+    ("TR", "Turkey"), ("UG", "Uganda"), ("UA", "Ukraine"),
+    ("AE", "United Arab Emirates"), ("GB", "United Kingdom"),
+    ("US", "United States"), ("UY", "Uruguay"), ("VE", "Venezuela"),
+    ("ZW", "Zimbabwe"),
+]
+PUBLIC_EPG_CODES = {code for code, _name in PUBLIC_EPG_REGISTRY}
+public_epg_enabled_codes: set[str] = {"US"}
+public_epg_state: dict[str, dict] = {}
+MAX_PUBLIC_EPG_COMPRESSED_BYTES = int(os.environ.get("M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES", str(256 * 1024 * 1024)))
+
 scheduler_started = False
-last_epg_refresh_date = ""
 
 state_lock = threading.RLock()
 scan_lock = threading.Lock()
@@ -688,6 +739,65 @@ def load_config() -> dict:
         return {}
 
 
+def _canonical_master_time(value) -> str:
+    text = str(value or "").strip()
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if not match:
+        raise ValueError("Daily update time must be a valid time such as 03:00.")
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("Daily update time must be a valid time such as 03:00.")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def master_timezone_name() -> str:
+    # Reuse the Sports Automation timezone as the application's local clock.
+    # It already exists on fresh installs and remains meaningful when sports is
+    # temporarily disabled.
+    try:
+        return str(sports.get_settings(DB_PATH).get("timezone") or "America/New_York")
+    except Exception:
+        return "America/New_York"
+
+
+def master_update_payload(now: datetime | None = None) -> dict:
+    timezone = ZoneInfo(master_timezone_name())
+    local_now = (now or datetime.now().astimezone()).astimezone(timezone)
+    hour, minute = [int(part) for part in master_refresh_time.split(":", 1)]
+    target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= local_now:
+        target += timedelta(days=1)
+    elapsed_seconds = None
+    if master_update_runtime.get("running") and master_update_runtime.get("started_monotonic") is not None:
+        elapsed_seconds = max(0, int(time.monotonic() - float(master_update_runtime["started_monotonic"])))
+    return {
+        "enabled": bool(master_auto_update),
+        "time": master_refresh_time,
+        "timezone": str(timezone),
+        "next_update": target.isoformat(timespec="seconds") if master_auto_update else None,
+        "last_update": last_master_update,
+        "last_duration_seconds": last_master_duration_seconds,
+        "last_trigger": last_master_trigger,
+        "running": bool(master_update_runtime.get("running")),
+        "started_at": master_update_runtime.get("started_at"),
+        "trigger": master_update_runtime.get("trigger"),
+        "elapsed_seconds": elapsed_seconds,
+    }
+
+
+def update_master_settings(*, enabled=None, refresh_time=None) -> dict:
+    global master_auto_update, master_refresh_time
+    if enabled is not None:
+        master_auto_update = bool(enabled)
+    if refresh_time is not None:
+        master_refresh_time = _canonical_master_time(refresh_time)
+        # Keep the Sports "day" boundary aligned with the one application-wide
+        # update clock.  There is no independent sports scheduler anymore.
+        sports.update_settings(DB_PATH, {"refresh_time": master_refresh_time})
+    save_config()
+    return master_update_payload()
+
+
 def save_config() -> None:
     primary = primary_provider_source()
     data = {
@@ -701,6 +811,17 @@ def save_config() -> None:
         "source_mode": source_mode,
         "last_refresh": last_refresh,
         "schedule": {"hour": SCHEDULE_HOUR, "minute": SCHEDULE_MINUTE},
+        "master_update": {
+            "enabled": bool(master_auto_update),
+            "time": master_refresh_time,
+            "last_update": last_master_update,
+            "last_duration_seconds": last_master_duration_seconds,
+            "last_trigger": last_master_trigger,
+        },
+        "public_epg": {
+            "enabled_countries": sorted(public_epg_enabled_codes),
+            "state": public_epg_state,
+        },
         "epg_sources": epg_sources,
         "provider_sources": provider_sources,
     }
@@ -716,9 +837,41 @@ def save_config() -> None:
 
 def restore_config() -> None:
     global last_source_url, source_mode, last_refresh, epg_sources, provider_sources
+    global master_auto_update, master_refresh_time, last_master_update
+    global last_master_duration_seconds, last_master_trigger
+    global public_epg_enabled_codes, public_epg_state
     data = load_config()
     source_mode = str(data.get("source_mode", "")).strip()
     last_refresh = data.get("last_refresh")
+    master = data.get("master_update", {}) if isinstance(data.get("master_update"), dict) else {}
+    master_auto_update = bool(master.get("enabled", True))
+    try:
+        master_refresh_time = _canonical_master_time(master.get("time", "03:00"))
+    except ValueError:
+        master_refresh_time = "03:00"
+    last_master_update = master.get("last_update") or None
+    try:
+        last_master_duration_seconds = float(master.get("last_duration_seconds")) if master.get("last_duration_seconds") is not None else None
+    except (TypeError, ValueError):
+        last_master_duration_seconds = None
+    last_master_trigger = str(master.get("last_trigger") or "").strip() or None
+
+    public = data.get("public_epg", {}) if isinstance(data.get("public_epg"), dict) else {}
+    enabled_codes = public.get("enabled_countries", ["US"])
+    if not isinstance(enabled_codes, list):
+        enabled_codes = ["US"]
+    public_epg_enabled_codes = {
+        str(code).upper() for code in enabled_codes if str(code).upper() in PUBLIC_EPG_CODES
+    }
+    if "public_epg" not in data:
+        public_epg_enabled_codes = {"US"}
+    restored_public_state = public.get("state", {})
+    public_epg_state = {
+        str(code).upper(): dict(value)
+        for code, value in restored_public_state.items()
+        if str(code).upper() in PUBLIC_EPG_CODES and isinstance(value, dict)
+    } if isinstance(restored_public_state, dict) else {}
+
     restored_sources = data.get("epg_sources", [])
     epg_sources = [dict(item) for item in restored_sources if isinstance(item, dict)]
     restored_providers = data.get("provider_sources", [])
@@ -1188,7 +1341,7 @@ def detect_provider_source(
     """Validate a direct M3U or separate-field Xtream provider login.
 
     Primary providers are loaded immediately. Fallbacks can be registered in
-    deferred mode and are not downloaded until Sports Update needs them.
+    deferred mode and are not downloaded until Master Update needs them.
     Authenticated Xtream providers use get_live_streams first so VOD and series
     entries never enter the sports channel set.
     """
@@ -1203,7 +1356,7 @@ def detect_provider_source(
 
     _provider_progress_update(
         "Preparing provider validation",
-        detail="Fallback channels will load only during Sports Update." if not load_channels else "",
+        detail="Fallback channels will load only during Master Update." if not load_channels else "",
     )
     resolved_id = "primary" if role == "primary" else (source_id or unique_provider_id(clean_name))
     source = {
@@ -1268,7 +1421,7 @@ def detect_provider_source(
                     else:
                         safe = redact_url_credentials(str(api_error or "Unknown provider error"))
                         raise ValueError(f"Xtream login could not be validated: {safe}")
-                _provider_progress_complete(0, "Saved for live-only loading during Sports Update.")
+                _provider_progress_complete(0, "Saved for live-only loading during Master Update.")
                 return source, "", []
 
             text, parsed = load_provider_playlist(source)
@@ -1281,7 +1434,7 @@ def detect_provider_source(
         if not load_channels:
             _provider_progress_update("Probing direct M3U source")
             _probe_m3u_header(clean_url)
-            _provider_progress_complete(0, "Saved for loading during Sports Update.")
+            _provider_progress_complete(0, "Saved for loading during Master Update.")
             return source, "", []
 
         text, parsed = load_provider_playlist(source)
@@ -1821,9 +1974,10 @@ def epg_sources_payload() -> list[dict]:
 
 
 def epg_builtin_payload() -> list[dict]:
+    # Combined is the single user-facing XMLTV output. sports.xml remains an
+    # internal/diagnostic endpoint for troubleshooting generated sports only.
     guides = (
         ("combined", "Combined", COMBINED_EPG_PATH, "/epg/combined.xml"),
-        ("sports", "Sports", SPORTS_EPG_PATH, "/epg/sports.xml"),
     )
     payload: list[dict] = []
     for guide_id, name, path, url_path in guides:
@@ -1955,10 +2109,342 @@ def refresh_all_epg_sources() -> dict:
     return {"count": len(results), "ok_count": ok_count, "results": results}
 
 
+def public_epg_url(country_code: str) -> str:
+    code = str(country_code or "").strip().lower()
+    return f"https://iptv-epg.org/files/epg-{code}.xml.gz"
+
+
+def public_epg_cache_path(country_code: str) -> Path:
+    code = str(country_code or "").strip().upper()
+    return PUBLIC_EPG_DIR / f"epg-{code.lower()}.xml.gz"
+
+
+def public_epg_filtered_path(country_code: str) -> Path:
+    code = str(country_code or "").strip().upper()
+    return PUBLIC_EPG_DIR / f"epg-{code.lower()}.filtered.xml.gz"
+
+
+def _public_epg_relevant_matchers() -> tuple[set[str], set[str]]:
+    """Return the small subset of IPTV channels worth keeping from public guides.
+
+    Every selected manual channel is eligible for public-guide fallback, not
+    only sports channels. Sports Automation additionally keeps fixed team/network
+    candidates for canonical-event corroboration. Event channels with blank
+    tvg-id remain discoverable from their M3U names and do not require the giant
+    public guide.
+    """
+    wanted_ids = set(selected_xmltv_ids())
+    wanted_names: set[str] = set()
+    for channel in channels:
+        channel_id = str(channel.get("tvg_id", "") or "").strip()
+        name_values = [str(channel.get("tvg_name", "") or "").strip(), str(channel.get("name", "") or "").strip()]
+        is_manual = int(channel.get("id", -1) or -1) in selected_ids
+        text = " ".join([str(channel.get("group", "") or ""), *name_values])
+        is_sports_candidate = bool(
+            sports._team_feed_identity(channel)
+            or sports._detect_sport(text)
+            or re.search(r"\b(?:espn|fox sports|fs1|fs2|tnt sports|cbs sports|nbc sports|mlb network|nfl network|nba tv|nhl network)\b", text, re.I)
+        )
+        if not (is_manual or is_sports_candidate):
+            continue
+        if channel_id:
+            wanted_ids.add(channel_id)
+        for value in name_values:
+            normalized = sports._normalize(value)
+            if normalized:
+                wanted_names.add(normalized)
+    return wanted_ids, wanted_names
+
+
+def _public_epg_subset_signature(country_code: str, wanted_ids: set[str], wanted_names: set[str]) -> str:
+    source = public_epg_cache_path(country_code)
+    source_marker = f"{source.stat().st_mtime_ns}:{source.stat().st_size}" if source.exists() else "missing"
+    digest = hashlib.sha256()
+    digest.update(source_marker.encode("utf-8"))
+    for value in sorted(wanted_ids):
+        digest.update(b"\0i:")
+        digest.update(value.encode("utf-8", errors="replace"))
+    for value in sorted(wanted_names):
+        digest.update(b"\0n:")
+        digest.update(value.encode("utf-8", errors="replace"))
+    return digest.hexdigest()
+
+
+def _filter_public_epg_cache(country_code: str, *, cancel_check=None) -> tuple[bool, str]:
+    """Create a compact gzip XMLTV subset from a large IPTV-EPG country cache.
+
+    IPTV-EPG publishes pretty-printed XMLTV with channel/programme blocks on
+    separate lines. A line-oriented first pass is dramatically faster than
+    constructing ElementTree objects for ~1M unrelated programmes. Only the
+    resulting compact gzip is handed to the normal XMLTV parser.
+    """
+    code = str(country_code or "").strip().upper()
+    source = public_epg_cache_path(code)
+    destination = public_epg_filtered_path(code)
+    state = public_epg_state.setdefault(code, {})
+    if not _gzip_xmltv_looks_valid(source):
+        destination.unlink(missing_ok=True)
+        return False, "Raw public EPG cache is unavailable."
+
+    wanted_ids, wanted_names = _public_epg_relevant_matchers()
+    signature = _public_epg_subset_signature(code, wanted_ids, wanted_names)
+    if (
+        destination.exists()
+        and destination.stat().st_size > 0
+        and state.get("filter_signature") == signature
+        and _gzip_xmltv_looks_valid(destination)
+    ):
+        return True, f"{code} public EPG filtered cache is fresh."
+
+    temp = destination.with_name(destination.name + ".tmp")
+    temp.unlink(missing_ok=True)
+    effective_ids = set(wanted_ids)
+    id_re = re.compile(r'\b(?:id|channel)="([^"]+)"')
+    kept_channels = 0
+    kept_programmes = 0
+    scanned_lines = 0
+
+    def block_id(block: str) -> str:
+        match = id_re.search(block)
+        return match.group(1) if match else ""
+
+    try:
+        with gzip.open(source, "rt", encoding="utf-8", errors="replace") as input_handle, gzip.open(
+            temp, "wt", encoding="utf-8", compresslevel=1
+        ) as output_handle:
+            output_handle.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            output_handle.write('<tv source-info-name="IPTV-EPG.org filtered" source-info-url="https://iptv-epg.org">\n')
+            block_lines: list[str] = []
+            block_kind = ""
+            for line in input_handle:
+                scanned_lines += 1
+                if scanned_lines % 50000 == 0 and cancel_check and cancel_check():
+                    raise sports.ScanCancelled()
+                stripped = line.lstrip()
+                if not block_kind:
+                    if stripped.startswith("<channel "):
+                        block_kind = "channel"
+                        block_lines = [line]
+                    elif stripped.startswith("<programme "):
+                        block_kind = "programme"
+                        block_lines = [line]
+                    else:
+                        continue
+                else:
+                    block_lines.append(line)
+
+                closing = f"</{block_kind}>"
+                if closing not in line:
+                    continue
+
+                block = "".join(block_lines)
+                cid = block_id(block)
+                keep = cid in effective_ids
+                if block_kind == "channel" and not keep and wanted_names:
+                    try:
+                        element = sports.ElementTree.fromstring(block)
+                        display_names = [
+                            child.text.strip()
+                            for child in element
+                            if child.tag.rsplit("}", 1)[-1] == "display-name" and child.text
+                        ]
+                        keep = any(sports._normalize(name) in wanted_names for name in display_names)
+                    except Exception:
+                        keep = False
+                    if keep and cid:
+                        effective_ids.add(cid)
+                if keep:
+                    output_handle.write(block)
+                    if block_kind == "channel":
+                        kept_channels += 1
+                    else:
+                        kept_programmes += 1
+                block_kind = ""
+                block_lines = []
+            output_handle.write("</tv>\n")
+        if not _gzip_xmltv_looks_valid(temp):
+            raise ValueError("Filtered public EPG was not valid gzip XMLTV.")
+        temp.replace(destination)
+        state["filter_signature"] = signature
+        state["filtered_at"] = datetime.now().astimezone(ZoneInfo(master_timezone_name())).isoformat(timespec="seconds")
+        state["filtered_channels"] = kept_channels
+        state["filtered_programmes"] = kept_programmes
+        state["filtered_bytes"] = destination.stat().st_size
+        save_config()
+        return True, f"Filtered {code} public EPG to {kept_channels:,} channels / {kept_programmes:,} programmes."
+    except sports.ScanCancelled:
+        temp.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        state["filter_error"] = str(exc)
+        save_config()
+        return False, str(exc)
+
+
+def public_epg_payload() -> dict:
+    countries = []
+    for code, name in PUBLIC_EPG_REGISTRY:
+        path = public_epg_cache_path(code)
+        state = dict(public_epg_state.get(code) or {})
+        filtered = public_epg_filtered_path(code)
+        countries.append({
+            "code": code,
+            "name": name,
+            "enabled": code in public_epg_enabled_codes,
+            "cached": path.exists() and path.stat().st_size > 0,
+            "compressed_bytes": path.stat().st_size if path.exists() else 0,
+            "filtered_bytes": filtered.stat().st_size if filtered.exists() else 0,
+            "filtered_channels": int(state.get("filtered_channels") or 0),
+            "filtered_programmes": int(state.get("filtered_programmes") or 0),
+            "last_refresh": state.get("last_refresh"),
+            "last_error": state.get("last_error") or state.get("filter_error"),
+        })
+    enabled_names = [item["name"] for item in countries if item["enabled"]]
+    return {
+        "provider": "IPTV-EPG",
+        "compressed": True,
+        "enabled_codes": sorted(public_epg_enabled_codes),
+        "enabled_count": len(public_epg_enabled_codes),
+        "summary": enabled_names[0] if len(enabled_names) == 1 else f"{len(enabled_names)} countries enabled",
+        "countries": countries,
+    }
+
+
+def update_public_epg_countries(enabled_codes: Iterable[str]) -> dict:
+    global public_epg_enabled_codes
+    requested = {str(code).strip().upper() for code in enabled_codes if str(code).strip()}
+    invalid = sorted(requested - PUBLIC_EPG_CODES)
+    if invalid:
+        raise ValueError(f"Unknown public EPG country code: {invalid[0]}")
+    disabled = public_epg_enabled_codes - requested
+    public_epg_enabled_codes = requested
+    for code in disabled:
+        public_epg_cache_path(code).unlink(missing_ok=True)
+        public_epg_filtered_path(code).unlink(missing_ok=True)
+        public_epg_state.pop(code, None)
+    save_config()
+    return public_epg_payload()
+
+
+def _gzip_xmltv_looks_valid(path: Path) -> bool:
+    try:
+        with gzip.open(path, "rb") as handle:
+            return b"<tv" in handle.read(65536)
+    except Exception:
+        return False
+
+
+def refresh_public_epg_source(country_code: str, *, force: bool = False, cancel_check=None) -> tuple[bool, str]:
+    code = str(country_code or "").strip().upper()
+    if code not in PUBLIC_EPG_CODES:
+        return False, "Unknown public EPG country."
+    if code not in public_epg_enabled_codes:
+        return False, "Public EPG country is disabled."
+
+    timezone = ZoneInfo(master_timezone_name())
+    local_now = datetime.now().astimezone(timezone)
+    state = public_epg_state.setdefault(code, {})
+    path = public_epg_cache_path(code)
+    if not force and path.exists() and _date_from_iso(state.get("last_refresh")) == local_now.date().isoformat():
+        return True, f"{code} public EPG cache is fresh."
+
+    temp = path.with_name(path.name + ".tmp")
+    temp.unlink(missing_ok=True)
+    request = urllib.request.Request(
+        public_epg_url(code),
+        headers={
+            "User-Agent": "M3U-Web-Picker/22.1",
+            "Accept": "application/gzip,application/octet-stream,*/*",
+            "Accept-Encoding": "identity",
+        },
+    )
+    total = 0
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response, temp.open("wb") as output:
+            while True:
+                if cancel_check and cancel_check():
+                    raise sports.ScanCancelled()
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_PUBLIC_EPG_COMPRESSED_BYTES:
+                    raise ValueError("Compressed public EPG exceeded the configured safety limit.")
+                output.write(chunk)
+        if total == 0 or not _gzip_xmltv_looks_valid(temp):
+            raise ValueError("Public EPG response was not a valid gzip XMLTV guide.")
+        temp.replace(path)
+        state["last_refresh"] = local_now.isoformat(timespec="seconds")
+        state["last_error"] = None
+        state.pop("filter_error", None)
+        state["compressed_bytes"] = total
+        save_config()
+        return True, f"Refreshed {code} public EPG ({total:,} compressed bytes)."
+    except sports.ScanCancelled:
+        temp.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp.unlink(missing_ok=True)
+        state["last_error"] = str(exc)
+        save_config()
+        return False, str(exc)
+
+
+def refresh_public_epg_sources(*, force: bool = False, cancel_check=None) -> dict:
+    results = []
+    ok_count = 0
+    registry_order = [code for code, _name in PUBLIC_EPG_REGISTRY]
+    for code in registry_order:
+        if code not in public_epg_enabled_codes:
+            continue
+        ok, message = refresh_public_epg_source(code, force=force, cancel_check=cancel_check)
+        if ok:
+            filtered_ok, filtered_message = _filter_public_epg_cache(code, cancel_check=cancel_check)
+            ok = filtered_ok
+            message = f"{message} {filtered_message}"
+        ok_count += 1 if ok else 0
+        results.append({"code": code, "ok": ok, "message": message})
+    return {"count": len(results), "ok_count": ok_count, "results": results}
+
+
+def active_public_epg_paths() -> list[Path]:
+    paths = []
+    for code, _name in PUBLIC_EPG_REGISTRY:
+        if code not in public_epg_enabled_codes:
+            continue
+        filtered = public_epg_filtered_path(code)
+        if _valid_xmltv_file(filtered):
+            paths.append(filtered)
+    return paths
+
+
+def configured_epg_fallback_paths(base_path: Path | None = None) -> list[Path]:
+    output: list[Path] = []
+    seen = {str(base_path.resolve())} if base_path and base_path.exists() else set()
+    for source in epg_sources:
+        candidate = epg_cache_path(str(source.get("id", "")))
+        if not _valid_xmltv_file(candidate):
+            continue
+        resolved = str(candidate.resolve())
+        if resolved not in seen:
+            seen.add(resolved)
+            output.append(candidate)
+    for candidate in active_public_epg_paths():
+        resolved = str(candidate.resolve())
+        if resolved not in seen:
+            seen.add(resolved)
+            output.append(candidate)
+    return output
+
+
 def _valid_xmltv_file(path: Path | None) -> bool:
     if not path or not path.exists() or path.stat().st_size == 0:
         return False
     try:
+        if path.suffix.lower() == ".gz":
+            return _gzip_xmltv_looks_valid(path)
         return b"<tv" in path.read_bytes()[:10000]
     except Exception:
         return False
@@ -2005,6 +2491,10 @@ def guide_export_needs_rebuild(path: Path, *, combined: bool = False) -> bool:
     base_path = active_base_epg_path() if combined else None
     if base_path and base_path.exists():
         newest_input = max(newest_input, base_path.stat().st_mtime)
+    if combined:
+        for fallback_path in configured_epg_fallback_paths(base_path):
+            if fallback_path.exists():
+                newest_input = max(newest_input, fallback_path.stat().st_mtime)
     if combined and PLAYLIST_PATH.exists():
         newest_input = max(newest_input, PLAYLIST_PATH.stat().st_mtime)
     return bool(newest_input and path.stat().st_mtime + 0.001 < newest_input)
@@ -2020,6 +2510,7 @@ def ensure_epg_exports_current(*, force: bool = False) -> None:
         DB_PATH,
         base_epg_path=active_base_epg_path(),
         base_channel_ids=selected_xmltv_ids(),
+        fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
         sports_epg_path=SPORTS_EPG_PATH,
         combined_epg_path=COMBINED_EPG_PATH,
     )
@@ -2056,6 +2547,27 @@ def request_sports_scan_cancel() -> tuple[bool, str]:
     return True, "Cancellation requested. The scan will stop at the next safe checkpoint."
 
 
+SPORTS_AUTOMATION_CYCLE_ORDER = [
+    "schedule_api",
+    "provider_refresh",
+    "epg_refresh",
+    "sports_scan_match",
+    "channel_build",
+    "epg_publish",
+    "m3u_publish",
+]
+
+
+def validate_sports_cycle_trace(actual: list[str]) -> dict:
+    expected = list(SPORTS_AUTOMATION_CYCLE_ORDER)
+    actual = list(actual or [])
+    return {
+        "ok": actual == expected,
+        "expected_order": expected,
+        "actual_order": actual,
+    }
+
+
 def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> dict:
     settings = sports.get_settings(DB_PATH)
     if not settings.get("enabled"):
@@ -2069,6 +2581,7 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
     failure_recorded = False
     scan_state_started = False
     provider_warnings: list[str] = []
+    cycle_trace: list[str] = []
     cancel_check = scan_cancel_event.is_set if trigger == "manual" else None
     try:
         sports.begin_scan_state(
@@ -2080,9 +2593,21 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         scan_state_started = True
         if scan_cancel_event.is_set():
             raise sports.ScanCancelled()
+
+        # One Sports Automation cycle owns the complete dependency chain. The
+        # optional canonical schedule refresh runs first; when disabled or not
+        # configured this stage is a no-op and the legacy provider-derived
+        # discovery path remains in use.
+        sports.update_scan_stage(DB_PATH, "1/6 Checking schedule API cache")
+        schedule_api_result = sports.refresh_schedule_api_if_due(
+            DB_PATH,
+            cancel_check=cancel_check,
+        )
+        cycle_trace.append("schedule_api")
+
         if source_mode == "url" and primary_provider_source():
             if refresh_source:
-                sports.update_scan_stage(DB_PATH, "Refreshing primary provider")
+                sports.update_scan_stage(DB_PATH, "2/6 Refreshing provider channels")
                 refreshed, message = refresh_master_from_url(cancel_check)
                 if not refreshed:
                     sports.record_scan_failure(
@@ -2108,10 +2633,12 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
                         f"{source.get('name', 'Fallback provider')}: {fallback_message}"
                     )
 
+        cycle_trace.append("provider_refresh")
+
         # EPG is enrichment. A failed XMLTV refresh falls back to the cached EPG
         # and then to M3U-only matching; it does not delete yesterday's channels.
         if provider_sources:
-            sports.update_scan_stage(DB_PATH, "Refreshing provider guide data")
+            sports.update_scan_stage(DB_PATH, "3/6 Refreshing provider guide data")
             for source in provider_sources:
                 if not provider_xmltv_url(source):
                     continue
@@ -2121,10 +2648,29 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
                         f"{source.get('name', 'Fallback provider')} guide: {epg_message}"
                     )
         elif last_source_url:
-            sports.update_scan_stage(DB_PATH, "Refreshing guide data")
+            sports.update_scan_stage(DB_PATH, "3/6 Refreshing guide data")
             sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH, cancel_check=cancel_check)
+
+        # When Sports Automation owns the cycle, user-configured guide sources
+        # refresh in the same dependency chain instead of on a separate clock.
+        if epg_sources:
+            sports.update_scan_stage(DB_PATH, "Refreshing configured guide sources")
+            epg_result = refresh_all_epg_sources()
+            failed_epg = [item for item in epg_result.get("results", []) if not item.get("ok")]
+            for item in failed_epg:
+                provider_warnings.append(f"{item.get('name', 'EPG source')}: {item.get('message', 'refresh failed')}")
+
+        if public_epg_enabled_codes:
+            sports.update_scan_stage(DB_PATH, "Refreshing selected public EPG countries")
+            public_result = refresh_public_epg_sources(cancel_check=cancel_check)
+            for item in public_result.get("results", []):
+                if not item.get("ok"):
+                    provider_warnings.append(
+                        f"Public EPG {item.get('code', '')}: {item.get('message', 'refresh failed')}"
+                    )
         if scan_cancel_event.is_set():
             raise sports.ScanCancelled()
+        cycle_trace.append("epg_refresh")
 
         provider_sets = sports_provider_channel_sets()
         sports_channels = [channel for _source, source_channels in provider_sets for channel in source_channels]
@@ -2136,11 +2682,27 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             if _valid_xmltv_file(candidate):
                 provider_epg_sources.append((candidate, source_channels))
 
-        sports.update_scan_stage(DB_PATH, "Discovering sports catalog")
+        # Public country guides are system-wide Combined-XMLTV fallbacks and
+        # also last-resort sports corroboration. Match their XMLTV IDs/names
+        # against the primary IPTV catalog, but never let them replace provider
+        # guide metadata when both exist.
+        primary_channels = provider_sets[0][1] if provider_sets else list(channels)
+        existing_paths = {str(path.resolve()) for path, _channels in provider_epg_sources if path.exists()}
+        for configured in epg_sources:
+            configured_path = epg_cache_path(str(configured.get("id", "")))
+            if _valid_xmltv_file(configured_path) and str(configured_path.resolve()) not in existing_paths:
+                provider_epg_sources.append((configured_path, primary_channels))
+                existing_paths.add(str(configured_path.resolve()))
+        for public_path in active_public_epg_paths():
+            if str(public_path.resolve()) not in existing_paths:
+                provider_epg_sources.append((public_path, primary_channels))
+                existing_paths.add(str(public_path.resolve()))
+
+        sports.update_scan_stage(DB_PATH, "4/6 Preparing sports match indexes")
         sports.discover_catalog_from_channels(DB_PATH, sports_channels)
         if scan_cancel_event.is_set():
             raise sports.ScanCancelled()
-        sports.update_scan_stage(DB_PATH, "Scanning and matching channels")
+        sports.update_scan_stage(DB_PATH, "4/6 Matching events and building channels")
         result = sports.scan_channels(
             DB_PATH,
             sports_channels,
@@ -2151,14 +2713,18 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             trigger=trigger,
             started_at=scan_started_at,
             base_channel_ids=selected_xmltv_ids(),
+            fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
             manual_channel_count=len(selected_channels_from_selected_ids_in_order()),
             cancel_check=cancel_check,
         )
+        cycle_trace.extend(result.get("pipeline_trace") or [])
         result["provider_warnings"] = provider_warnings
+        result["schedule_api"] = schedule_api_result
         if provider_warnings:
             result["message"] += f" {len(provider_warnings)} fallback provider warning{'s' if len(provider_warnings) != 1 else ''}."
-        sports.update_scan_stage(DB_PATH, "Writing playlist and validating guide")
+        sports.update_scan_stage(DB_PATH, "5/6 Publishing M3U and XMLTV")
         write_current_playlist()
+        cycle_trace.append("m3u_publish")
         guide_check = sports.validate_guide_exports(
             DB_PATH,
             playlist_path=PLAYLIST_PATH,
@@ -2166,6 +2732,33 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             combined_epg_path=COMBINED_EPG_PATH,
         )
         result["guide_check"] = guide_check
+        sports.update_scan_stage(DB_PATH, "6/6 Validating automation cycle")
+        order_check = validate_sports_cycle_trace(cycle_trace)
+        expected_cycle = order_check["expected_order"]
+        order_ok = order_check["ok"]
+        cycle_steps = [
+            {
+                "name": "schedule_api",
+                "ok": True,
+                "mode": "api" if schedule_api_result.get("used") else "legacy",
+                "warning": schedule_api_result.get("warning", ""),
+            },
+            {"name": "provider_refresh", "ok": "provider_refresh" in cycle_trace},
+            {"name": "epg_refresh", "ok": "epg_refresh" in cycle_trace},
+            {"name": "sports_scan_match", "ok": "sports_scan_match" in cycle_trace},
+            {"name": "channel_build", "ok": "channel_build" in cycle_trace},
+            {"name": "epg_publish", "ok": "epg_publish" in cycle_trace},
+            {"name": "m3u_publish", "ok": bool(guide_check.get("ok")) and "m3u_publish" in cycle_trace},
+        ]
+        result["cycle_check"] = {
+            "ok": order_ok and all(step["ok"] for step in cycle_steps),
+            "order_ok": order_ok,
+            "expected_order": expected_cycle,
+            "actual_order": cycle_trace,
+            "steps": cycle_steps,
+        }
+        if schedule_api_result.get("warning"):
+            result["message"] += " Schedule API refresh failed; cached schedule or legacy matching was used."
         if not guide_check["ok"]:
             print(f"Generated sports guide validation failed: {guide_check}")
         return result
@@ -2261,55 +2854,152 @@ def _date_from_iso(value: str | None) -> str:
         return ""
 
 
+def run_master_update(*, trigger: str = "manual") -> dict:
+    """Run the one dependency-ordered application update cycle.
+
+    Sports Automation is an optional stage. Provider/EPG/public-guide refreshes
+    still run when sports is disabled, so Jellyfin/Plex can rely on one daily
+    application schedule and one Combined XMLTV URL.
+    """
+    global last_master_update, last_master_duration_seconds, last_master_trigger
+
+    trigger = str(trigger or "manual").strip() or "manual"
+    timezone = ZoneInfo(master_timezone_name())
+    started_at = datetime.now().astimezone(timezone)
+    started_monotonic = time.monotonic()
+    master_update_runtime.update({
+        "running": True,
+        "started_at": started_at.isoformat(timespec="seconds"),
+        "trigger": trigger,
+        "started_monotonic": started_monotonic,
+    })
+
+    try:
+        sports_settings = sports.get_settings(DB_PATH)
+        if sports_settings.get("enabled"):
+            result = run_sports_scan(trigger=trigger, refresh_source=True)
+        else:
+            warnings: list[str] = []
+            trace = ["schedule_api"]  # Disabled sports/API is an intentional no-op stage.
+            if source_mode == "url" and primary_provider_source():
+                ok, message = refresh_master_from_url()
+                if not ok:
+                    raise SportsScanError("Could not refresh the primary provider playlist. Existing outputs were kept.")
+            trace.append("provider_refresh")
+
+            if provider_sources:
+                for source in provider_sources:
+                    if source.get("role") != "primary" or not provider_xmltv_url(source):
+                        continue
+                    ok, message = refresh_provider_epg(source)
+                    if not ok:
+                        warnings.append(f"{source.get('name', 'Primary provider')} guide: {message}")
+            elif last_source_url:
+                try:
+                    sports.refresh_epg_cache(last_source_url, EPG_CACHE_PATH)
+                except Exception as exc:
+                    warnings.append(f"Provider guide: {redact_url_credentials(str(exc))}")
+
+            if epg_sources:
+                epg_result = refresh_all_epg_sources()
+                for item in epg_result.get("results", []):
+                    if not item.get("ok"):
+                        warnings.append(f"{item.get('name', 'EPG source')}: {item.get('message', 'refresh failed')}")
+            public_result = refresh_public_epg_sources()
+            for item in public_result.get("results", []):
+                if not item.get("ok"):
+                    warnings.append(f"Public EPG {item.get('code', '')}: {item.get('message', 'refresh failed')}")
+            trace.append("epg_refresh")
+
+            base_path = active_base_epg_path()
+            sports.rebuild_epg_exports(
+                DB_PATH,
+                base_epg_path=base_path,
+                base_channel_ids=selected_xmltv_ids(),
+                fallback_epg_paths=configured_epg_fallback_paths(base_path),
+                sports_epg_path=SPORTS_EPG_PATH,
+                combined_epg_path=COMBINED_EPG_PATH,
+            )
+            trace.extend(["sports_scan_match", "channel_build", "epg_publish"])
+            write_current_playlist()
+            trace.append("m3u_publish")
+            order_check = validate_sports_cycle_trace(trace)
+            result = {
+                "ok": True,
+                "message": "Master update completed; Sports Automation is disabled.",
+                "provider_warnings": warnings,
+                "cycle_check": {
+                    "ok": bool(order_check.get("ok")),
+                    "order_ok": bool(order_check.get("ok")),
+                    "expected_order": order_check.get("expected_order"),
+                    "actual_order": trace,
+                },
+            }
+
+        finished_at = datetime.now().astimezone(timezone)
+        last_master_update = finished_at.isoformat(timespec="seconds")
+        last_master_duration_seconds = round(max(0.0, time.monotonic() - started_monotonic), 1)
+        last_master_trigger = trigger
+        save_config()
+        result["master_update"] = master_update_payload()
+        return result
+    finally:
+        master_update_runtime.update({
+            "running": False,
+            "started_at": None,
+            "trigger": None,
+            "started_monotonic": None,
+        })
+
+
+def _master_update_due(now: datetime) -> bool:
+    if not master_auto_update:
+        return False
+    timezone = ZoneInfo(master_timezone_name())
+    local_now = now.astimezone(timezone)
+    hour, minute = [int(part) for part in master_refresh_time.split(":", 1)]
+    if (local_now.hour, local_now.minute) != (hour, minute):
+        return False
+    if last_master_update:
+        try:
+            last = datetime.fromisoformat(last_master_update)
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone)
+            if last.astimezone(timezone).date() == local_now.date():
+                return False
+        except Exception:
+            pass
+    return True
+
+
 def scheduler_loop() -> None:
-    global last_epg_refresh_date
     last_backup_date = ""
+    last_master_attempt_key = ""
     while True:
         try:
             now = datetime.now().astimezone()
-            today = now.date().isoformat()
 
             if sports.purge_expired_disabled_cache(DB_PATH, now):
+                base_path = active_base_epg_path()
                 sports.rebuild_epg_exports(
                     DB_PATH,
-                    base_epg_path=active_base_epg_path(),
+                    base_epg_path=base_path,
                     base_channel_ids=selected_xmltv_ids(),
+                    fallback_epg_paths=configured_epg_fallback_paths(base_path),
                     sports_epg_path=SPORTS_EPG_PATH,
                     combined_epg_path=COMBINED_EPG_PATH,
                 )
                 write_current_playlist()
 
-            master_refreshed = False
-            if (
-                source_mode == "url"
-                and last_source_url
-                and (now.hour, now.minute) == (SCHEDULE_HOUR, SCHEDULE_MINUTE)
-                and _date_from_iso(last_refresh) != today
-            ):
-                master_refreshed, _message = refresh_master_from_url()
-
-            if sports.should_run_scheduled(DB_PATH, now):
-                try:
-                    # Avoid downloading the provider playlist twice when the master
-                    # refresh and sports refresh share the same minute.
-                    run_sports_scan(
-                        trigger="scheduled",
-                        refresh_source=not master_refreshed,
-                    )
-                except Exception as exc:
-                    print(f"Scheduled sports scan failed: {exc}")
-
-            epg_refresh_minute_total = SCHEDULE_MINUTE + EPG_REFRESH_OFFSET_MINUTES
-            epg_refresh_hour = (SCHEDULE_HOUR + epg_refresh_minute_total // 60) % 24
-            epg_refresh_minute = epg_refresh_minute_total % 60
-            if (
-                epg_sources
-                and (now.hour, now.minute) == (epg_refresh_hour, epg_refresh_minute)
-                and last_epg_refresh_date != today
-            ):
-                refresh_all_epg_sources()
-                ensure_epg_exports_current(force=True)
-                last_epg_refresh_date = today
+            if _master_update_due(now):
+                local_now = now.astimezone(ZoneInfo(master_timezone_name()))
+                attempt_key = local_now.strftime("%Y-%m-%dT%H:%M")
+                if attempt_key != last_master_attempt_key:
+                    last_master_attempt_key = attempt_key
+                    try:
+                        run_master_update(trigger="scheduled")
+                    except Exception as exc:
+                        print(f"Scheduled master update failed: {exc}")
 
             backup_enabled = os.environ.get("M3U_BACKUP_ENABLED", "false").lower() in {
                 "1", "true", "yes", "on"
@@ -2335,7 +3025,6 @@ def scheduler_loop() -> None:
         except Exception as exc:
             print(f"Scheduler error: {exc}")
         time.sleep(30)
-
 
 def start_scheduler_once() -> None:
     global scheduler_started
@@ -2364,6 +3053,7 @@ def load_cached_master_playlist_on_startup() -> None:
                 DB_PATH,
                 base_epg_path=active_base_epg_path(),
                 base_channel_ids=selected_xmltv_ids(),
+                fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
                 sports_epg_path=SPORTS_EPG_PATH,
                 combined_epg_path=COMBINED_EPG_PATH,
             )
@@ -2386,6 +3076,7 @@ def load_cached_master_playlist_on_startup() -> None:
             DB_PATH,
             base_epg_path=active_base_epg_path(),
             base_channel_ids=selected_xmltv_ids(),
+            fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
             sports_epg_path=SPORTS_EPG_PATH,
             combined_epg_path=COMBINED_EPG_PATH,
         )

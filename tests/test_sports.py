@@ -493,6 +493,35 @@ http://provider.test/user/pass/philly.ts
         self.assertIn('x-sports-subtitle="Away broadcast', rows[0]["raw"][0])
         self.assertIn('tvg-logo="https://example.test/phillies.png"', rows[0]["raw"][0])
 
+    def test_build_feeds_prefers_team_aware_candidate_for_same_url(self):
+        shared = {
+            "name": "MLB Philadelphia Phillies",
+            "tvg_name": "MLB Philadelphia Phillies",
+            "group": "MLB / MiLB",
+            "url": "http://provider.test/user/pass/shared.ts",
+            "_provider_priority": 0,
+        }
+        event = {
+            "away_team_id": "mlb:toronto-blue-jays",
+            "away_team_name": "Toronto Blue Jays",
+            "home_team_id": "mlb:philadelphia-phillies",
+            "home_team_name": "Philadelphia Phillies",
+            "source_channels": [shared],
+            "expanded_feeds": True,
+        }
+        team_feed_map = {"mlb:philadelphia-phillies": [shared]}
+        rule = {
+            "scope_type": "team",
+            "scope_id": "mlb:philadelphia-phillies",
+            "feed_preference": "favorite",
+        }
+
+        feeds = sports._build_feeds(event, team_feed_map, rule, {"use_backup_feeds": False})
+
+        self.assertEqual(len(feeds), 1)
+        self.assertEqual(feeds[0]["feed_type"], "home")
+        self.assertEqual(feeds[0]["team_id"], "mlb:philadelphia-phillies")
+
     def test_effective_sports_start_moves_above_manual_number_range(self):
         self.assertEqual(sports.effective_start_channel(1000, 999), 1000)
         self.assertEqual(sports.effective_start_channel(1000, 1000), 2000)
@@ -972,6 +1001,7 @@ http://provider.test/live/golf.ts
         for title in (
             "No EVENT Today",
             "No Events Today!",
+            "No Game Today",
             "PGA Tour — Signing-Off",
         ):
             with self.subTest(title=title):
@@ -2043,7 +2073,7 @@ http://provider.test/user/pass/nhl-event.ts
             core.COMBINED_EPG_PATH = original_combined_epg
             core.EPG_CACHE_PATH = original_epg_cache
 
-    def test_builtin_epg_payload_reports_served_guides(self):
+    def test_builtin_epg_payload_advertises_only_combined_guide(self):
         original_sports_epg = core.SPORTS_EPG_PATH
         original_combined_epg = core.COMBINED_EPG_PATH
         try:
@@ -2056,11 +2086,9 @@ http://provider.test/user/pass/nhl-event.ts
             core.SPORTS_EPG_PATH = original_sports_epg
             core.COMBINED_EPG_PATH = original_combined_epg
 
+        self.assertEqual(set(payload), {"combined"})
         self.assertEqual(payload["combined"]["url_path"], "/epg/combined.xml")
-        self.assertEqual(payload["sports"]["url_path"], "/epg/sports.xml")
         self.assertTrue(payload["combined"]["cached"])
-        self.assertTrue(payload["sports"]["cached"])
-        self.assertGreater(payload["combined"]["size_bytes"], payload["sports"]["size_bytes"])
         self.assertTrue(payload["combined"]["last_refresh"])
 
 
@@ -2445,6 +2473,331 @@ http://provider.test/phillies.ts
         )
         self.assertEqual(len(merged), 1)
 
+    def test_schedule_api_config_hides_secret_and_is_optional(self):
+        status = sports.update_schedule_api_config(
+            self.db_path,
+            enabled=True,
+            url="https://v1.baseball.api-sports.io/",
+            api_key="super-secret-key",
+        )
+        self.assertTrue(status["configured"])
+        self.assertTrue(status["effective"])
+        self.assertTrue(status["key_configured"])
+        self.assertNotIn("api_key", status)
+        self.assertEqual(len(status["apis"]), 1)
+        self.assertEqual(status["apis"][0]["provider"], "API-BASEBALL")
+        self.assertEqual(status["apis"][0]["scope"], "MLB")
+        self.assertNotIn("api_key", status["apis"][0])
+        settings = sports.get_settings(self.db_path)
+        self.assertEqual(settings["schedule_api_url"], "https://v1.baseball.api-sports.io")
+        self.assertNotIn("__schedule_api_key", settings)
+
+        disabled = sports.update_schedule_api_config(self.db_path, enabled=False)
+        self.assertFalse(disabled["enabled"])
+        self.assertFalse(disabled["effective"])
+        self.assertTrue(disabled["configured"])
+        self.assertTrue(disabled["fallback_mode"])
+        self.assertEqual(len(disabled["apis"]), 1)
+
+        reenabled = sports.update_schedule_api_config(self.db_path, enabled=True)
+        self.assertTrue(reenabled["enabled"])
+        self.assertTrue(reenabled["effective"])
+
+        removed = sports.update_schedule_api_config(
+            self.db_path,
+            enabled=False,
+            url="",
+            clear_key=True,
+        )
+        self.assertFalse(removed["configured"])
+        self.assertEqual(removed["apis"], [])
+
+    def test_schedule_api_disabled_or_blank_uses_legacy_path_even_with_cache(self):
+        settings = sports.get_settings(self.db_path)
+        timezone = ZoneInfo(settings["timezone"])
+        today = datetime(2026, 8, 8, 14, 0, tzinfo=timezone)
+        with sports.closing(sports._connect(self.db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO sports_schedule_api_cache
+                    (source, league_id, season, schedule_date, fetched_on, fetched_at, result_count, remaining_quota)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (sports.SCHEDULE_API_SOURCE, "mlb", 2026, "2026-08-08", "2026-08-08", today.isoformat(), 1, 99),
+            )
+            conn.execute(
+                """
+                INSERT INTO sports_schedule_events
+                    (source, api_event_id, league_id, season, schedule_date, scheduled_start,
+                     status_short, status_long, home_api_id, home_name, home_logo,
+                     away_api_id, away_name, away_logo, raw_json, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sports.SCHEDULE_API_SOURCE, "179771", "mlb", 2026, "2026-08-08",
+                    "2026-08-08T18:05:00-04:00", "NS", "Not Started",
+                    "27", "Philadelphia Phillies", "", "36", "Toronto Blue Jays", "", "{}", today.isoformat(),
+                ),
+            )
+            conn.commit()
+
+        # Disabled means the canonical cache is intentionally ignored.
+        self.assertEqual(sports.schedule_api_events_for_window(self.db_path, today), [])
+
+        # Enabled with a blank URL is also explicitly legacy mode.
+        sports.update_schedule_api_config(self.db_path, enabled=True, url="")
+        self.assertEqual(sports.schedule_api_events_for_window(self.db_path, today), [])
+
+    def test_master_cycle_order_validator_rejects_drift(self):
+        expected = [
+            "schedule_api",
+            "provider_refresh",
+            "epg_refresh",
+            "sports_scan_match",
+            "channel_build",
+            "epg_publish",
+            "m3u_publish",
+        ]
+        self.assertTrue(core.validate_sports_cycle_trace(expected)["ok"])
+        drifted = expected.copy()
+        drifted[1], drifted[2] = drifted[2], drifted[1]
+        self.assertFalse(core.validate_sports_cycle_trace(drifted)["ok"])
+
+    def test_schedule_api_games_url_targets_mlb_day(self):
+        url = sports._schedule_api_games_url(
+            "https://v1.baseball.api-sports.io",
+            schedule_date=datetime(2026, 8, 8).date(),
+            season=2026,
+            timezone="America/New_York",
+        )
+        self.assertIn("/games?", url)
+        self.assertNotIn("league=", url)
+        self.assertNotIn("season=", url)
+        self.assertIn("date=2026-08-08", url)
+        self.assertIn("timezone=America%2FNew_York", url)
+
+    def test_schedule_api_canonical_id_collapses_provider_replay_airings(self):
+        settings = sports.get_settings(self.db_path)
+        settings["include_replays"] = False
+        team_lookup = sports._build_team_lookup(self.db_path)
+        raw_api = [{
+            "api_source": sports.SCHEDULE_API_SOURCE,
+            "api_event_id": "179771",
+            "league_id": "mlb",
+            "season": 2026,
+            "scheduled_start": datetime(2026, 8, 8, 18, 5, tzinfo=ZoneInfo("America/New_York")),
+            "status_short": "NS",
+            "status_long": "Not Started",
+            "home_api_id": "27",
+            "home_name": "Philadelphia Phillies",
+            "home_logo": "",
+            "away_api_id": "36",
+            "away_name": "Toronto Blue Jays",
+            "away_logo": "",
+        }]
+        anchors = sports._schedule_api_anchor_events(raw_api, settings, team_lookup)
+        self.assertEqual(len(anchors), 1)
+        channel = {
+            "name": "MLB Toronto Blue Jays at Philadelphia Phillies",
+            "tvg_name": "",
+            "group": "MLB",
+            "tvg_id": "event",
+            "url": "http://provider.test/event.ts",
+        }
+        live = sports._event_from_text(
+            self.db_path,
+            channel,
+            "MLB Toronto Blue Jays at Philadelphia Phillies",
+            settings,
+            datetime(2026, 8, 8, 14, 0, tzinfo=ZoneInfo("America/New_York")),
+            forced_start=datetime(2026, 8, 8, 18, 5, tzinfo=ZoneInfo("America/New_York")),
+            forced_end=datetime(2026, 8, 8, 21, 5, tzinfo=ZoneInfo("America/New_York")),
+            team_lookup=team_lookup,
+        )
+        replay = sports._event_from_text(
+            self.db_path,
+            channel,
+            "MLB Toronto Blue Jays at Philadelphia Phillies",
+            {**settings, "include_replays": True},
+            datetime(2026, 8, 8, 14, 0, tzinfo=ZoneInfo("America/New_York")),
+            forced_start=datetime(2026, 8, 9, 0, 30, tzinfo=ZoneInfo("America/New_York")),
+            forced_end=datetime(2026, 8, 9, 3, 0, tzinfo=ZoneInfo("America/New_York")),
+            team_lookup=team_lookup,
+        )
+        mapped = sports._apply_schedule_api_identity([live, replay], anchors)
+        self.assertEqual({item["event_identity"] for item in mapped}, {"api-sports-baseball:179771"})
+        merged = sports._merge_events([*anchors, *mapped], settings=settings)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["api_event_id"], "179771")
+        self.assertEqual(merged[0]["event_key"], "api-sports-baseball:179771")
+        self.assertEqual(merged[0]["start"].hour, 18)
+        self.assertEqual(merged[0]["start"].minute, 5)
+
+    def _api_phillies_anchor(self, *, include_replays=False):
+        settings = sports.get_settings(self.db_path)
+        settings["include_replays"] = include_replays
+        team_lookup = sports._build_team_lookup(self.db_path)
+        raw_api = [{
+            "api_source": sports.SCHEDULE_API_SOURCE,
+            "api_event_id": "179771",
+            "league_id": "mlb",
+            "season": 2026,
+            "scheduled_start": datetime(2026, 8, 8, 18, 5, tzinfo=ZoneInfo("America/New_York")),
+            "status_short": "NS",
+            "status_long": "Not Started",
+            "home_api_id": "27",
+            "home_name": "Philadelphia Phillies",
+            "home_logo": "",
+            "away_api_id": "36",
+            "away_name": "Toronto Blue Jays",
+            "away_logo": "",
+        }]
+        anchors = sports._schedule_api_anchor_events(raw_api, settings, team_lookup)
+        return settings, team_lookup, anchors
+
+    def _api_epg_event(self, settings, team_lookup, title, start, stop, *, is_live=False, description="", url="event.ts"):
+        channel = {
+            "name": title,
+            "tvg_name": title,
+            "group": "MLB",
+            "tvg_id": url,
+            "url": f"http://provider.test/{url}",
+        }
+        event = sports._event_from_text(
+            self.db_path,
+            channel,
+            title,
+            settings,
+            datetime(2026, 8, 8, 16, 0, tzinfo=ZoneInfo("America/New_York")),
+            forced_start=start,
+            forced_end=stop,
+            team_lookup=team_lookup,
+        )
+        self.assertIsNotNone(event)
+        event["timing_source"] = "xmltv"
+        event["source_kind"] = "xmltv"
+        event["source_kinds"] = ["xmltv"]
+        event["epg_programme"] = {
+            "title": title,
+            "description": description,
+            "start": start,
+            "stop": stop,
+            "is_live": is_live,
+            "is_replay": False,
+        }
+        return event
+
+    def test_schedule_api_uses_live_game_and_drops_gameday_and_11pm_rebroadcast(self):
+        settings, team_lookup, anchors = self._api_phillies_anchor(include_replays=False)
+        tz = ZoneInfo("America/New_York")
+        gameday = self._api_epg_event(
+            settings, team_lookup,
+            "Toronto Blue Jays vs. Philadelphia Phillies MLB In-Game Live Gameday",
+            datetime(2026, 8, 8, 18, 0, tzinfo=tz),
+            datetime(2026, 8, 8, 19, 0, tzinfo=tz),
+            description="Live wagering coverage with updated odds and player props.",
+            url="gameday.ts",
+        )
+        live = self._api_epg_event(
+            settings, team_lookup,
+            "Toronto Blue Jays @ Philadelphia Phillies",
+            datetime(2026, 8, 8, 18, 5, tzinfo=tz),
+            datetime(2026, 8, 8, 21, 5, tzinfo=tz),
+            is_live=True,
+            description="Game 2 of 3 Live from Citizens Bank Park.",
+            url="live.ts",
+        )
+        rebroadcast = self._api_epg_event(
+            settings, team_lookup,
+            "MLB Baseball : Toronto Blue Jays at Philadelphia Phillies",
+            datetime(2026, 8, 8, 23, 0, tzinfo=tz),
+            datetime(2026, 8, 9, 1, 30, tzinfo=tz),
+            description="Later broadcast of the same game.",
+            url="late.ts",
+        )
+        mapped = sports._apply_schedule_api_identity([gameday, live, rebroadcast], anchors)
+        merged = sports._merge_events([*anchors, *mapped], settings=settings)
+        self.assertEqual(len(merged), 1)
+        event = merged[0]
+        self.assertEqual(event["event_key"], "api-sports-baseball:179771")
+        self.assertEqual(event["start"], datetime(2026, 8, 8, 18, 5, tzinfo=tz))
+        self.assertEqual(event["epg_programme"]["title"], "Toronto Blue Jays @ Philadelphia Phillies")
+        self.assertEqual([item["url"] for item in event["source_channels"]], ["http://provider.test/live.ts"])
+        self.assertEqual(event.get("epg_programmes", []), [])
+
+    def test_schedule_api_replays_on_attaches_11pm_to_same_event_id(self):
+        settings, team_lookup, anchors = self._api_phillies_anchor(include_replays=True)
+        tz = ZoneInfo("America/New_York")
+        live = self._api_epg_event(
+            settings, team_lookup,
+            "Toronto Blue Jays @ Philadelphia Phillies",
+            datetime(2026, 8, 8, 18, 5, tzinfo=tz),
+            datetime(2026, 8, 8, 21, 5, tzinfo=tz),
+            is_live=True, url="live.ts",
+        )
+        rebroadcast = self._api_epg_event(
+            settings, team_lookup,
+            "MLB Baseball : Toronto Blue Jays at Philadelphia Phillies",
+            datetime(2026, 8, 8, 23, 0, tzinfo=tz),
+            datetime(2026, 8, 9, 1, 30, tzinfo=tz),
+            url="late.ts",
+        )
+        mapped = sports._apply_schedule_api_identity([live, rebroadcast], anchors)
+        merged = sports._merge_events([*anchors, *mapped], settings=settings)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["event_key"], "api-sports-baseball:179771")
+        self.assertEqual(len(merged[0].get("epg_programmes", [])), 1)
+        replay = merged[0]["epg_programmes"][0]
+        self.assertEqual(replay["start"], datetime(2026, 8, 8, 23, 0, tzinfo=tz))
+        self.assertTrue(replay["is_replay"])
+
+    def test_schedule_api_ignores_early_squeeze_play_as_game_source(self):
+        settings = sports.get_settings(self.db_path)
+        team_lookup = sports._build_team_lookup(self.db_path)
+        tz = ZoneInfo("America/New_York")
+        raw_api = [{
+            "api_source": sports.SCHEDULE_API_SOURCE,
+            "api_event_id": "179778",
+            "league_id": "mlb",
+            "season": 2026,
+            "scheduled_start": datetime(2026, 8, 8, 20, 10, tzinfo=tz),
+            "status_short": "NS",
+            "status_long": "Not Started",
+            "home_api_id": "2",
+            "home_name": "Arizona Diamondbacks",
+            "home_logo": "",
+            "away_api_id": "18",
+            "away_name": "Los Angeles Dodgers",
+            "away_logo": "",
+        }]
+        anchors = sports._schedule_api_anchor_events(raw_api, settings, team_lookup)
+        squeeze = self._api_epg_event(
+            settings, team_lookup,
+            "Dodgers Squeeze Play : Dodgers @ Diamondbacks",
+            datetime(2026, 8, 8, 15, 0, tzinfo=tz),
+            datetime(2026, 8, 8, 16, 0, tzinfo=tz),
+            description="From Aug. 7, 2026.",
+            url="squeeze.ts",
+        )
+        mapped = sports._apply_schedule_api_identity([squeeze], anchors)
+        merged = sports._merge_events([*anchors, *mapped], settings=settings)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["event_key"], "api-sports-baseball:179778")
+        self.assertEqual(merged[0]["start"], datetime(2026, 8, 8, 20, 10, tzinfo=tz))
+        self.assertEqual(merged[0].get("source_channels", []), [])
+
+    def test_successful_scan_reports_internal_match_build_publish_order(self):
+        result = sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=datetime(2026, 8, 1, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(
+            result["pipeline_trace"],
+            ["sports_scan_match", "channel_build", "epg_publish"],
+        )
+
     def test_epg_manager_ui_is_present_and_column_aligned(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "templates" / "index.html").read_text(encoding="utf-8")
@@ -2455,7 +2808,7 @@ http://provider.test/phillies.ts
         self.assertIn("<colgroup>", html)
         self.assertIn('id="epgSources"', html)
         self.assertIn('id="combinedEpgUrl"', html)
-        self.assertIn('id="sportsEpgUrl"', html)
+        self.assertNotIn('id="sportsEpgUrl"', html)
         self.assertIn('<th scope="col">Status</th>', html)
         self.assertIn('id="epgAddStatus" class="epg-status-cell small-muted"></td>', html)
         self.assertNotIn('>Credentials hidden after save</td>', html)
@@ -2463,10 +2816,11 @@ http://provider.test/phillies.ts
         self.assertIn("renderBuiltInEpgStatus", javascript)
         self.assertIn("table-layout: fixed", stylesheet)
         self.assertIn("Live Channels", html)
-        self.assertIn("Last Updated / Status", html)
+        self.assertIn('<th scope="col">Last Updated</th>', html)
+        self.assertIn('<th scope="col">Status</th>', html)
         self.assertIn('id="providerOperationStatus"', html)
         self.assertIn("provider-remove-primary-btn", javascript)
-        self.assertIn("Ready — loads during Sports Update", javascript)
+        self.assertIn("Ready — loads during Master Update", javascript)
         self.assertIn('providerSources.some(source => source.role === "primary")', javascript)
         self.assertIn("await loadInitialChannels();", javascript)
         self.assertIn("await loadProviderSources();", javascript)
@@ -2479,7 +2833,136 @@ http://provider.test/phillies.ts
         self.assertIn('id="primaryProviderFieldset"', html)
         self.assertIn("fieldset.disabled = locked;", javascript)
         self.assertIn("provider-account-status", javascript)
-        self.assertIn("v='22.0-rc1'", html)
+        self.assertIn('id="sportsScheduleApiEnabled"', html)
+        self.assertIn('id="sportsScheduleApiUrl"', html)
+        self.assertIn('id="sportsScheduleApiKey"', html)
+        self.assertIn("schedule cache → provider/channel refresh → guide refresh → sports match/build → M3U/XMLTV publish", html)
+        self.assertIn("v='22.1-rc2'", html)
+        self.assertIn('id="publicEpgDetails"', html)
+        self.assertIn('id="publicEpgCountries"', html)
+        self.assertIn('id="masterUpdateEnabled"', html)
+        self.assertIn('id="masterUpdateTime"', html)
+        self.assertIn('id="masterUpdateNowBtn"', html)
+        self.assertNotIn('id="sportsScheduleMode"', html)
+        self.assertNotIn('id="sportsIntervalHours"', html)
+        self.assertNotIn("Every X hours", html)
+        self.assertIn("savePublicEpgSelections", javascript)
+        self.assertIn("runMasterUpdate", javascript)
+
+
+    def test_public_epg_filter_keeps_selected_non_sports_channel(self):
+        original_channels = core.channels
+        original_selected_ids = core.selected_ids
+        try:
+            core.channels = [{
+                "id": 42,
+                "tvg_id": "NBCWGAL.us",
+                "tvg_name": "PA | Lancaster | NBC WGAL",
+                "name": "PA | Lancaster | NBC WGAL",
+                "group": "Local",
+                "url": "http://provider.test/wgal",
+            }]
+            core.selected_ids = {42}
+            with patch("core.selected_xmltv_ids", return_value={"NBCWGAL.us"}):
+                wanted_ids, wanted_names = core._public_epg_relevant_matchers()
+        finally:
+            core.channels = original_channels
+            core.selected_ids = original_selected_ids
+
+        self.assertIn("NBCWGAL.us", wanted_ids)
+        self.assertIn(sports._normalize("PA | Lancaster | NBC WGAL"), wanted_names)
+
+    def test_public_epg_registry_defaults_to_compressed_us_guide(self):
+        self.assertIn(("US", "United States"), core.PUBLIC_EPG_REGISTRY)
+        self.assertEqual(core.public_epg_url("US"), "https://iptv-epg.org/files/epg-us.xml.gz")
+
+    def test_gzip_public_epg_respects_provider_precedence(self):
+        import gzip
+
+        base = Path(self.temp.name) / "provider.xml"
+        fallback = Path(self.temp.name) / "public.xml.gz"
+        sports_xml = b'<?xml version="1.0" encoding="UTF-8"?><tv></tv>'
+        base.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?><tv>'
+            '<channel id="PhiladelphiaPhillies.mlb"><display-name>Phillies</display-name></channel>'
+            '</tv>',
+            encoding="utf-8",
+        )
+        with gzip.open(fallback, "wt", encoding="utf-8") as handle:
+            handle.write(
+                '<?xml version="1.0" encoding="UTF-8"?><tv>'
+                '<channel id="PhiladelphiaPhillies.mlb"><display-name>Phillies Public</display-name></channel>'
+                '<programme channel="PhiladelphiaPhillies.mlb" start="20260808180500 -0400" stop="20260808210500 -0400">'
+                '<title>Toronto Blue Jays @ Philadelphia Phillies</title></programme>'
+                '</tv>'
+            )
+
+        combined = sports.build_combined_xmltv(
+            base,
+            sports_xml,
+            {"PhiladelphiaPhillies.mlb"},
+            fallback_epg_paths=[fallback],
+        )
+        text = combined.decode("utf-8")
+        self.assertIn("Toronto Blue Jays @ Philadelphia Phillies", text)
+        self.assertEqual(text.count('channel id="PhiladelphiaPhillies.mlb"'), 1)
+
+        base.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?><tv>'
+            '<channel id="PhiladelphiaPhillies.mlb"><display-name>Phillies</display-name></channel>'
+            '<programme channel="PhiladelphiaPhillies.mlb" start="20260808180500 -0400" stop="20260808210500 -0400">'
+            '<title>Provider Phillies Game</title></programme>'
+            '</tv>',
+            encoding="utf-8",
+        )
+        combined = sports.build_combined_xmltv(
+            base,
+            sports_xml,
+            {"PhiladelphiaPhillies.mlb"},
+            fallback_epg_paths=[fallback],
+        )
+        text = combined.decode("utf-8")
+        self.assertIn("Provider Phillies Game", text)
+        self.assertNotIn("Toronto Blue Jays @ Philadelphia Phillies", text)
+
+    def test_public_epg_fills_non_sports_gaps_without_overwriting_provider_programmes(self):
+        import gzip
+
+        base = Path(self.temp.name) / "provider-local.xml"
+        fallback = Path(self.temp.name) / "public-local.xml.gz"
+        sports_xml = b'<?xml version="1.0" encoding="UTF-8"?><tv></tv>'
+        base.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?><tv>'
+            '<channel id="NBCWGAL.us"><display-name>PA | Lancaster | NBC WGAL</display-name></channel>'
+            '<programme channel="NBCWGAL.us" start="20260808120000 +0000" stop="20260808130000 +0000">'
+            '<title>Provider Morning News</title></programme>'
+            '</tv>',
+            encoding="utf-8",
+        )
+        with gzip.open(fallback, "wt", encoding="utf-8") as handle:
+            handle.write(
+                '<?xml version="1.0" encoding="UTF-8"?><tv>'
+                '<channel id="NBCWGAL.us"><display-name>NBC WGAL</display-name></channel>'
+                '<programme channel="NBCWGAL.us" start="20260808123000 +0000" stop="20260808133000 +0000">'
+                '<title>Public Overlap Should Lose</title></programme>'
+                '<programme channel="NBCWGAL.us" start="20260808133000 +0000" stop="20260808140000 +0000">'
+                '<title>Public Local Gap Filler</title></programme>'
+                '</tv>'
+            )
+
+        combined = sports.build_combined_xmltv(
+            base,
+            sports_xml,
+            {"NBCWGAL.us"},
+            fallback_epg_paths=[fallback],
+        )
+        text = combined.decode("utf-8")
+        self.assertIn("Provider Morning News", text)
+        self.assertIn("Public Local Gap Filler", text)
+        self.assertNotIn("Public Overlap Should Lose", text)
+        self.assertEqual(text.count('channel id="NBCWGAL.us"'), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
 

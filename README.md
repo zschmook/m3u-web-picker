@@ -1,19 +1,36 @@
 # M3U Web Picker
-### v22.0-rc1
+### v22.1-rc2
 
-- Starts the v22 line from the debug10 logical-event and scan-index foundation.
-- Broad league/conference/sport rules now generate one best feed per game by default.
-- Games involving an explicitly selected team receive the expanded home/away/national/event feed set, with the team rule controlling feed preference.
-- Team and league overlap remains one logical event and never allocates duplicate channel blocks.
-- The entire add-primary fieldset is locked whenever a URL or file primary exists, including Xtream username/password and both load actions.
-- Xtream provider rows show provider-reported account status and expiration date in **Last Updated / Status** without exposing credentials or connection counts.
-- Retains daily or every-X-hours Sports Automation scheduling, 90-minute postgame cleanup, narrow off-air filtering, replay/encore grouping, primary/fallback provider precedence, and live-only Xtream imports.
-- Retains scan-local indexes and stage timings; the current real-world debug10 benchmark was about 4m30s–4m50s for a primary with roughly 6,500 live channels.
-- RC validation should begin with a fresh test state so stale Jellyfin mappings and migrated generated rows do not contaminate results.
+**Release candidate:** see `RELEASE-NOTES-v22.1-rc2.md`.
 
-**Version 22.0-rc1**
+- Makes the schedule API event ID the hard logical-game identity before provider/XMLTV airing grouping. A same-matchup rebroadcast can no longer allocate a second sports channel block when the API identifies it as the same game.
+- API-assisted live-airing selection now evaluates provider rows around the canonical API start and rejects obvious supporting content such as pre/postgame, Gameday/in-game wagering, Squeeze Play, betting/odds, previews, recaps, and studio shows as the primary game stream.
+- Provider rows are clustered with a tight 90-second tolerance in API mode so a 6:00 PM support program is not merged into a 6:05 PM first-pitch candidate.
+- With replays/encores disabled, later same-matchup airings are dropped. With replays enabled, later airings are attached as replay programme windows on the same API event/channel IDs instead of generating new channel blocks.
+- Regression coverage includes the real Aug. 8 Phillies case (6:00 betting Gameday → 6:05 live game → 11:00 rebroadcast) and the Dodgers Squeeze Play false match.
+- The three-file MLB fixture (API schedule + sanitized provider M3U + filtered public U.S. EPG) now resolves 15 API games into 15 logical events and 17 generated feeds for All MLB + explicit Phillies.
 
-This is the first v22 release candidate. It promotes the tested v22.0-debug1 application behavior without functional changes: compact league-wide feed generation, expanded feeds for explicitly selected teams, a complete primary-provider UI lock, Xtream account status/expiration display, replay-aware logical event grouping, and indexed sports scanning.
+- Schedule API enable/disable now persists immediately from the switch. API URL/key controls are disabled while the API is off, and configured schedule APIs appear in a proper Loaded Schedule APIs table with status, URL, last update, and Remove action.
+- Fixes dark-mode contrast for the Free Public EPG country section header and country labels.
+- Replaces the separate sports/provider/EPG schedules with one application-wide **Master Update**, enabled by default at **3:00 AM local time** and user-changeable from the top of the page below the M3U URL.
+- **Update Now** runs the same dependency-ordered pipeline without changing the next scheduled daily run.
+- Master Update now shows a spinner and live elapsed timer while a manual or scheduled cycle is running, and the last completed cycle records/displays its total duration.
+- Master pipeline order is schedule API (optional) → provider refresh → guide refresh → sports match → channel build → XMLTV publish → M3U publish → validation.
+- Adds **Free Public EPG — By Country** under EPG Manager. It is collapsed by default, checkbox-only, persists immediately, and starts with **United States enabled only**.
+- Public country guides use IPTV-EPG's compressed `.xml.gz` feeds, remain compressed on disk, and are stream-decompressed while matching/filtering so giant guides are not expanded into memory or permanent raw XML files.
+- Free public country guides are system-wide lowest-priority fallback/enrichment sources for every selected manual channel, not a sports-only feature. Provider/configured guide data wins on overlapping time windows; public guide programmes can fill uncovered gaps on the same channel. The same filtered public data remains available for sports corroboration.
+- Corrects the API-BASEBALL free-plan fetch shape to the known-good **date + timezone** request and filters MLB (`league.id == 1`) locally.
+- The schedule API remains optional. Disabled, blank, or incompletely configured API settings use the original provider-derived matcher and ignore canonical API cache data.
+- Provider Sources keeps separate **Last Updated** and **Status** columns.
+- Narrow filler filtering now also recognizes **No Game Today** alongside No Event(s) Today and Signing Off.
+
+**Version 22.1-rc2**
+
+- Builds on v22.1-debug1's optional canonical MLB schedule layer and v22.0's logical-event/feed-selection work.
+- API schedule storage remains source/league keyed so later adapters can support NFL/NCAA, basketball, hockey, soccer, and other sports without redesigning the cache model.
+- Broad league/conference/sport rules still generate one best feed per game, while explicitly selected teams can expand home/away/national/event feeds without duplicate logical events.
+- Retains 90-minute postgame cleanup, manual/static channel isolation, replay/encore grouping, primary/fallback provider precedence, live-only Xtream imports, and scan-local matching indexes.
+- Fresh debug state remains recommended for RC validation.
 
 This is a single-page Flask application for loading an M3U playlist, manually selecting channels, ordering the custom playlist, and automatically generating temporary scheduled sports channels with matching XMLTV guide data.
 
@@ -32,16 +49,24 @@ Load exactly one primary provider from a direct M3U URL or an Xtream login. The 
 
 Add one or more fallback providers below the primary. Sports Automation refreshes and scans them in priority order. Feed eligibility is evaluated first; after disabled backup feeds and other settings are removed, the lowest provider priority with a usable candidate wins. This means a fallback does not add duplicate or extra sports feeds when the primary can satisfy the event.
 
-For Xtream logins, enter the server/base URL separately from the username and password. The application probes the conventional authentication endpoint, requests live streams and live categories through the Xtream API, excludes VOD/series records, and derives the XMLTV endpoint internally. A fallback provider is registered after a lightweight validation and does not download its channel catalog until Sports Update runs. Direct M3U URLs with embedded credentials remain supported for backward compatibility behind the same size safeguards. Saved provider rows expose only a friendly provider label, type, live-channel count, priority, refresh status, and—when reported by Xtream—account status and expiration date.
+For Xtream logins, enter the server/base URL separately from the username and password. The application probes the conventional authentication endpoint, requests live streams and live categories through the Xtream API, excludes VOD/series records, and derives the XMLTV endpoint internally. A fallback provider is registered after a lightweight validation and does not download its channel catalog until Master Update runs. Direct M3U URLs with embedded credentials remain supported for backward compatibility behind the same size safeguards. Saved provider rows expose only a friendly provider label, type, live-channel count, priority, refresh status, and—when reported by Xtream—account status and expiration date.
 
 Separate credential fields prevent accidental UI/API exposure; they are not an encryption layer. Credentials are stored in the application's local `config.json`, so the runtime data directory and backups should be protected like any other secret-bearing configuration.
 
 
 ## EPG Manager and guide recovery
 
-The EPG Manager appears above Channel Manager in one unified table. The add-source controls, built-in Combined and Sports guides, and named external XMLTV sources share fixed columns for Name, Type, Served URL, Status, and Action. Stored provider URLs and credentials remain hidden after saving; only the friendly source label and app-served URL are displayed.
+The EPG Manager appears above Channel Manager in one unified table. The add-source controls, the built-in **Combined** guide, and named external XMLTV sources share fixed columns for Name, Type, Served URL, Status, and Action. Stored provider URLs and credentials remain hidden after saving; only the friendly source label and app-served URL are displayed.
 
-The sports and combined guide endpoints now verify that their XML contains the persisted generated sports rows. If an empty or stale guide file exists while generated rows are present, the application rebuilds it before serving Jellyfin. A manually configured EPG source is used as a fallback when the conventional Xtream `xmltv.php` URL cannot be derived or refreshed.
+`combined.xml` is the single user-facing Jellyfin/Plex guide. The sports-only XMLTV file is still generated internally for diagnostics and validation, but it is no longer advertised as a normal EPG Manager output. If an empty or stale guide file exists while generated sports rows are present, the application rebuilds it before serving Jellyfin. A manually configured EPG source is used as a fallback when the conventional Xtream `xmltv.php` URL cannot be derived or refreshed.
+
+### Master Update and free public country guides
+
+The only automatic update clock exposed by the UI is **Master Update**, directly below the served M3U URL. It defaults to 03:00 in the configured local sports timezone and can be moved to run before an external Jellyfin/Plex guide refresh. Manual **Update Now** does not alter the next scheduled daily time.
+
+**Free Public EPG — By Country** is an expandable checkbox list inside EPG Manager. United States is enabled on a fresh configuration and every other country starts disabled. Enabled countries use the built-in IPTV-EPG registry and compressed `epg-<country>.xml.gz` sources. The application caches those compressed files once per local day, line-streams the large gzip to create a compact filtered gzip containing only relevant manual/provider/sports channel IDs and names, and hands that compact subset to the normal XMLTV matcher. Only useful selected-channel/programme data reaches `combined.xml`; the full public guide is never intentionally expanded to a permanent XML file or parsed into one giant in-memory XML tree.
+
+Guide precedence is provider/base guide first, then user-configured guide sources, then enabled free public-country guides. Precedence is applied per channel **and time window**: a lower-priority source may fill an uncovered gap on a selected channel, but any programme that overlaps a higher-priority programme is discarded. This lets a public guide repair partial provider-guide holes without replacing good provider metadata.
 
 ## Persistent Docker state
 
@@ -56,11 +81,7 @@ http://YOUR-SERVER-IP:10000/playlist/custom.m3u
 http://YOUR-SERVER-IP:10000/epg/combined.xml
 ```
 
-Use `combined.xml` for the selected manual channels' provider guide data plus generated sports programmes. v21.5 and later no longer copy the provider's entire XMLTV catalog into this file. Use the sports-only guide when the provider XMLTV source is already configured separately:
-
-```text
-http://YOUR-SERVER-IP:10000/epg/sports.xml
-```
+Use `combined.xml` for everything: selected manual channels use provider/configured guide data first and enabled free public-country guides as fallback, while generated sports channels are merged into the same file. The provider's full XMLTV catalog is never copied into this output.
 
 The examples use the sports debug port `10000`; the normal Compose instance uses `9999`. The custom M3U advertises `combined.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
 
@@ -150,7 +171,7 @@ Settings save silently to SQLite. There is no Save button. Fresh installations s
 
 Manual scan activity is persisted in SQLite. Closing or reopening the browser tab does not lose the running state. The UI polls the backend, displays the current stage and elapsed time, and leaves a dismissible success or failure result after completion. An app restart converts an interrupted running state into a visible failure instead of leaving a permanent “already running” message.
 
-The master **Enable sports** switch controls both automatic and manual generation. **Auto update** can run either once daily at the configured time or every 1–24 hours. Interval mode is anchored to the most recently completed attempt, so a manual **Update now**, a successful scheduled run, a failed run, or a cancelled run starts a fresh interval and prevents rapid retry loops. **Update now** still works when Auto update is off, disables duplicate clicks, and shows a looping `.` → `..` → `...` activity indicator while the backend works.
+The master **Enable sports** switch controls whether sports-generated channels participate in the application-wide update. Scheduling itself is owned by **Master Update** at the top of the page: one configurable daily run defaults to **3:00 AM local time**. **Update Now** runs that same full pipeline immediately and does not move the next scheduled daily run. There is no hourly/every-X-hours UI.
 
 Turning Sports Automation off immediately removes generated sports rows from the served M3U and XMLTV files. The generated data remains privately cached for 24 hours so an accidental toggle can be reversed immediately. Saved sport, league, conference, and team rules are never deleted.
 
@@ -158,18 +179,18 @@ The global **Hide SD / LOW BANDWIDTH channels** control now also excludes SD fee
 
 At update time the application:
 
-1. Refreshes the provider M3U when a URL source is configured.
-2. Tries to derive and cache the provider XMLTV endpoint.
-3. Parses M3U and XMLTV events without aborting on a single malformed entry.
-4. Matches events against saved rules and deduplicates duplicate M3U/XMLTV descriptions.
-5. Builds identifiable home, away, national, event, alternate-language, and backup feeds.
-6. Assigns channels inside the event’s league/series range.
-7. Replaces generated database rows and XMLTV exports atomically.
-8. Rewrites the served custom playlist.
+1. Refreshes/checks the optional canonical sports schedule API cache.
+2. Refreshes the primary/fallback provider M3U catalogs as required.
+3. Refreshes provider, configured, and enabled public-country EPG caches.
+4. Parses M3U/XMLTV and matches provider airings against canonical events when available.
+5. Matches events against saved sports rules and builds the selected feed set.
+6. Assigns generated channels inside the event’s league/series range.
+7. Builds filtered Sports and Combined XMLTV output, with provider guides ahead of public fallback guides.
+8. Replaces generated database rows/XMLTV through the existing guarded publish path, atomically writes the M3U, and validates the cycle order/output.
 
 A failed refresh or scan preserves the previous working sports lineup. A successful scan with zero matches clears stale sports output.
 
-Clear provider filler titles matching **No Event Today**, **No Events Today**, or **Signing Off** are excluded case-insensitively after punctuation normalization. Legitimate scheduled programming, including podcasts and studio shows, is not broadly filtered. Generated channels remain available until 90 minutes after the known or estimated event end so long games and overtime are not removed early.
+Clear provider filler titles matching **No Event Today**, **No Events Today**, **No Game Today**, or **Signing Off** are excluded case-insensitively after punctuation normalization. Legitimate scheduled programming, including podcasts and studio shows, is not broadly filtered. Generated channels remain available until 90 minutes after the known or estimated event end so long games and overtime are not removed early.
 
 ## Generated guide behavior
 

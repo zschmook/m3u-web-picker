@@ -7,6 +7,11 @@ let activeGroupMembers = new Set();
 let showGroupOnly = false;
 let epgSources = [];
 let epgBuiltins = [];
+let publicEpgState = {countries: [], enabled_codes: ["US"], enabled_count: 1, summary: "United States"};
+let masterUpdateState = {enabled: true, time: "03:00", timezone: "America/New_York", next_update: null, last_update: null, last_duration_seconds: null, last_trigger: null, running: false, started_at: null, trigger: null, elapsed_seconds: null};
+let masterUpdateBusy = false;
+let masterUpdateLocalStartedAt = 0;
+let masterUpdateElapsedTimer = null;
 let providerSources = [];
 let currentSourceMode = "";
 let providerOperationBusy = false;
@@ -32,9 +37,7 @@ const els = {
 els.playlistUrl.value = `${location.origin}/playlist/custom.m3u`;
 els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
 const combinedEpgUrlInput = document.getElementById("combinedEpgUrl");
-const sportsEpgUrlInput = document.getElementById("sportsEpgUrl");
 if (combinedEpgUrlInput) combinedEpgUrlInput.value = `${location.origin}/epg/combined.xml`;
-if (sportsEpgUrlInput) sportsEpgUrlInput.value = `${location.origin}/epg/sports.xml`;
 
 const CHANNEL_MANAGER_COLLAPSE_KEY = "m3u-picker.channel-manager-collapsed";
 let channelManagerCollapsed = localStorage.getItem(CHANNEL_MANAGER_COLLAPSE_KEY) === "true";
@@ -339,7 +342,7 @@ function formatEpgSize(bytes) {
 
 function renderBuiltInEpgStatus() {
   const byId = new Map(epgBuiltins.map(item => [String(item.id || ""), item]));
-  for (const [id, elementId] of [["combined", "combinedEpgStatus"], ["sports", "sportsEpgStatus"]]) {
+  for (const [id, elementId] of [["combined", "combinedEpgStatus"]]) {
     const target = document.getElementById(elementId);
     if (!target) continue;
     const guide = byId.get(id);
@@ -387,17 +390,234 @@ function renderEpgSources() {
   }).join("");
 }
 
+function renderPublicEpg() {
+  const target = document.getElementById("publicEpgCountries");
+  const summary = document.getElementById("publicEpgSummary");
+  const status = document.getElementById("publicEpgStatus");
+  if (summary) summary.textContent = publicEpgState.summary || "No countries enabled";
+  if (!target) return;
+  const countries = publicEpgState.countries || [];
+  target.innerHTML = countries.map(country => {
+    const id = `publicEpg-${country.code}`;
+    const cached = country.cached && country.compressed_bytes
+      ? ` • ${formatEpgSize(country.compressed_bytes)} cached`
+      : "";
+    return `
+      <div class="form-check public-epg-country-item">
+        <input class="form-check-input public-epg-country-check" type="checkbox" id="${escapeHtml(id)}" data-code="${escapeHtml(country.code)}" ${country.enabled ? "checked" : ""}>
+        <label class="form-check-label" for="${escapeHtml(id)}">${escapeHtml(country.name)}<span class="small-muted">${escapeHtml(cached)}</span></label>
+      </div>`;
+  }).join("");
+  if (status) {
+    const enabled = countries.filter(country => country.enabled);
+    const failures = enabled.filter(country => country.last_error);
+    status.textContent = failures.length
+      ? `${failures.length} enabled public guide${failures.length === 1 ? " has" : "s have"} a refresh warning; cached data remains available when present.`
+      : "Enabled guides refresh once per day during the master update and fill uncovered guide windows for any selected channel.";
+  }
+}
+
+
+function formatElapsedSeconds(value) {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatUpdateDuration(value) {
+  const total = Math.max(0, Math.round(Number(value) || 0));
+  if (!total && Number(value) !== 0) return "";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const parts = [];
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}m`);
+  if (seconds || !parts.length) parts.push(`${seconds}s`);
+  return parts.join(" ");
+}
+
+function masterUpdateElapsedSeconds() {
+  if (masterUpdateBusy && masterUpdateLocalStartedAt) {
+    return Math.max(0, Math.floor((Date.now() - masterUpdateLocalStartedAt) / 1000));
+  }
+  if (masterUpdateState.running && masterUpdateState.started_at) {
+    const started = Date.parse(masterUpdateState.started_at);
+    if (Number.isFinite(started)) return Math.max(0, Math.floor((Date.now() - started) / 1000));
+  }
+  return Math.max(0, Number(masterUpdateState.elapsed_seconds) || 0);
+}
+
+function updateMasterUpdateTicker() {
+  const shouldRun = Boolean(masterUpdateBusy || masterUpdateState.running || sportsState?.scan?.running);
+  if (shouldRun && !masterUpdateElapsedTimer) {
+    masterUpdateElapsedTimer = setInterval(() => {
+      renderMasterUpdate();
+      renderSportsScanStatus();
+    }, 1000);
+  } else if (!shouldRun && masterUpdateElapsedTimer) {
+    clearInterval(masterUpdateElapsedTimer);
+    masterUpdateElapsedTimer = null;
+  }
+}
+
+function renderMasterUpdate() {
+  const enabled = document.getElementById("masterUpdateEnabled");
+  const time = document.getElementById("masterUpdateTime");
+  const status = document.getElementById("masterUpdateStatus");
+  const button = document.getElementById("masterUpdateNowBtn");
+  const runningPanel = document.getElementById("masterUpdateRunning");
+  const runningText = document.getElementById("masterUpdateRunningText");
+  if (enabled) enabled.checked = Boolean(masterUpdateState.enabled);
+  if (time) {
+    time.value = masterUpdateState.time || "03:00";
+    time.disabled = !masterUpdateState.enabled;
+  }
+
+  const scanRunning = Boolean(sportsState?.scan?.running);
+  const masterRunning = Boolean(masterUpdateBusy || masterUpdateState.running || scanRunning);
+  const scanTrigger = String(sportsState?.scan?.trigger || "").trim();
+  const effectiveTrigger = masterUpdateBusy
+    ? "manual"
+    : String(masterUpdateState.trigger || scanTrigger || "scheduled").trim();
+  const manualScan = scanRunning && scanTrigger === "manual";
+  const cancelling = manualScan && String(sportsState.scan?.stage || "").toLowerCase().includes("cancellation requested");
+
+  if (button && !masterUpdateBusy) {
+    button.disabled = scanRunning && !manualScan;
+    button.textContent = cancelling ? "Cancelling…" : (manualScan ? "Cancel Update" : (scanRunning ? "Updating…" : "Update Now"));
+    button.classList.toggle("btn-danger", manualScan);
+    button.classList.toggle("btn-primary", !manualScan);
+  }
+
+  if (runningPanel && runningText) {
+    runningPanel.classList.toggle("d-none", !masterRunning);
+    if (masterRunning) {
+      const label = effectiveTrigger === "scheduled" ? "Automatic update" : "Manual update";
+      runningText.textContent = `${label} • ${formatElapsedSeconds(masterUpdateElapsedSeconds())}`;
+    }
+  }
+
+  if (status) {
+    const next = masterUpdateState.enabled ? formatNextUpdate(masterUpdateState.next_update) : "automatic updates disabled";
+    const last = masterUpdateState.last_update ? formatNextUpdate(masterUpdateState.last_update) : "never";
+    const duration = masterUpdateState.last_duration_seconds == null
+      ? ""
+      : formatUpdateDuration(masterUpdateState.last_duration_seconds);
+    const zone = masterUpdateState.timezone || "local time";
+    status.textContent = [
+      `Next: ${next}`,
+      `Last: ${last}`,
+      duration ? `Took ${duration}` : "",
+      zone
+    ].filter(Boolean).join(" • ");
+  }
+  updateMasterUpdateTicker();
+}
+
+async function saveMasterUpdate(changes) {
+  try {
+    const response = await fetch("/api/master-update", {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(changes)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not save master update settings.");
+    masterUpdateState = data.master_update || masterUpdateState;
+    renderMasterUpdate();
+  } catch (error) {
+    alert(error.message);
+    await loadMasterUpdate();
+  }
+}
+
+async function loadMasterUpdate() {
+  try {
+    const response = await fetch("/api/master-update");
+    const data = await response.json();
+    if (response.ok) masterUpdateState = data.master_update || masterUpdateState;
+  } catch {}
+  renderMasterUpdate();
+}
+
+async function runMasterUpdate() {
+  const button = document.getElementById("masterUpdateNowBtn");
+  const scanRunning = Boolean(sportsState?.scan?.running);
+  const manualScan = scanRunning && String(sportsState.scan?.trigger || "manual") === "manual";
+  if (manualScan) {
+    await handleSportsScanAction();
+    renderMasterUpdate();
+    return;
+  }
+  if (masterUpdateBusy || scanRunning) return;
+  masterUpdateBusy = true;
+  masterUpdateLocalStartedAt = Date.now();
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Updating…";
+  }
+  renderMasterUpdate();
+  setStatus("Running master update…");
+  try {
+    const response = await fetch("/api/master-update/run", {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Master update failed.");
+    masterUpdateState = data.master_update || masterUpdateState;
+    if (data.sports) sportsState = data.sports;
+    if (data.channels) channels = data.channels;
+    if (data.selected_ids) selected = new Set(data.selected_ids.map(Number));
+    applySportsState();
+    render();
+    await loadEpgSources();
+    setStatus(data.result?.message || "Master update complete.");
+  } catch (error) {
+    setStatus("");
+    alert(error.message);
+  } finally {
+    masterUpdateBusy = false;
+    masterUpdateLocalStartedAt = 0;
+    await loadMasterUpdate();
+  }
+}
+
+async function savePublicEpgSelections() {
+  const enabledCodes = [...document.querySelectorAll(".public-epg-country-check:checked")]
+    .map(input => input.dataset.code);
+  try {
+    const response = await fetch("/api/public-epg", {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({enabled_codes: enabledCodes})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not save public EPG selections.");
+    publicEpgState = data.public_epg || publicEpgState;
+    renderPublicEpg();
+  } catch (error) {
+    alert(error.message);
+    await loadEpgSources();
+  }
+}
+
 async function loadEpgSources() {
   try {
     const response = await fetch("/api/epg");
     const data = await response.json();
     epgSources = data.sources || [];
     epgBuiltins = data.builtins || [];
+    publicEpgState = data.public_epg || publicEpgState;
+    masterUpdateState = data.master_update || masterUpdateState;
   } catch {
     epgSources = [];
     epgBuiltins = [];
   }
   renderEpgSources();
+  renderPublicEpg();
+  renderMasterUpdate();
 }
 
 async function addEpgSource() {
@@ -522,7 +742,7 @@ function renderProviderSources() {
   setSourceMode(currentSourceMode);
   if (addButton) addButton.disabled = !hasPrimary || providerOperationBusy;
   if (!providerSources.length) {
-    list.innerHTML = `<tr><td colspan="6" class="small-muted">No URL provider loaded. Load a primary provider above.</td></tr>`;
+    list.innerHTML = `<tr><td colspan="7" class="small-muted">No URL provider loaded. Load a primary provider above.</td></tr>`;
     return;
   }
   list.innerHTML = providerSources.map(source => {
@@ -531,24 +751,24 @@ function renderProviderSources() {
     const kind = source.kind === "xtream"
       ? (source.xtream_api ? "Xtream API" : "Xtream-compatible")
       : "Direct M3U";
-    const refreshStatus = !primary && !hasPrimary
+    const updated = source.last_refresh
+      ? escapeHtml(formatEpgTimestamp(source.last_refresh))
+      : source.cached ? "Cached" : "—";
+    const operationalStatus = !primary && !hasPrimary
       ? `<span class="text-warning">Waiting for primary</span>`
       : source.last_error
       ? `<span class="text-warning">Refresh failed</span>`
       : source.deferred
-        ? "Ready — loads during Sports Update"
-        : source.last_refresh
-          ? `Updated ${escapeHtml(formatEpgTimestamp(source.last_refresh))}`
-          : source.cached ? "Cached" : "Not cached";
+        ? "Ready — loads during Master Update"
+        : "Ready";
     const accountBits = [];
     if (source.kind === "xtream") {
       if (source.account_status) accountBits.push(escapeHtml(source.account_status));
       if (source.expires_at) accountBits.push(`Expires ${escapeHtml(formatProviderExpiry(source.expires_at))}`);
     }
     const accountStatus = accountBits.length
-      ? `<div class="provider-account-status">${accountBits.join(" • ")}</div>`
-      : "";
-    const status = `${refreshStatus}${accountStatus}`;
+      ? `${operationalStatus !== "Ready" ? `${operationalStatus} • ` : ""}<span class="provider-account-status">${accountBits.join(" • ")}</span>`
+      : operationalStatus;
     const title = source.last_error
       ? escapeHtml(source.last_error)
       : source.warning ? escapeHtml(source.warning) : "";
@@ -558,7 +778,8 @@ function renderProviderSources() {
         <td><strong>${escapeHtml(source.name || source.source_label || source.id)}</strong><div class="small-muted">${escapeHtml(source.source_label || "Provider")}</div></td>
         <td>${escapeHtml(kind)}</td>
         <td class="text-end">${Number(source.channel_count || 0).toLocaleString()}</td>
-        <td class="small-muted" title="${title}">${status}</td>
+        <td class="small-muted">${updated}</td>
+        <td class="small-muted" title="${title}">${accountStatus}</td>
         <td class="text-end">${primary
           ? `<button class="btn btn-outline-danger btn-sm provider-remove-primary-btn" type="button">Remove</button>`
           : `<button class="btn btn-outline-danger btn-sm provider-delete-btn" type="button">Remove</button>`}</td>
@@ -619,7 +840,7 @@ async function addFallbackProvider() {
   usernameInput.value = "";
   passwordInput.value = "";
   renderProviderSources();
-  finishProviderProgress({stage: "Fallback provider saved", detail: "Live channels will load only when Sports Update runs.", channel_count: 0, status: "complete"});
+  finishProviderProgress({stage: "Fallback provider saved", detail: "Live channels will load only when Master Update runs.", channel_count: 0, status: "complete"});
   setStatus(`Added sports fallback provider: ${name}`);
 }
 
@@ -877,7 +1098,6 @@ document.getElementById("providerSources")?.addEventListener("click", event => {
 document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyInputValue("playlistUrl", "copyPlaylistBtn"));
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
 document.getElementById("copyCombinedEpgBtn")?.addEventListener("click", () => copyInputValue("combinedEpgUrl", "copyCombinedEpgBtn"));
-document.getElementById("copySportsEpgBtn")?.addEventListener("click", () => copyInputValue("sportsEpgUrl", "copySportsEpgBtn"));
 document.getElementById("addEpgBtn")?.addEventListener("click", addEpgSource);
 document.getElementById("epgUrl")?.addEventListener("keydown", event => { if (event.key === "Enter") addEpgSource(); });
 document.getElementById("epgSources")?.addEventListener("click", event => {
@@ -1018,7 +1238,7 @@ document.getElementById("moveOrderDownBtn").addEventListener("click", () => move
 document.getElementById("saveOrderBtn").addEventListener("click", saveOrder);
 
 // Sports automation ---------------------------------------------------------
-let sportsState = {settings: {}, rules: [], catalog: [], generated: [], last_scan: null, scan: {running: false}, next_update: null, numbering: {blocks: []}};
+let sportsState = {settings: {}, rules: [], catalog: [], generated: [], last_scan: null, scan: {running: false}, next_update: null, numbering: {blocks: []}, schedule_api: {}};
 const SPORTS_COLLAPSE_KEY = "m3u-picker.sports-collapsed";
 const SPORTS_SCAN_DISMISSED_KEY = "m3u-picker.sports-scan-dismissed";
 let sportsCollapsed = localStorage.getItem(SPORTS_COLLAPSE_KEY) === "true";
@@ -1081,7 +1301,7 @@ function renderSportsPreview() {
   const rows = sportsState.generated || [];
   sportsElement("sportsPreviewCount").textContent = `${rows.length} channel${rows.length === 1 ? "" : "s"}`;
   if (!rows.length) {
-    target.innerHTML = `<div class="small-muted">No generated sports channels yet. The nightly update or Update now will populate this list.</div>`;
+    target.innerHTML = `<div class="small-muted">No generated sports channels yet. The daily Master Update or Update Now will populate this list.</div>`;
     return;
   }
   target.innerHTML = rows.map(row => `
@@ -1109,11 +1329,6 @@ function formatSportsClock(value) {
   return date.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
 }
 
-function applySportsScheduleVisibility(mode) {
-  const interval = mode === "interval";
-  sportsElement("sportsDailyTimeField").classList.toggle("d-none", interval);
-  sportsElement("sportsIntervalHoursField").classList.toggle("d-none", !interval);
-}
 
 function formatScanDuration(startedAt, finishedAt = null) {
   const started = new Date(startedAt || "");
@@ -1135,24 +1350,39 @@ function renderSportsScanStatus() {
   const title = sportsElement("sportsScanStatusTitle");
   const details = sportsElement("sportsScanStatusDetails");
   const dismiss = sportsElement("sportsScanStatusDismiss");
+  const spinner = sportsElement("sportsScanStatusSpinner");
   if (!panel || !title || !details || !dismiss) return;
 
   const scan = sportsState.scan || {running: false};
   const lastScan = sportsState.last_scan;
+  const masterRunning = Boolean(masterUpdateBusy || masterUpdateState.running);
+  const running = Boolean(masterRunning || scan.running);
   panel.classList.remove("is-running", "is-success", "is-failed", "is-neutral");
+  if (spinner) spinner.classList.toggle("d-none", !running);
 
-  if (scan.running) {
+  if (running) {
     panel.classList.remove("d-none");
     panel.classList.add("is-running");
     dismiss.classList.add("d-none");
+
+    const scanTrigger = String(scan.trigger || "").trim();
+    const trigger = masterUpdateBusy
+      ? "manual"
+      : String(masterUpdateState.trigger || scanTrigger || "scheduled").trim();
+    const label = trigger === "scheduled" ? "Automatic update" : "Manual update";
     const cancellationRequested = String(scan.stage || "").toLowerCase().includes("cancellation requested");
-    title.textContent = cancellationRequested
-      ? `Cancelling sports update${".".repeat(sportsScanDotCount)}`
-      : `Scanning and matching channels${".".repeat(sportsScanDotCount)}`;
-    const stage = scan.stage || "Scanning and matching channels";
-    const started = scan.started_at ? `Started ${formatNextUpdate(scan.started_at)}` : "";
-    const elapsed = scan.started_at ? `Elapsed ${formatScanDuration(scan.started_at)}` : "";
-    details.textContent = [stage, started, elapsed].filter(Boolean).join(" • ");
+    title.textContent = cancellationRequested ? "Cancelling update" : `${label} in progress`;
+
+    const stage = scan.running
+      ? (scan.stage || "Scanning and matching sports channels")
+      : "Preparing sports scan";
+    const elapsedSeconds = masterRunning
+      ? masterUpdateElapsedSeconds()
+      : (scan.started_at ? Math.max(0, Math.floor((Date.now() - Date.parse(scan.started_at)) / 1000)) : 0);
+    details.textContent = [
+      stage,
+      `Elapsed ${formatElapsedSeconds(elapsedSeconds)}`
+    ].filter(Boolean).join(" • ");
     return;
   }
 
@@ -1170,33 +1400,42 @@ function renderSportsScanStatus() {
   const status = String(lastScan.status || "").toLowerCase();
   panel.classList.remove("d-none");
   dismiss.classList.remove("d-none");
+  const sportsDuration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
+  const masterFinished = masterUpdateState.last_update ? Date.parse(masterUpdateState.last_update) : NaN;
+  const scanFinished = lastScan.finished_at ? Date.parse(lastScan.finished_at) : NaN;
+  const sameMasterCycle = Number.isFinite(masterFinished) && Number.isFinite(scanFinished)
+    && Math.abs(masterFinished - scanFinished) <= 5 * 60 * 1000;
+  const masterDuration = sameMasterCycle && masterUpdateState.last_duration_seconds != null
+    ? formatUpdateDuration(masterUpdateState.last_duration_seconds)
+    : "";
+
   if (status === "success") {
     panel.classList.add("is-success");
     title.textContent = "Sports update complete";
-    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
     details.textContent = [
       `${lastScan.channel_count || 0} channels generated`,
       `${lastScan.event_count || 0} events matched`,
       `Completed ${formatNextUpdate(lastScan.finished_at)}`,
-      duration ? `Duration ${duration}` : ""
+      sportsDuration ? `Sports scan ${sportsDuration}` : "",
+      masterDuration ? `Master update ${masterDuration}` : ""
     ].filter(Boolean).join(" • ");
   } else if (status === "failed") {
     panel.classList.add("is-failed");
     title.textContent = "Sports update failed";
-    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
     details.textContent = [
       lastScan.message || "Existing sports channels were kept.",
       `Finished ${formatNextUpdate(lastScan.finished_at)}`,
-      duration ? `Duration ${duration}` : ""
+      sportsDuration ? `Sports scan ${sportsDuration}` : "",
+      masterDuration ? `Master update ${masterDuration}` : ""
     ].filter(Boolean).join(" • ");
   } else if (status === "cancelled") {
     panel.classList.add("is-neutral");
     title.textContent = "Sports update cancelled";
-    const duration = formatScanDuration(lastScan.started_at, lastScan.finished_at);
     details.textContent = [
       lastScan.message || "Existing sports channels were kept.",
       `Stopped ${formatNextUpdate(lastScan.finished_at)}`,
-      duration ? `Duration ${duration}` : ""
+      sportsDuration ? `Sports scan ${sportsDuration}` : "",
+      masterDuration ? `Master update ${masterDuration}` : ""
     ].filter(Boolean).join(" • ");
   } else {
     panel.classList.add("is-neutral");
@@ -1220,6 +1459,138 @@ function updateSportsScanPulse() {
   renderSportsScanStatus();
 }
 
+
+function scheduleApiStatusLabel(api) {
+  if (api.effective) return "Active";
+  if (api.configured) return "Disabled";
+  return "Incomplete";
+}
+
+function renderSportsScheduleApiList() {
+  const target = sportsElement("sportsScheduleApiList");
+  if (!target) return;
+  const api = sportsState.schedule_api || {};
+  const entries = Array.isArray(api.apis) ? api.apis : [];
+  if (!entries.length) {
+    target.innerHTML = `<tr><td colspan="6" class="small-muted">No schedule APIs loaded.</td></tr>`;
+    return;
+  }
+  target.innerHTML = entries.map(entry => {
+    const status = scheduleApiStatusLabel(entry);
+    const updated = entry.last_fetch_at ? formatNextUpdate(entry.last_fetch_at) : "—";
+    const url = entry.url || "—";
+    return `
+      <tr>
+        <td>${escapeHtml(entry.provider || "Schedule API")}</td>
+        <td>${escapeHtml(entry.scope || "—")}</td>
+        <td class="schedule-api-url-cell" title="${escapeHtml(url)}">${escapeHtml(url)}</td>
+        <td>${escapeHtml(status)}</td>
+        <td>${escapeHtml(updated)}</td>
+        <td class="text-end"><button class="btn btn-outline-danger btn-sm schedule-api-remove" type="button" data-api-id="${escapeHtml(entry.id || "")}">Remove</button></td>
+      </tr>`;
+  }).join("");
+}
+
+function renderSportsScheduleApi() {
+  const api = sportsState.schedule_api || {};
+  const enabled = Boolean(api.enabled);
+  const enabledInput = sportsElement("sportsScheduleApiEnabled");
+  const fieldset = sportsElement("sportsScheduleApiFields");
+  const urlInput = sportsElement("sportsScheduleApiUrl");
+  const keyInput = sportsElement("sportsScheduleApiKey");
+  const status = sportsElement("sportsScheduleApiStatus");
+  if (!enabledInput || !fieldset || !urlInput || !keyInput || !status) return;
+  enabledInput.checked = enabled;
+  fieldset.disabled = !enabled;
+  urlInput.value = api.url || "";
+  keyInput.value = "";
+  keyInput.placeholder = api.key_configured ? "API key saved" : "Enter API key";
+  if (!enabled) {
+    status.textContent = api.configured
+      ? "Schedule API disabled • provider-derived matching active."
+      : "Provider-derived matching active.";
+  } else if (!api.effective) {
+    status.textContent = "Schedule API enabled but not fully configured • enter the API URL and key, then save.";
+  } else {
+    const bits = ["Schedule API active"];
+    if (api.last_fetch_at) bits.push(`Last fetch ${formatNextUpdate(api.last_fetch_at)}`);
+    if (Number(api.cached_event_count || 0) > 0) bits.push(`${Number(api.cached_event_count).toLocaleString()} games cached`);
+    if (api.remaining_quota !== null && api.remaining_quota !== undefined) bits.push(`${api.remaining_quota} requests remaining`);
+    status.textContent = bits.join(" • ");
+  }
+  renderSportsScheduleApiList();
+}
+
+async function patchSportsScheduleApi(payload, failureMessage) {
+  const response = await fetch("/api/sports/schedule-api", {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || failureMessage);
+  sportsState.schedule_api = data.schedule_api || {};
+  return sportsState.schedule_api;
+}
+
+async function toggleSportsScheduleApiEnabled() {
+  const input = sportsElement("sportsScheduleApiEnabled");
+  if (!input) return;
+  const desired = input.checked;
+  input.disabled = true;
+  const fieldset = sportsElement("sportsScheduleApiFields");
+  if (fieldset) fieldset.disabled = !desired;
+  try {
+    await patchSportsScheduleApi({enabled: desired}, "Could not update schedule API state.");
+    setSportsError("");
+  } catch (error) {
+    input.checked = !desired;
+    setSportsError(`Could not update schedule API state. ${error.message}`);
+  } finally {
+    input.disabled = false;
+    renderSportsScheduleApi();
+  }
+}
+
+async function saveSportsScheduleApi() {
+  const button = sportsElement("sportsScheduleApiSave");
+  const enabled = Boolean(sportsElement("sportsScheduleApiEnabled")?.checked);
+  const url = sportsElement("sportsScheduleApiUrl")?.value.trim() || "";
+  const apiKey = sportsElement("sportsScheduleApiKey")?.value.trim() || "";
+  if (!enabled) return;
+  if (button) button.disabled = true;
+  try {
+    const payload = {url};
+    if (apiKey) payload.api_key = apiKey;
+    await patchSportsScheduleApi(payload, "Could not save schedule API settings.");
+    sportsElement("sportsScheduleApiKey").value = "";
+    setSportsError("");
+  } catch (error) {
+    setSportsError(`Could not save schedule API settings. ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
+    renderSportsScheduleApi();
+  }
+}
+
+async function removeSportsScheduleApi() {
+  const target = sportsElement("sportsScheduleApiList");
+  if (target) {
+    target.querySelectorAll(".schedule-api-remove").forEach(button => { button.disabled = true; });
+  }
+  try {
+    await patchSportsScheduleApi(
+      {enabled: false, url: "", clear_key: true},
+      "Could not remove schedule API."
+    );
+    setSportsError("");
+  } catch (error) {
+    setSportsError(`Could not remove schedule API. ${error.message}`);
+  } finally {
+    renderSportsScheduleApi();
+  }
+}
+
 function applySportsState() {
   const settings = sportsState.settings || {};
   const enabled = Boolean(settings.enabled);
@@ -1233,35 +1604,19 @@ function applySportsState() {
   sportsElement("sportsEnabledBadge").textContent = enabled ? "Enabled" : "Off";
   sportsElement("sportsEnabledBadge").classList.toggle("text-bg-success", enabled);
   sportsElement("sportsEnabledBadge").classList.toggle("text-bg-secondary", !enabled);
+  renderSportsScheduleApi();
 
   sportsElement("sportsStartChannel").value = settings.start_channel ?? 1000;
   sportsElement("sportsBlockSize").value = settings.channels_per_event ?? 10;
   sportsElement("sportsGroupTitle").value = settings.group_title || "Sports Today";
   sportsElement("sportsTimezone").value = settings.timezone || "America/New_York";
-  const scheduleMode = settings.schedule_mode === "interval" ? "interval" : "daily";
-  sportsElement("sportsScheduleMode").value = scheduleMode;
-  sportsElement("sportsRefreshTime").value = settings.refresh_time || "03:00";
-  sportsElement("sportsIntervalHours").value = settings.interval_hours ?? 2;
-  applySportsScheduleVisibility(scheduleMode);
   sportsElement("sportsEventWindow").value = settings.event_window || "today";
   sportsElement("sportsIncludeReplays").checked = Boolean(settings.include_replays);
   sportsElement("sportsIncludePregame").checked = Boolean(settings.include_pregame);
   sportsElement("sportsUseBackups").checked = Boolean(settings.use_backup_feeds);
   sportsElement("sportsEverythingMode").checked = Boolean(settings.everything_mode);
   if (els.excludeSdChannels) els.excludeSdChannels.checked = Boolean(settings.exclude_sd);
-  sportsElement("sportsAutoUpdate").checked = Boolean(settings.auto_update);
-  sportsElement("sportsAutoUpdate").disabled = !enabled;
-  const scanRunning = Boolean(sportsState.scan?.running);
-  const scanButton = sportsElement("sportsRunScanBtn");
-  const manualScanRunning = scanRunning && String(sportsState.scan?.trigger || "manual") === "manual";
-  const cancellationRequested = manualScanRunning && String(sportsState.scan?.stage || "").toLowerCase().includes("cancellation requested");
-  scanButton.disabled = !enabled || (scanRunning && (!manualScanRunning || cancellationRequested));
-  scanButton.setAttribute("aria-busy", String(scanRunning));
-  scanButton.textContent = cancellationRequested
-    ? "Cancelling…"
-    : (manualScanRunning ? "Cancel scan" : (scanRunning ? "Scanning…" : "Update now"));
-  scanButton.classList.toggle("btn-danger", manualScanRunning);
-  scanButton.classList.toggle("btn-primary", !manualScanRunning);
+  renderMasterUpdate();
 
   const numbering = sportsState.numbering || {};
   const capacity = Number(numbering.events_per_primary_block || 0);
@@ -1294,14 +1649,7 @@ function applySportsState() {
     ? `Everything Mode is active. Your ${sportsState.rules.length} curated selection${sportsState.rules.length === 1 ? " is" : "s are"} safely preserved. Scans may take for-fucking-ever.`
     : "";
 
-  const scheduleDescription = scheduleMode === "interval"
-    ? `Every ${Number(settings.interval_hours || 2)} hour${Number(settings.interval_hours || 2) === 1 ? "" : "s"}`
-    : `Daily at ${formatSportsClock(settings.refresh_time || "03:00")}`;
-  sportsElement("sportsNextUpdate").textContent = !enabled
-    ? "Sports automation disabled"
-    : settings.auto_update
-      ? `Next update: ${formatNextUpdate(sportsState.next_update)} • ${scheduleDescription}`
-      : "Automatic updates disabled";
+  sportsElement("sportsNextUpdate").textContent = "Runs with the Master Update cycle.";
 
   const lastScan = sportsState.last_scan;
   sportsElement("sportsLastScan").textContent = lastScan
@@ -1548,9 +1896,11 @@ async function deleteSportsRule(ruleId) {
 
 async function cancelSportsScan() {
   setSportsError("");
-  const button = sportsElement("sportsRunScanBtn");
-  button.disabled = true;
-  button.textContent = "Cancelling…";
+  const button = document.getElementById("masterUpdateNowBtn");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Cancelling…";
+  }
   try {
     const response = await fetch("/api/sports/scan/cancel", {method: "POST"});
     const data = await response.json();
@@ -1626,6 +1976,8 @@ async function pollSportsStatus({reschedule = true} = {}) {
     const changed = sportsGeneratedSignature && signature !== sportsGeneratedSignature;
     sportsState = data;
     applySportsState();
+    if (data.scan?.running || masterUpdateState.running) await loadMasterUpdate();
+    else renderMasterUpdate();
     if (changed) await loadInitialChannels({quiet: true});
   } catch {
     // Silent polling failure. User-facing errors are reserved for explicit actions.
@@ -1643,8 +1995,6 @@ function bindSports() {
     sportsCollapsed = !enabled;
     localStorage.setItem(SPORTS_COLLAPSE_KEY, String(sportsCollapsed));
     sportsElement("sportsBody").classList.toggle("d-none", !enabled);
-    sportsElement("sportsAutoUpdate").disabled = !enabled;
-    sportsElement("sportsRunScanBtn").disabled = !enabled || Boolean(sportsState.scan?.running);
     scheduleSportsSave({enabled});
   });
   sportsElement("sportsCollapseBtn").addEventListener("click", () => {
@@ -1654,28 +2004,14 @@ function bindSports() {
     applySportsState();
   });
   sportsElement("sportsBlockSportFilter").addEventListener("change", renderSportsBlockMap);
-  sportsElement("sportsAutoUpdate").addEventListener("change", event => scheduleSportsSave({auto_update: event.target.checked}));
   sportsElement("sportsStartChannel").addEventListener("input", event => scheduleSportsSave({start_channel: Number(event.target.value)}));
   sportsElement("sportsBlockSize").addEventListener("input", event => scheduleSportsSave({channels_per_event: Number(event.target.value)}));
   sportsElement("sportsGroupTitle").addEventListener("input", event => scheduleSportsSave({group_title: event.target.value}));
   sportsElement("sportsTimezone").addEventListener("change", event => scheduleSportsSave({timezone: event.target.value}));
-  sportsElement("sportsScheduleMode").addEventListener("change", event => {
-    const mode = event.target.value === "interval" ? "interval" : "daily";
-    applySportsScheduleVisibility(mode);
-    scheduleSportsSave({schedule_mode: mode});
-  });
-  sportsElement("sportsIntervalHours").addEventListener("change", event => {
-    const value = Math.min(24, Math.max(1, Number(event.target.value) || 2));
-    event.target.value = value;
-    scheduleSportsSave({interval_hours: value});
-  });
   sportsElement("sportsEventWindow").addEventListener("change", event => scheduleSportsSave({event_window: event.target.value}));
   sportsElement("sportsIncludeReplays").addEventListener("change", event => scheduleSportsSave({include_replays: event.target.checked}));
   sportsElement("sportsIncludePregame").addEventListener("change", event => scheduleSportsSave({include_pregame: event.target.checked}));
   sportsElement("sportsUseBackups").addEventListener("change", event => scheduleSportsSave({use_backup_feeds: event.target.checked}));
-  sportsElement("sportsRefreshTime").addEventListener("change", event => {
-    if (event.target.value) scheduleSportsSave({refresh_time: event.target.value});
-  });
   sportsElement("sportsEverythingMode").addEventListener("change", event => {
     scheduleSportsSave({everything_mode: event.target.checked});
   });
@@ -1683,6 +2019,12 @@ function bindSports() {
     const signature = scanResultSignature(sportsState.last_scan);
     if (signature) localStorage.setItem(SPORTS_SCAN_DISMISSED_KEY, signature);
     renderSportsScanStatus();
+  });
+
+  sportsElement("sportsScheduleApiEnabled")?.addEventListener("change", toggleSportsScheduleApiEnabled);
+  sportsElement("sportsScheduleApiSave")?.addEventListener("click", saveSportsScheduleApi);
+  sportsElement("sportsScheduleApiList")?.addEventListener("click", event => {
+    if (event.target.closest(".schedule-api-remove")) removeSportsScheduleApi();
   });
 
   sportsElement("sportsAddSelectionBtn").addEventListener("click", () => {
@@ -1725,7 +2067,6 @@ function bindSports() {
       deleteSportsRule(Number(row.dataset.id));
     }
   });
-  sportsElement("sportsRunScanBtn").addEventListener("click", handleSportsScanAction);
 }
 
 async function initialize() {
@@ -1734,12 +2075,23 @@ async function initialize() {
   // lock, which could leave only part of the primary form disabled.
   await loadInitialChannels();
   await loadProviderSources();
-  await Promise.all([loadGroups(), loadEpgSources(), loadSports()]);
+  await Promise.all([loadGroups(), loadEpgSources(), loadSports(), loadMasterUpdate()]);
   setSourceMode(currentSourceMode);
   render();
   updateClearSearchButton();
   scheduleSportsStatusPoll();
 }
+
+document.getElementById("masterUpdateEnabled")?.addEventListener("change", event => {
+  saveMasterUpdate({enabled: event.target.checked});
+});
+document.getElementById("masterUpdateTime")?.addEventListener("change", event => {
+  if (event.target.value) saveMasterUpdate({time: event.target.value});
+});
+document.getElementById("masterUpdateNowBtn")?.addEventListener("click", runMasterUpdate);
+document.getElementById("publicEpgCountries")?.addEventListener("change", event => {
+  if (event.target.classList.contains("public-epg-country-check")) savePublicEpgSelections();
+});
 
 bindSports();
 initialize();

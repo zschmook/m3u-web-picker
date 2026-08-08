@@ -1037,3 +1037,158 @@ thead th {
   margin-top: 0.2rem;
   font-weight: 600;
 }
+
+/* v22.1: split provider refresh timestamp from account status. */
+.provider-source-table {
+  min-width: 1180px;
+}
+
+.provider-source-table col.provider-col-updated {
+  width: 210px;
+}
+
+.provider-source-table col.provider-col-status {
+  width: 235px;
+}
+
+.provider-source-table th:nth-child(5),
+.provider-source-table td:nth-child(5) {
+  width: 210px;
+  min-width: 210px;
+  padding-left: 1rem;
+  white-space: nowrap;
+}
+
+.provider-source-table th:nth-child(6),
+.provider-source-table td:nth-child(6) {
+  width: 235px;
+  min-width: 235px;
+  white-space: nowrap;
+}
+
+.provider-account-status {
+  margin-top: 0;
+}
+
+.sports-schedule-api .badge {
+  vertical-align: middle;
+}
+
+/* v22.1-debug2: one app-wide update clock directly under the served M3U URL. */
+.master-update-panel {
+  padding-top: .25rem;
+}
+
+.master-update-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+
+.master-time-label {
+  margin: 0;
+  color: #d1d5db;
+  font-size: .9rem;
+  white-space: nowrap;
+}
+
+.master-time-input {
+  width: 116px;
+}
+
+.public-epg-details {
+  border-top: 1px solid #374151;
+  padding-top: 14px;
+}
+
+.public-epg-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+  user-select: none;
+}
+
+.public-epg-country-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 18px;
+}
+
+.public-epg-country-item {
+  min-width: 0;
+}
+
+.public-epg-country-item .form-check-label {
+  cursor: pointer;
+}
+
+@media (max-width: 992px) {
+  .public-epg-country-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .master-update-controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 576px) {
+  .public-epg-country-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* v22.1-debug3: keep public-country controls readable in dark mode. */
+.public-epg-details > summary,
+.public-epg-details > summary::marker,
+.public-epg-country-item .form-check-label {
+  color: #e5e7eb;
+}
+
+/* Schedule API configuration is intentionally inactive until its master switch is on. */
+#sportsScheduleApiFields:disabled .form-label {
+  color: #9ca3af;
+}
+
+.schedule-api-table th {
+  white-space: nowrap;
+}
+
+.schedule-api-url-cell {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* v22.1-debug4: visible master-update progress and elapsed timer. */
+.master-update-running {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  color: #d1d5db;
+  font-size: .9rem;
+  white-space: nowrap;
+}
+
+.master-update-running .spinner-border {
+  width: 1rem;
+  height: 1rem;
+  border-width: .15em;
+}
+
+/* v22.1-debug7: mirror the master-update spinner/timer in Sports Automation. */
+.sports-scan-status-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+}
+
+.sports-scan-status-title-wrap .spinner-border {
+  width: 1rem;
+  height: 1rem;
+  border-width: .15em;
+  flex: 0 0 auto;
+}
