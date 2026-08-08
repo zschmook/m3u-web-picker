@@ -1,3 +1,28 @@
+# Quick Start
+
+Requires **Git** and **Docker Desktop / Docker Compose**.
+
+## macOS
+
+```bash
+cd ~/Desktop && git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git && cd m3u-web-picker && docker compose up -d --build
+```
+
+## Linux
+
+```bash
+cd ~/Desktop && git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git && cd m3u-web-picker && docker compose up -d --build
+```
+
+## Windows PowerShell
+
+```powershell
+cd ([Environment]::GetFolderPath("Desktop")); git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git; cd m3u-web-picker; docker compose up -d --build
+```
+
+Once started, open **http://localhost:9999**.
+
+---
 # M3U Web Picker
 ### v22.1-rc2
 
