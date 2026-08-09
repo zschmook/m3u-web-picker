@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import argparse
+import os
 
 from flask import Flask, render_template
 
-from core import PORT
 from api import register_routes
+from core import DEV_PORT, PORT
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("M3U_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
 
 
 @app.get("/")
@@ -23,9 +25,14 @@ if __name__ == "__main__":
         "-d",
         "--dev",
         action="store_true",
-        help="Run on developer port 9998 instead of 9999",
+        help="Run Flask debug mode on the developer port (default 9998).",
     )
     args = parser.parse_args()
 
-    run_port = 9998 if args.dev else PORT
-    app.run(host="0.0.0.0", port=run_port, debug=False)
+    run_port = DEV_PORT if args.dev else PORT
+    app.run(
+        host="0.0.0.0",
+        port=run_port,
+        debug=args.dev,
+        use_reloader=args.dev,
+    )

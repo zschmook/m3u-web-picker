@@ -1,7 +1,62 @@
+# Normal long-running instance.
+#
+# Host paths and container paths are different things:
+#   - The LEFT side/source is a folder on the computer running Docker.
+#   - The RIGHT side/target is the path visible inside the Linux container.
+#
+# The app always writes nightly DB backups to /backups INSIDE the container.
+# M3U_BACKUP_DIR chooses which HOST folder Docker maps to /backups.
+#
+# Examples for a .env file next to this Compose file:
+#   Linux:   M3U_BACKUP_DIR=/home/me/Documents/m3u_picker/nightly
+#   macOS:   M3U_BACKUP_DIR=/Users/me/Documents/m3u_picker/nightly
+#   Windows: M3U_BACKUP_DIR=C:/Users/me/Documents/m3u_picker/nightly
+#   Portable default: M3U_BACKUP_DIR=./backups
+#
+# Live runtime state is stored in a named Docker volume at /app/data and is
+# also copied safely to the host backup folder each night.
+name: m3u-picker
+
 services:
   m3u-picker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+
     container_name: m3u-picker
+
     ports:
-      - "9999:9999"
+      # HOST:CONTAINER. Change M3U_HOST_PORT if 9999 is already occupied.
+      - "${M3U_HOST_PORT:-9999}:9999"
+
+    environment:
+      # Enable the in-app nightly SQLite backup scheduler. No host cron needed.
+      M3U_BACKUP_ENABLED: "true"
+      M3U_DATA_DIR: /app/data
+      M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
+      M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
+      M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
+      M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
+      M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES: "${M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES:-268435456}"
+      M3U_BACKUP_CONTAINER_DIR: /backups
+      BACKUP_TIME: "03:15"
+      BACKUP_TIMEZONE: "America/New_York"
+      BACKUP_RETENTION_DAYS: "30"
+
+      # Master playlist refresh remains at 3:00 AM. Sports has its own time in
+      # the web UI and defaults to 3:00 AM as well.
+      MASTER_REFRESH_HOUR: "3"
+      MASTER_REFRESH_MINUTE: "0"
+
+    volumes:
+      - type: bind
+        source: "${M3U_BACKUP_DIR:-./backups}"
+        target: /backups
+      - type: volume
+        source: m3u-picker-data
+        target: /app/data
+
     restart: unless-stopped
+
+volumes:
+  m3u-picker-data:

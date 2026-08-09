@@ -1,0 +1,17 @@
+.git
+__pycache__
+*.py[cod]
+.DS_Store
+*.zip
+backups/
+backups-sports-debug/
+.vscode/
+.idea/
+config.json
+*.db
+*.m3u
+*.xml
+.env
+data/
+
+debug-data/
