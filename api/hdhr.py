@@ -13,15 +13,20 @@ from .http import no_cache
 
 # Must satisfy SiliconDust's HDHomeRun device-ID checksum rule.
 HDHR_DEVICE_ID = "1234ABC2"
+HDHR_DEVICE_AUTH = "m3u-web-picker"
 HDHR_FRIENDLY_NAME = "M3U Web Picker"
 HDHR_MODEL = "HDTC-2US"
 HDHR_TUNER_COUNT = 2
-HDHR_FIRMWARE_VERSION = "20260810"
+# Telly uses the HDHomeRun EXTEND ATSC personality specifically for Plex
+# compatibility. Keep the same firmware family while retaining our own ID.
+HDHR_FIRMWARE_NAME = "hdhomeruntc_atsc"
+HDHR_FIRMWARE_VERSION = "20150826"
 
 _HDHR_HTTP_PREFIXES = (
     "/discover.json",
     "/lineup_status.json",
     "/lineup.json",
+    "/lineup.post",
     "/device.xml",
     "/capability",
     "/hdhr/stream/",
@@ -31,6 +36,13 @@ _HDHR_HTTP_PREFIXES = (
 
 def _base_url() -> str:
     return request.host_url.rstrip("/")
+
+
+def _is_plex_request() -> bool:
+    user_agent = str(request.headers.get("User-Agent", "") or "").lower()
+    if "plex" in user_agent:
+        return True
+    return any(str(name).lower().startswith("x-plex-") for name in request.headers.keys())
 
 
 def _resolve_play_url(play_url: str) -> str:
@@ -56,8 +68,8 @@ def _lineup_rows() -> list[dict]:
             {
                 "GuideNumber": number,
                 "GuideName": name,
-                # Match the native HDHomeRun HTTP live-TV URL shape. The
-                # /hdhr/stream/<number> route remains available as an alias.
+                # Native HDHomeRun HTTP live-TV URL shape. Plex-compatible
+                # emulators use this form and may append their own query string.
                 "URL": f"{base}/auto/v{number}",
             }
         )
@@ -82,17 +94,34 @@ def _device_xml() -> bytes:
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _device_xml_response() -> Response:
+    response = Response(_device_xml(), content_type="application/xml; charset=utf-8")
+    return no_cache(response)
+
+
 def register_hdhr_routes(app):
     @app.before_request
-    def hdhr_http_trace():
-        if request.path.startswith(_HDHR_HTTP_PREFIXES):
-            # Temporary experimental visibility: if the official app says
-            # fetch() failed we can distinguish browser/WebView policy from a
-            # request that never reached the Docker-hosted facade.
+    def hdhr_http_trace_and_plex_root_probe():
+        plex_root_probe = (
+            request.path == "/"
+            and request.method in {"GET", "HEAD"}
+            and _is_plex_request()
+        )
+        if request.path.startswith(_HDHR_HTTP_PREFIXES) or plex_root_probe:
             print(
-                f"HDHomeRun HTTP {request.method} {request.path} from {request.remote_addr or '?'}",
+                "HDHomeRun HTTP "
+                f"{request.method} {request.path} "
+                f"from {request.remote_addr or '?'} "
+                f"host={request.host or '?'} "
+                f"ua={request.headers.get('User-Agent', '')!r}",
                 flush=True,
             )
+        # Plex-compatible tuner emulators such as Telly serve their UPnP
+        # capability XML at the base address. Do that only for Plex so the
+        # normal M3U Web Picker browser UI can continue owning '/'.
+        if plex_root_probe:
+            return _device_xml_response()
+        return None
 
     @app.after_request
     def hdhr_http_headers(response):
@@ -102,7 +131,7 @@ def register_hdhr_routes(app):
             # a web origin fetches an RFC1918 address, so explicitly allow the
             # private-network preflight as well.
             response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, POST, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Range, Accept, Origin"
             )
@@ -122,9 +151,10 @@ def register_hdhr_routes(app):
             FriendlyName=HDHR_FRIENDLY_NAME,
             Manufacturer="Silicondust",
             ModelNumber=HDHR_MODEL,
-            FirmwareName="hdhomerun",
+            FirmwareName=HDHR_FIRMWARE_NAME,
             FirmwareVersion=HDHR_FIRMWARE_VERSION,
             DeviceID=HDHR_DEVICE_ID,
+            DeviceAuth=HDHR_DEVICE_AUTH,
             BaseURL=base,
             LineupURL=f"{base}/lineup.json",
             TunerCount=HDHR_TUNER_COUNT,
@@ -133,13 +163,29 @@ def register_hdhr_routes(app):
 
     @app.get("/lineup_status.json")
     def hdhr_lineup_status():
+        # Plex-capable HDHomeRun emulators advertise a scan operation even
+        # though the IPTV lineup is already known. The matching lineup.post
+        # route below acknowledges start/abort as no-ops.
         response = jsonify(
             ScanInProgress=0,
-            ScanPossible=0,
+            ScanPossible=1,
             Source="Cable",
             SourceList=["Cable"],
         )
         return no_cache(response)
+
+    @app.post("/lineup.post")
+    def hdhr_lineup_scan():
+        action = str(request.args.get("scan", "") or "").strip().lower()
+        if action in {"start", "abort"}:
+            return no_cache(Response(status=200))
+        return no_cache(
+            Response(
+                "Invalid scan command.\n",
+                status=400,
+                content_type="text/plain; charset=utf-8",
+            )
+        )
 
     @app.get("/lineup.json")
     def hdhr_lineup():
@@ -148,8 +194,7 @@ def register_hdhr_routes(app):
     @app.get("/device.xml")
     @app.get("/capability")
     def hdhr_device():
-        response = Response(_device_xml(), content_type="application/xml; charset=utf-8")
-        return no_cache(response)
+        return _device_xml_response()
 
     @app.route("/hdhr/stream/<guide_number>", methods=["GET", "HEAD"])
     @app.route("/auto/v<guide_number>", methods=["GET", "HEAD"])
