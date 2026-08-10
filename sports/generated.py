@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -14,9 +16,9 @@ def _rewrite_extinf(line: str, attrs: dict[str, str], display_name: str) -> str:
     left = line.rsplit(",", 1)[0] if "," in line else line
     for key, value in attrs.items():
         escaped = str(value).replace('"', "'")
-        if _s.re.search(rf'{_s.re.escape(key)}="[^"]*"', left):
-            left = _s.re.sub(
-                rf'{_s.re.escape(key)}="[^"]*"',
+        if re.search(rf'{re.escape(key)}="[^"]*"', left):
+            left = re.sub(
+                rf'{re.escape(key)}="[^"]*"',
                 f'{key}="{escaped}"',
                 left,
             )
@@ -211,12 +213,12 @@ def publish_generated(
                         item["tvg_id"],
                         item["source_tvg_id"],
                         item["tvg_logo"],
-                        _s.json.dumps(item["raw"]),
+                        json.dumps(item["raw"]),
                         item["event_title"],
                         item["event_start"],
                         item["event_end"],
                         1 if item["is_replay"] else 0,
-                        _s.json.dumps(item.get("epg_programme") or {}),
+                        json.dumps(item.get("epg_programme") or {}),
                         generated_at,
                     ),
                 )
