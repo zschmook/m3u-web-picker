@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Iterable
 
@@ -75,7 +76,7 @@ def _matching_rules(event: dict, rules: list[dict] | dict) -> list[dict]:
     source_text = event.get("source_text", "")
     for sport_id, sport_rules in by_scope["sport"].items():
         if sport_id in event_sports or any(
-            _s.re.search(pattern, source_text, _s.re.I)
+            re.search(pattern, source_text, re.I)
             for pattern in _s.SPORT_PATTERNS.get(sport_id, [])
         ):
             add(sport_rules)
