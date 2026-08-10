@@ -1,6 +1,6 @@
-# Experimental Casting / TV Playback
+# Experimental Streaming / Casting / TV Playback
 
-This document covers the experimental playback and casting features on the `experiments` branch.
+This document covers the experimental local playback, Google Cast, and Roku playback features on the `experiments` branch.
 
 The experimental TV Guide runs at:
 
@@ -8,100 +8,136 @@ The experimental TV Guide runs at:
 http://localhost:1000/guide
 ```
 
-The Mac remains the media relay. Provider stream URLs and credentials stay server-side.
+The browser remains the controller and the Mac remains the media relay. Provider stream URLs, credentials, tokens, and source-specific details stay server-side.
 
-## Playback architecture
+## Current playback architecture
 
-Browser playback and TV playback use separate ffmpeg-normalized outputs:
+Local browser playback and remote-TV playback deliberately use separate ffmpeg-normalized outputs:
 
 ```text
 Provider stream
     |
-    +--> ffmpeg --> H.264/AAC fragmented MP4 --> browser
+    +--> ffmpeg --> H.264/AAC fragmented MP4 --> local browser player
     |
-    +--> ffmpeg --> H.264/AAC HLS ------------> Chromecast / Roku
+    +--> ffmpeg --> H.264/AAC HLS ------------> Chromecast / Google TV
+    |
+    +--> ffmpeg --> H.264/AAC HLS ------------> Roku receiver
 ```
 
-The browser controller should stay on `localhost`, while Chromecast and Roku must fetch the HLS relay over the Mac's LAN address.
+This separation is intentional. Cast/Roku changes should not destabilize the browser player, and remote devices never need direct access to provider URLs.
 
-## LAN address
+The controller should normally stay on `localhost`. Cast and Roku receivers fetch HLS from the Mac over the LAN.
 
-On macOS, determine the active LAN address with:
+## Experimental Docker/LAN layout
+
+The experimental stack is isolated from the normal M3U Web Picker instance and publishes the application on host port `1000`.
+
+Typical startup:
 
 ```bash
-./scripts/detect-lan-host.sh
+docker compose up -d --build
 ```
 
-For the current test machine, the LAN address is:
-
-```text
-10.0.0.22
-```
-
-The experimental Docker stack publishes the guide and relay on host port `1000`, so TV devices fetch media from URLs beginning with:
-
-```text
-http://10.0.0.22:1000
-```
-
-If the Mac moves to another network, use the new LAN address rather than assuming a `192.168.*` or `10.0.0.*` subnet.
-
-## Browser playback
-
-1. Open:
-
-   ```text
-   http://localhost:1000/guide
-   ```
-
-2. Find a channel in the curated lineup.
-3. Press **Play**.
-4. The browser player uses the ffmpeg-backed H.264/AAC fragmented-MP4 path.
-5. Press **Stop** to stop local playback.
-
-The raw provider stream is not exposed to the browser as a direct playback/download URL.
-
-## Chromecast
-
-Chromecast playback uses Google Cast plus a separate HLS relay.
-
-### Requirements
-
-- Chromecast and Mac must be on the same LAN.
-- The experimental guide must remain open in Chrome at `http://localhost:1000/guide`.
-- The HLS relay must be reachable from the Chromecast using the Mac's LAN address.
-
-### Send a channel
-
-1. Play a channel in the experimental TV Guide.
-2. Press **Cast** beside the player controls.
-3. Choose the Chromecast/Google Cast receiver, for example **Office TV**.
-4. The guide creates a Cast receiver session and loads the HLS media URL on the receiver.
-5. The Chromecast pulls the `.m3u8` playlist and MPEG-TS segments directly from the Mac over the LAN.
-
-The controller remains on:
+Then open:
 
 ```text
 http://localhost:1000/guide
 ```
 
-The receiver media URL uses the LAN host, for example:
+Runtime/debug state lives under:
 
 ```text
-http://10.0.0.22:1000/guide/cast/<session>/stream.m3u8
+./debug-data
 ```
 
-### Chromecast diagnostics
+On macOS, the repository includes:
 
-Expand **Diagnostics** directly below the player to see the current Cast relay address and use **Test LAN**.
+```bash
+./scripts/detect-lan-host.sh
+```
 
-If a Cast session opens and channel metadata appears on the TV but video never starts, verify that the relay address shown in Diagnostics matches the Mac's actual active LAN IP.
+The current test network uses a `10.x.x.x` LAN. The app's receiver-facing URLs therefore look like:
 
-## Roku
+```text
+http://10.x.x.x:1000/guide/cast/<token>/stream.m3u8
+```
 
-Roku playback currently uses a sideloaded experimental Roku receiver app. This is a developer-mode workflow.
+The exact LAN address is runtime-specific; do not hard-code the example address into future logic.
 
-### 1. Enable Roku developer mode
+## Local browser playback
+
+1. Open `http://localhost:1000/guide`.
+2. Find a channel in the curated lineup.
+3. Press **Play**.
+4. The browser uses the ffmpeg-backed H.264/AAC fragmented-MP4 path.
+5. Press **Stop** for a true stop.
+
+The guide API exposes the application playback route, not the raw provider URL.
+
+Generated Sports Automation channels use the same guide/player routing as manually selected channels. A generated sports row can therefore be played locally, Cast, or sent to Roku through the same controller.
+
+## Remote-device discovery
+
+The guide attempts discovery automatically when it opens.
+
+### Google Cast discovery
+
+Google's Cast Sender SDK reports receiver availability. The **Cast** button is hidden when no Cast receivers are available and shown when Cast reports at least one receiver.
+
+There is intentionally one Cast button even when multiple Google Cast devices exist. Google's native receiver picker owns device selection.
+
+### Roku discovery
+
+The experimental Roku discovery path scans the local `/24` used by the current `10.x.x.x` test network and probes Roku ECP on TCP port `8060`.
+
+Discovery validates the Roku device identity through its ECP device information. A random host listening on port 8060 is not enough to qualify as a Roku.
+
+When discovery returns devices:
+
+- zero Roku devices: hide the normal Roku button;
+- one or more Roku devices: prefer the browser's previously used Roku if it is still present, otherwise use the first discovered Roku;
+- the discovered Roku name/IP is written into Diagnostics so it can still be inspected or manually tested.
+
+The current automatic discovery proves that a Roku ECP device exists. It does **not** yet prove that the M3U Web Picker sideloaded receiver app is installed.
+
+## Google Cast playback
+
+Google Cast uses the Cast Application Framework sender plus the default receiver/media path.
+
+### Requirements
+
+- Mac and Cast receiver must be on the same LAN.
+- Open the sender/controller at `http://localhost:1000/guide`.
+- The receiver-facing HLS URL must be reachable over the Mac's LAN address.
+
+### Starting Cast playback
+
+1. Press **Play** on a channel so the guide has a current channel.
+2. Press **Cast**.
+3. Google's native receiver picker opens.
+4. Choose a Chromecast/Google TV receiver.
+5. M3U Web Picker starts the HLS relay and loads that HLS URL into the selected Cast session.
+6. The remote device pulls the playlist and MPEG-TS segments from the Mac.
+
+The browser remains the controller. While Cast is active, selecting another guide channel sends the newly selected channel through the Cast path rather than starting duplicate local playback.
+
+### Disconnecting Cast
+
+**Disconnect** is a handoff, not a destructive stop:
+
+1. stop remote media;
+2. stop the Cast HLS relay;
+3. end the Cast session;
+4. wait for the Cast session to actually disappear;
+5. resume the same current channel in the local browser if the channel has not changed in the meantime.
+
+The channel identity guard prevents an asynchronous Cast shutdown from resurrecting an old channel after the user has selected something else or pressed **Stop**.
+
+## Roku playback
+
+Roku playback uses a sideloaded experimental Roku receiver application plus the same H.264/AAC HLS relay concept used by Cast.
+
+### Enable Roku developer mode
 
 From the Roku home screen, press:
 
@@ -120,21 +156,17 @@ Right
 
 Choose **Enable installer and restart**, accept the developer agreement, set a developer password, and allow the Roku to restart.
 
-Note the Roku's LAN IP address.
+If required, enable Roku local-network control under the Roku setting for **Control by mobile apps**.
 
-If required, enable Roku local control under the Roku setting for **Control by mobile apps**.
+### Install the Roku receiver
 
-### 2. Install the Roku receiver
-
-The receiver ZIP is included in the repository at:
+The receiver ZIP is included at:
 
 ```text
 roku-receiver/dist/m3u-web-picker-roku-receiver-exp1.zip
 ```
 
-A bundled copy may also be present at the repository root in experimental release ZIPs.
-
-From a computer on the same LAN, open the Roku's IP address in a browser:
+From a computer on the same LAN, open the Roku's address in a browser:
 
 ```text
 http://ROKU-IP
@@ -149,84 +181,113 @@ Password: <your Roku developer-mode password>
 
 In the Roku **Development Application Installer**:
 
-1. Choose **Install with zip**.
-2. Upload `m3u-web-picker-roku-receiver-exp1.zip`.
-3. Do not extract the receiver ZIP first.
+1. choose **Install with zip**;
+2. upload `m3u-web-picker-roku-receiver-exp1.zip`;
+3. do not extract the receiver ZIP first.
 
 Roku permits only one sideloaded developer application at a time.
 
-### 3. Connect the TV Guide to the Roku
+### Starting Roku playback
 
-1. Open the experimental guide:
+Normal use no longer requires manually typing the Roku IP before every session. Automatic discovery chooses the remembered/first Roku and fills the Diagnostics field.
 
-   ```text
-   http://localhost:1000/guide
-   ```
+1. Open `http://localhost:1000/guide`.
+2. Press **Play** on a channel.
+3. Press **Roku**.
+4. M3U Web Picker launches the sideloaded receiver and passes the current HLS session.
+5. The Roku pulls the HLS media from the Mac over the LAN.
 
-2. Expand **Diagnostics** directly below the player.
-3. Enter the Roku's LAN IP in **Roku TV IP**.
-4. Press **Test Roku**.
-5. A successful test displays the detected Roku device name/model and remembers the IP in that browser.
+Diagnostics still exposes **Roku TV IP** and **Test Roku** for development/troubleshooting.
 
-Example from development testing:
+### Disconnecting Roku
 
-```text
-Found 65" TCL Roku TV · 65S435
-```
+**Disconnect Roku** stops the Roku relay, sends the Roku back to Home, and resumes the same current channel in the local browser when that channel is still current.
 
-### 4. Send a channel to Roku
+As with Cast, **Stop** remains a true stop and clears the current channel so a later asynchronous handoff cannot restart it.
 
-1. Press **Play** on a channel so it becomes the current guide channel.
-2. Press **Roku** beside the **Cast** and **Stop** controls.
-3. The app launches the sideloaded Roku receiver and passes it the current HLS session.
-4. The Roku pulls the H.264/AAC HLS stream from the Mac over the LAN.
-5. Use **Disconnect Roku** when you want to stop Roku playback and return to the Roku home screen.
+## Cast <-> Roku direct switching
 
-The media path is conceptually:
+Direct remote-to-remote switching is supported. The user does not need to press Disconnect before choosing the other remote target.
+
+This path is serialized because Cast and Roku are separate asynchronous state machines.
+
+The current transition rules are:
 
 ```text
-provider --> ffmpeg --> H.264/AAC HLS --> Mac LAN :1000 --> Roku
+Local -> Cast              allowed
+Local -> Roku              allowed
+Cast  -> Roku              tear down Cast completely, then start Roku
+Roku  -> Cast              tear down Roku, then open/complete Cast selection
+Cast  -> Disconnect        return current channel to local
+Roku  -> Disconnect        return current channel to local
+Stop                       true stop; do not resume anything
 ```
+
+A shared remote-transition lock disables/ignores additional remote actions while a handoff is already in flight. This prevents rapid button clicking from overlapping two receiver transitions.
+
+For Cast -> Roku specifically, M3U Web Picker waits until the Cast session is actually gone before Roku startup proceeds. Merely requesting Cast teardown is not considered sufficient.
+
+## Known Cast picker edge case
+
+When Roku is active and the user presses **Cast**, Roku is shut down before Google's native receiver picker completes. If the user then cancels the Cast picker, Roku has already been stopped and the browser does not currently auto-resume local playback.
+
+This is a known experimental edge case and is intentionally left alone for now. It does not affect the normal successful Roku -> Cast path.
 
 ## Diagnostics
 
-The **Diagnostics** section is directly below the TV Guide player. It currently contains the networking/device setup needed for experimental TV playback, including:
+The expandable **Diagnostics** section below the player currently contains development/troubleshooting controls such as:
 
-- Cast relay address
-- **Test LAN**
-- **Roku TV IP**
-- **Test Roku**
-- detected Roku device information
+- current Cast relay address;
+- **Test LAN**;
+- discovered/selected **Roku TV IP**;
+- **Test Roku**;
+- detected Roku name/model/status;
+- Cast SDK/session status.
 
-These controls are intentionally experimental and may move as the TV Guide UI is cleaned up.
+Normal device discovery is automatic; Diagnostics is no longer intended to be the primary day-to-day device-selection workflow.
 
-## Docker
+## Current verified behavior
 
-The experimental build is isolated from the normal M3U Web Picker instance and uses host port `1000`.
+Manually exercised on the experimental branch:
 
-Typical startup:
+- local ffmpeg-normalized browser playback;
+- Cast availability discovery;
+- Google native Cast receiver picker;
+- Cast HLS playback over the LAN;
+- automatic Roku discovery on the current LAN;
+- Roku HLS playback through the sideloaded receiver;
+- channel changes while remote playback is active;
+- Cast Disconnect -> same channel resumes locally;
+- Roku Disconnect -> same channel resumes locally;
+- direct Cast -> Roku handoff;
+- direct Roku -> Cast handoff;
+- rapid/repeated remote-button clicking is blocked while a handoff is in flight;
+- **Stop** remains a true stop and prevents stale async handoffs from reviving old playback.
 
-```bash
-docker compose up -d --build
-docker compose ps
-```
+These are manual experimental tests, not a claim of complete browser/device compatibility or full automated integration coverage.
 
-Then open:
+## Streaming/casting backlog
 
-```text
-http://localhost:1000/guide
-```
+### Multiple Roku support
 
-Runtime/debug state for this experiment lives under `./debug-data` in the experimental build.
+Current behavior chooses the remembered Roku when possible, otherwise the first discovered Roku. That is sufficient for a one-Roku test environment but is not the finished UX.
 
-## Current status
+Required future behavior:
 
-Verified during development:
+- **0 Rokus:** hide the Roku control;
+- **1 Roku:** the Roku button sends directly to that device;
+- **2+ Rokus:** provide a small selector/dropdown rather than silently choosing the first device;
+- remember the last-used Roku and preselect it when it is still available;
+- show a useful device name/model and enough network identity to distinguish similar TVs;
+- keep discovery restricted to verified Roku devices, not arbitrary hosts;
+- consider verifying that the M3U Web Picker sideloaded receiver is installed before presenting a Roku as fully playback-ready.
 
-- browser playback through ffmpeg-normalized H.264/AAC
-- Chromecast receiver session creation
-- Chromecast HLS playback over the LAN
-- Roku discovery/test over the LAN
-- Roku playback through the sideloaded receiver
+### Other follow-up items
 
-These casting features remain experimental and belong on the `experiments` branch until they are intentionally promoted.
+- Revisit the Roku -> Cast picker-cancel behavior if it becomes annoying in real use.
+- Generalize Roku discovery beyond the current `10.x.x.x /24` experimental-network assumption before treating it as portable production behavior.
+- Continue testing teardown/reconnect behavior across real Cast and Roku firmware variants.
+
+## Scope
+
+All streaming/casting work described here remains experimental and belongs on the `experiments` branch until it is intentionally promoted to another release branch.
