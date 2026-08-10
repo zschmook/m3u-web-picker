@@ -43,6 +43,17 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             "http://10.0.0.22:10000/lineup.json",
         )
 
+    def test_discover_matches_hdhomerun_cross_origin_behavior(self):
+        response = self.client.get(
+            "/discover.json",
+            base_url="http://10.0.0.22:10000",
+            headers={"Origin": "https://app.hdhomerun.com"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertIn("GET", response.headers.get("Access-Control-Allow-Methods", ""))
+        self.assertIn("Range", response.headers.get("Access-Control-Allow-Headers", ""))
+
     @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
     def test_lineup_uses_exact_curated_channel_numbers(self, _curated):
         response = self.client.get(
