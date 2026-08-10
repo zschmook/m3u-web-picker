@@ -32,6 +32,7 @@ _catalog = import_module(f"{__name__}.catalog")
 _generated = import_module(f"{__name__}.generated")
 _rules = import_module(f"{__name__}.rules")
 _feeds = import_module(f"{__name__}.feeds")
+_epg_io = import_module(f"{__name__}.epg_io")
 _guide = import_module(f"{__name__}.guide")
 _guide_validation = import_module(f"{__name__}.guide_validation")
 _scan = import_module(f"{__name__}.scan")
@@ -140,6 +141,16 @@ _install(
         "_feed_label",
         "_preferred_feed_logo",
         "_build_feeds",
+    ),
+)
+_install(
+    _epg_io,
+    (
+        "derive_xmltv_url",
+        "refresh_epg_cache",
+        "download_xmltv_bytes",
+        "_parse_xmltv_time",
+        "_iterparse_xmltv",
     ),
 )
 _install(
