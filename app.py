@@ -12,7 +12,24 @@ app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    html = render_template("index.html")
+    return html.replace(
+        "</body>",
+        """
+<script>
+  (() => {
+    const brand = document.querySelector(".app-brand-block");
+    const status = document.getElementById("sportsScanStatus");
+    if (!brand || !status) return;
+    brand.style.flex = "1 1 620px";
+    status.classList.remove("mb-3");
+    status.classList.add("mt-4");
+    status.style.width = "100%";
+    brand.appendChild(status);
+  })();
+</script>
+</body>""",
+    )
 
 
 @app.get("/guide")
