@@ -69,6 +69,7 @@ def _record_schedule_api_refresh_health(
     health = schedule_api_refresh_health(db_path)
     datasets = dict(health.get("datasets") or {})
     recorded_at = _s._now_iso()
+    reference_datasets = set(plan.get("reference_datasets") or [])
 
     for planned in plan.get("datasets") or []:
         dataset_id = str(planned.get("id") or "")
@@ -141,12 +142,13 @@ def _record_schedule_api_refresh_health(
                 )
             )
             entry["reference_error_at"] = recorded_at
-        elif dataset_id == "ncaa" and successes:
-            # A successful NCAA schedule fetch does not guarantee standings/reference
-            # data was requested, so only clear an old reference error when this run
-            # did not report one and the plan still requires that reference dataset.
-            if "ncaa_membership" in set(plan.get("reference_datasets") or []):
-                entry["reference_error"] = ""
+        elif dataset_id == "ncaa" and "ncaa_membership" in reference_datasets:
+            # If NCAA membership was required and no reference failure was
+            # reported, the reference lookup succeeded or reused its valid
+            # season cache. Clear any older failure even when game dates were
+            # themselves satisfied entirely from cache.
+            entry["reference_error"] = ""
+            entry["reference_error_at"] = None
 
         datasets[dataset_id] = entry
 
