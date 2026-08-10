@@ -1,0 +1,26 @@
+name: Refactor Check
+
+on:
+  push:
+    branches:
+      - experiments-refacor-work
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile Python sources
+        run: python -m compileall -q .
+      - name: Run unit tests
+        env:
+          M3U_DISABLE_SCHEDULER: 'true'
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
