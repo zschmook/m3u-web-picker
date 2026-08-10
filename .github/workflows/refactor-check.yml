@@ -29,13 +29,20 @@ jobs:
           import ast
           from pathlib import Path
 
-          for path in [Path('sports.py'), *sorted(Path('sports').glob('*.py'))]:
+          offenders = []
+          paths = [p for p in [Path('sports.py'), *sorted(Path('sports').glob('*.py'))] if p.exists()]
+          for path in paths:
               tree = ast.parse(path.read_text(encoding='utf-8'))
               print(f'=== {path} ===')
               for node in tree.body:
                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                       end = getattr(node, 'end_lineno', node.lineno)
-                      print(f'{node.name}\t{node.lineno}-{end}\t{end-node.lineno+1}')
+                      size = end - node.lineno + 1
+                      print(f'{node.name}\t{node.lineno}-{end}\t{size}')
+                      if size > 500:
+                          offenders.append(f'{path}:{node.name}={size}')
+          if offenders:
+              raise SystemExit('Sports functions/classes over 500 lines: ' + ', '.join(offenders))
           PY
       - name: Run unit tests
         env:
