@@ -1,4 +1,4 @@
-> **v30-experiments / exp11-roku-bundled — DEBUG ONLY:** Full standalone experiment on `http://localhost:1000`. It uses its own Compose project/container and local `./debug-data`; it does not mount the stable main instance's Docker volume. This build includes the pop-out TV Guide, ffmpeg-backed browser playback, Chromecast playback, and experimental Roku playback.
+> **v30-experiments / exp11-roku-bundled — DEBUG ONLY:** Full standalone experiment on `http://localhost:10000`. It uses its own Compose project/container and local `./debug-data`; it does not mount the stable main instance's Docker volume. This build includes the pop-out TV Guide, ffmpeg-backed browser playback, Chromecast playback, and experimental Roku playback.
 
 # M3U Web Picker
 
@@ -18,10 +18,11 @@
 - Removes the user-entered Schedule API base URL. The user supplies only the API-SPORTS key; M3U Web Picker owns the product endpoints internally and derives the needed products from existing Sports Automation selections.
 - Current API-backed schedule adapters: **MLB** through API-SPORTS Baseball, plus **NFL** and **NCAA football** through API-SPORTS American Football. Unsupported or intentionally legacy-only sports (for example golf and track & field) continue through the existing provider/XMLTV matcher without making an API call.
 - Collapses overlapping rules into the minimum unique schedule datasets. Selecting a league, conferences, and multiple teams does not create one request per rule; rules are filtered locally against the already-fetched league/day slate.
-- Caches API schedule results by provider/product/endpoint plus normalized request parameters (including date/season/timezone where applicable) and reuses same-day data across normal Master Update and repeated **Update Now** runs. **Force Schedule Refresh** is an explicit advanced control that bypasses only the daily schedule cache.
+- Caches API schedule results by provider/product/endpoint plus normalized request parameters (including date/season/timezone where applicable) and reuses same-day data across normal Master Update and repeated **Update Now** runs. **Refresh API schedules** is an explicit advanced control that bypasses only the same-day schedule cache.
 - Caches NCAA conference membership as long-lived reference data so Big Ten, ACC, SEC, and explicit team rules can be evaluated locally against one NCAA schedule dataset. Existing seeded conference membership remains a fallback if reference data cannot be refreshed.
 - API failures first preserve/reuse relevant cached canonical schedules when possible; if no usable canonical schedule is available, the affected sport falls back to the existing provider/EPG matcher instead of taking down the lineup.
-- The Schedule API request plan and cache status are visible in the UI, including which selected rules are API-backed, legacy-only, or mixed.
+- The Schedule API table reports each planned dataset independently. **Cached**, **No successful cache**, **Refresh failed**, **Partial refresh**, and **Using cached fallback** are distinct states; a configured API key no longer makes every dataset misleadingly look active.
+- The most recent per-dataset refresh attempt and generic failure reason are persisted in the local sports database so a failed NFL/NCAA refresh remains visible after polling or page reload. API credentials are never included in this health payload.
 - **Update Now** is disabled for the entire time any update pipeline is running, preventing overlapping refreshes or accidental double-click cancellation.
 - Retains the RC4 sticky top control area, equal-width Channels/EPG labels, right-aligned status rows, and visible User Guide link.
 - No cache/backup storage cleanup changes are included in RC5; that investigation remains separate.
@@ -150,19 +151,17 @@ Do not extract that receiver ZIP first. Roku permits only one sideloaded develop
 Start the experimental Docker build and open:
 
 ```text
-http://localhost:1000/guide
+http://localhost:10000/guide
 ```
 
 Then:
 
 1. Press **Play** on a channel so it becomes the current guide channel.
-2. Expand **Diagnostics** directly below the video player.
-3. Enter the Roku TV's LAN IP in **Roku TV IP**.
-4. Press **Test Roku**. A successful test displays the Roku device name/model and remembers the IP in that browser.
-5. Press **Roku** beside the Cast/Stop controls to launch the sideloaded receiver and send the current channel to the TV.
-6. Press **Disconnect Roku** to stop Roku playback and return the Roku home screen.
+2. The guide automatically discovers verified Roku ECP devices on the current experimental LAN. Diagnostics still shows the selected Roku IP/name and retains **Test Roku** for troubleshooting.
+3. Press **Roku** beside the Cast control to launch the sideloaded receiver and send the current channel to the TV.
+4. Press **Disconnect Roku** to stop Roku playback, return the Roku home screen, and resume the same current channel locally.
 
-The Mac remains the media relay: the provider stream is normalized by ffmpeg into H.264/AAC HLS, and the Roku pulls that HLS stream over the LAN. Provider credentials and raw stream URLs remain server-side.
+The Mac remains the media relay: the provider stream is normalized by ffmpeg into H.264/AAC HLS, and the Roku pulls that HLS stream over the LAN. Provider credentials and raw stream URLs remain server-side. Direct Cast↔Roku switching is serialized so the old remote target is fully torn down before the new one starts. Multiple-Roku selection is a required follow-up: 0 devices hides the control, 1 device is direct, and 2+ devices will use a selector with the last-used Roku preselected.
 
 ## Persistent Docker state
 
@@ -179,7 +178,7 @@ http://YOUR-SERVER-IP:10000/epg/epg.xml
 
 Use `epg.xml` for everything: selected manual channels use provider/configured guide data first and enabled free public-country guides as fallback, while generated sports channels are merged into the same file. The provider's full XMLTV catalog is never copied into this output.
 
-The examples use the sports debug port `10000`; the normal Compose instance uses `9999`. The Channels M3U advertises `epg.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
+The examples use the experimental/debug port `10000`; the normal Compose instance uses `9999`. The Channels M3U advertises `epg.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
 
 ## Fresh debug state (recommended)
 
@@ -335,13 +334,13 @@ python3 app.py --dev
 Open `http://localhost:9998`.
 
 
-Experimental TV Guide Cast support lives only in v30-experiments / sports-experiments.
+Experimental TV Guide Cast/Roku support lives only on the `experiments` branch until intentionally promoted.
 
 
-### v30 experiments exp5 LAN/Cast test
+### v30 experiments LAN/Cast test
 
-This disposable build publishes port 1000 on all host interfaces. On the test Mac its configured LAN URL is `http://10.0.0.22:1000`. Use `http://localhost:1000/guide` for the Google Cast sender UI; the Chromecast fetches the selected ffmpeg stream from `http://10.0.0.22:1000`.
+This disposable build publishes port 10000 on all host interfaces. On the test Mac its configured LAN URL is `http://10.0.0.22:10000`. Use `http://localhost:10000/guide` for the Google Cast sender UI; the Chromecast/Roku fetches the selected HLS relay from `http://10.0.0.22:10000`.
 
-### v30 experiments LAN note (exp8)
+### v30 experiments LAN note
 
-This test machine is currently `10.0.0.22` on `en0`, so Chromecast HLS is advertised as `http://10.0.0.22:1000`. The Cast controller should still be opened at `http://localhost:1000/guide` on the Mac. If the Mac moves to another LAN, run `./scripts/detect-lan-host.sh` to see the new address and override `M3U_LAN_HOST` when starting the experiment rather than assuming a `192.168.*` network.
+This test machine is currently `10.0.0.22` on `en0`, so Chromecast/Roku HLS is advertised as `http://10.0.0.22:10000`. The Cast controller should still be opened at `http://localhost:10000/guide` on the Mac. If the Mac moves to another LAN, run `./scripts/detect-lan-host.sh` to see the new address and override `M3U_LAN_HOST` when starting the experiment rather than assuming a `192.168.*` network.
