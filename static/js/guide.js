@@ -1,15 +1,22 @@
-let guideChannels = [];
-let currentGuideChannel = null;
-let castContext = null;
-let castApiReady = false;
-let castSessionLoadInFlight = false;
-let lastCastMediaUrl = "";
-let currentCastPipelineToken = "";
-let currentRokuPipelineToken = "";
-let currentRokuHost = "";
-let currentRokuDeviceName = "Roku TV";
-let rokuPlaybackActive = false;
-let guideConfig = {media_origin: ""};
+const guideState = {
+  channels: [],
+  currentChannel: null,
+  config: {media_origin: ""},
+  mode: "stopped",
+  cast: {
+    context: null,
+    apiReady: false,
+    loadInFlight: false,
+    lastMediaUrl: "",
+    relayToken: "",
+  },
+  roku: {
+    relayToken: "",
+    host: "",
+    deviceName: "Roku TV",
+    active: false,
+  },
+};
 
 const guideEls = {
   status: document.getElementById("guideStatus"),
@@ -49,8 +56,8 @@ function escapeHtml(value) {
 
 function filteredGuideChannels() {
   const query = guideEls.search.value.trim().toLowerCase();
-  if (!query) return guideChannels;
-  return guideChannels.filter(channel => {
+  if (!query) return guideState.channels;
+  return guideState.channels.filter(channel => {
     const text = `${channel.number} ${channel.name} ${channel.group} ${channel.subtitle || ""}`.toLowerCase();
     return text.includes(query);
   });
@@ -68,7 +75,7 @@ function renderGuide() {
     const generated = channel.generated
       ? `<span class="badge text-bg-primary guide-generated-badge">Auto</span>`
       : "";
-    const isCurrent = currentGuideChannel?.play_url === channel.play_url;
+    const isCurrent = guideState.currentChannel?.play_url === channel.play_url;
     return `
       <tr class="${isCurrent ? "guide-current-row" : ""}">
         <td>${escapeHtml(channel.number)}</td>
@@ -102,11 +109,11 @@ async function loadGuide() {
     const response = await fetch("/api/guide/channels", {cache: "no-store"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not load curated lineup.");
-    guideChannels = Array.isArray(data.channels) ? data.channels : [];
+    guideState.channels = Array.isArray(data.channels) ? data.channels : [];
     renderGuide();
-    guideEls.status.textContent = `${guideChannels.length.toLocaleString()} currently served channel${guideChannels.length === 1 ? "" : "s"}`;
+    guideEls.status.textContent = `${guideState.channels.length.toLocaleString()} currently served channel${guideState.channels.length === 1 ? "" : "s"}`;
   } catch (error) {
-    guideChannels = [];
+    guideState.channels = [];
     renderGuide();
     guideEls.status.textContent = error.message;
   }
@@ -122,13 +129,13 @@ async function loadGuideConfig() {
     const response = await fetch("/api/guide/config", {cache: "no-store"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not load guide network configuration.");
-    guideConfig = data || {media_origin: ""};
-    if (!guideConfig.media_origin && !isLoopbackHost(window.location.hostname)) {
-      guideConfig.media_origin = window.location.origin;
+    guideState.config = data || {media_origin: ""};
+    if (!guideState.config.media_origin && !isLoopbackHost(window.location.hostname)) {
+      guideState.config.media_origin = window.location.origin;
     }
-    guideEls.castRelay.textContent = guideConfig.media_origin || "LAN relay not configured";
+    guideEls.castRelay.textContent = guideState.config.media_origin || "LAN relay not configured";
   } catch (error) {
-    guideConfig = {media_origin: ""};
+    guideState.config = {media_origin: ""};
     guideEls.castRelay.textContent = "LAN relay unavailable";
     console.error("Could not load guide network configuration", error);
   }
@@ -136,7 +143,7 @@ async function loadGuideConfig() {
 }
 
 function castMediaOrigin() {
-  const configured = String(guideConfig?.media_origin || "").trim();
+  const configured = String(guideState.config?.media_origin || "").trim();
   if (configured) return configured.replace(/\/$/, "");
   if (!isLoopbackHost(window.location.hostname)) return window.location.origin.replace(/\/$/, "");
   return "";
@@ -164,13 +171,13 @@ async function stopCastRelayToken(token) {
 }
 
 async function stopCastRelay() {
-  const token = currentCastPipelineToken;
-  currentCastPipelineToken = "";
+  const token = guideState.cast.relayToken;
+  guideState.cast.relayToken = "";
   await stopCastRelayToken(token);
 }
 
 async function startCastRelay(channel) {
-  const previousToken = currentCastPipelineToken;
+  const previousToken = guideState.cast.relayToken;
   const response = await fetch("/api/guide/cast/start", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -181,11 +188,11 @@ async function startCastRelay(channel) {
   if (!response.ok) throw new Error(data.error || "Could not start Cast HLS relay.");
   const mediaUrl = absoluteCastMediaUrl(data.playlist_path || "");
   if (!mediaUrl) throw new Error("The LAN media relay is not configured.");
-  currentCastPipelineToken = data.token || "";
+  guideState.cast.relayToken = data.token || "";
   return {
     mediaUrl,
     contentType: data.content_type || "application/x-mpegurl",
-    token: currentCastPipelineToken,
+    token: guideState.cast.relayToken,
     previousToken,
   };
 }
@@ -219,14 +226,14 @@ function configuredRokuHost() {
 
 function updateRokuControls(message = "") {
   const host = configuredRokuHost();
-  guideEls.rokuBtn.disabled = !currentGuideChannel || !host;
-  guideEls.rokuBtn.textContent = rokuPlaybackActive ? "Disconnect Roku" : "Roku";
+  guideEls.rokuBtn.disabled = !guideState.currentChannel || !host;
+  guideEls.rokuBtn.textContent = guideState.roku.active ? "Disconnect Roku" : "Roku";
   if (message) {
     guideEls.rokuStatus.textContent = message;
   } else if (!host) {
     guideEls.rokuStatus.textContent = "Enter the Roku TV IP, then sideload the included receiver app.";
-  } else if (rokuPlaybackActive) {
-    guideEls.rokuStatus.textContent = `Playing on ${currentRokuDeviceName} (${host}).`;
+  } else if (guideState.roku.active) {
+    guideEls.rokuStatus.textContent = `Playing on ${guideState.roku.deviceName} (${host}).`;
   } else {
     guideEls.rokuStatus.textContent = `Ready for Roku at ${host}.`;
   }
@@ -250,11 +257,11 @@ async function testRoku() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not reach Roku TV.");
-    currentRokuHost = data.roku_host || host;
-    currentRokuDeviceName = data.device?.name || "Roku TV";
-    localStorage.setItem("m3u-guide-roku-host", currentRokuHost);
-    guideEls.rokuHost.value = currentRokuHost;
-    updateRokuControls(`Found ${currentRokuDeviceName}${data.device?.model ? ` · ${data.device.model}` : ""}.`);
+    guideState.roku.host = data.roku_host || host;
+    guideState.roku.deviceName = data.device?.name || "Roku TV";
+    localStorage.setItem("m3u-guide-roku-host", guideState.roku.host);
+    guideEls.rokuHost.value = guideState.roku.host;
+    updateRokuControls(`Found ${guideState.roku.deviceName}${data.device?.model ? ` · ${data.device.model}` : ""}.`);
   } catch (error) {
     updateRokuControls(error.message || String(error));
   } finally {
@@ -263,10 +270,10 @@ async function testRoku() {
 }
 
 async function stopRokuPlayback({sendHome = true} = {}) {
-  const token = currentRokuPipelineToken;
-  const host = currentRokuHost || configuredRokuHost();
-  currentRokuPipelineToken = "";
-  rokuPlaybackActive = false;
+  const token = guideState.roku.relayToken;
+  const host = guideState.roku.host || configuredRokuHost();
+  guideState.roku.relayToken = "";
+  guideState.roku.active = false;
   if (token || (sendHome && host)) {
     try {
       await fetch("/api/guide/roku/stop", {
@@ -283,14 +290,15 @@ async function stopRokuPlayback({sendHome = true} = {}) {
 }
 
 function showRokuPlayer() {
+  guideState.mode = "roku";
   guideEls.player.classList.add("d-none");
   guideEls.castScreen.classList.remove("d-none");
   guideEls.nowPlayingLabel.textContent = "Now playing remotely";
   guideEls.playbackBadge.textContent = "Roku";
   guideEls.playbackBadge.className = "badge rounded-pill text-bg-primary";
   guideEls.remoteScreenVerb.textContent = "Playing on";
-  guideEls.castScreenDevice.textContent = currentRokuDeviceName || "Roku TV";
-  guideEls.castScreenChannel.textContent = currentGuideChannel?.name || "";
+  guideEls.castScreenDevice.textContent = guideState.roku.deviceName || "Roku TV";
+  guideEls.castScreenChannel.textContent = guideState.currentChannel?.name || "";
 }
 
 async function startRokuChannel(channel) {
@@ -300,14 +308,14 @@ async function startRokuChannel(channel) {
   if (currentCastSession()) {
     await stopRemoteMedia();
     await stopCastRelay();
-    castContext.endCurrentSession(true);
+    guideState.cast.context.endCurrentSession(true);
   }
 
-  const previousToken = currentRokuPipelineToken;
+  const previousToken = guideState.roku.relayToken;
   setCurrentChannel(channel);
   stopLocalStream({hidePanel: false});
-  currentRokuHost = host;
-  currentRokuDeviceName = currentRokuDeviceName || "Roku TV";
+  guideState.roku.host = host;
+  guideState.roku.deviceName = guideState.roku.deviceName || "Roku TV";
   guideEls.playerMessage.textContent = `Starting Roku relay for ${host}…`;
   showRokuPlayer();
 
@@ -323,39 +331,39 @@ async function startRokuChannel(channel) {
     throw new Error(data.error || "Could not start Roku playback.");
   }
 
-  currentRokuPipelineToken = data.token || "";
-  currentRokuHost = data.roku_host || host;
-  currentRokuDeviceName = data.device?.name || "Roku TV";
-  rokuPlaybackActive = true;
-  localStorage.setItem("m3u-guide-roku-host", currentRokuHost);
-  guideEls.rokuHost.value = currentRokuHost;
+  guideState.roku.relayToken = data.token || "";
+  guideState.roku.host = data.roku_host || host;
+  guideState.roku.deviceName = data.device?.name || "Roku TV";
+  guideState.roku.active = true;
+  localStorage.setItem("m3u-guide-roku-host", guideState.roku.host);
+  guideEls.rokuHost.value = guideState.roku.host;
   showRokuPlayer();
-  guideEls.playerMessage.textContent = `Playing on ${currentRokuDeviceName}.`;
-  updateRokuControls(`Playing on ${currentRokuDeviceName} · ${data.media_url || "HLS relay active"}`);
+  guideEls.playerMessage.textContent = `Playing on ${guideState.roku.deviceName}.`;
+  updateRokuControls(`Playing on ${guideState.roku.deviceName} · ${data.media_url || "HLS relay active"}`);
 
-  if (previousToken && previousToken !== currentRokuPipelineToken) {
+  if (previousToken && previousToken !== guideState.roku.relayToken) {
     await stopCastRelayToken(previousToken);
   }
 }
 
 async function toggleRoku() {
-  if (rokuPlaybackActive) {
+  if (guideState.roku.active) {
     await stopRokuPlayback({sendHome: true});
     showLocalPlayer();
-    if (currentGuideChannel) {
+    if (guideState.currentChannel) {
       guideEls.playerMessage.textContent = "Roku disconnected. Press Play to resume locally.";
     }
     return;
   }
 
-  if (!currentGuideChannel) {
+  if (!guideState.currentChannel) {
     updateRokuControls("Press Play on a channel first.");
     return;
   }
 
   guideEls.rokuBtn.disabled = true;
   try {
-    await startRokuChannel(currentGuideChannel);
+    await startRokuChannel(guideState.currentChannel);
   } catch (error) {
     console.error("Roku playback failed", error);
     guideEls.playerMessage.textContent = `Roku playback failed: ${error.message || error}.`;
@@ -366,7 +374,7 @@ async function toggleRoku() {
 }
 
 function currentCastSession() {
-  return castContext?.getCurrentSession?.() || null;
+  return guideState.cast.context?.getCurrentSession?.() || null;
 }
 
 function currentCastDeviceName() {
@@ -390,13 +398,13 @@ function updateCastStatus(message = "") {
   }
 
   guideEls.castBtn.textContent = "Cast";
-  guideEls.castBtn.disabled = !castApiReady;
+  guideEls.castBtn.disabled = !guideState.cast.apiReady;
 
   if (message) {
     guideEls.castStatus.textContent = message;
   } else if (!window.isSecureContext) {
     guideEls.castStatus.textContent = "Cast sender needs a secure origin. Open this guide at http://localhost:1000/guide; receiver media still comes from the LAN relay.";
-  } else if (!castApiReady) {
+  } else if (!guideState.cast.apiReady) {
     guideEls.castStatus.textContent = "Google Cast SDK loading…";
   } else if (!castMediaOrigin()) {
     guideEls.castStatus.textContent = "Google Cast is ready, but the LAN media relay is not configured.";
@@ -406,6 +414,7 @@ function updateCastStatus(message = "") {
 }
 
 function showLocalPlayer() {
+  guideState.mode = "local";
   guideEls.player.classList.remove("d-none");
   guideEls.castScreen.classList.add("d-none");
   guideEls.nowPlayingLabel.textContent = "Now playing";
@@ -414,6 +423,7 @@ function showLocalPlayer() {
 }
 
 function showCastPlayer() {
+  guideState.mode = "cast";
   const device = currentCastDeviceName();
   guideEls.player.classList.add("d-none");
   guideEls.castScreen.classList.remove("d-none");
@@ -422,7 +432,7 @@ function showCastPlayer() {
   guideEls.playbackBadge.className = "badge rounded-pill text-bg-primary";
   guideEls.remoteScreenVerb.textContent = "Casting to";
   guideEls.castScreenDevice.textContent = device;
-  guideEls.castScreenChannel.textContent = currentGuideChannel?.name || "";
+  guideEls.castScreenChannel.textContent = guideState.currentChannel?.name || "";
 }
 
 function stopLocalStream({hidePanel = false} = {}) {
@@ -448,7 +458,7 @@ async function stopPlayback() {
   await stopRemoteMedia();
   await stopCastRelay();
   await stopRokuPlayback({sendHome: true});
-  currentGuideChannel = null;
+  guideState.currentChannel = null;
   guideEls.playerPanel.classList.add("d-none");
   guideEls.playerMessage.textContent = "";
   guideEls.playerMeta.textContent = "";
@@ -457,7 +467,7 @@ async function stopPlayback() {
 }
 
 function setCurrentChannel(channel) {
-  currentGuideChannel = channel;
+  guideState.currentChannel = channel;
   guideEls.playerPanel.classList.remove("d-none");
   guideEls.playerTitle.textContent = channel.name || "Channel";
   guideEls.playerMeta.textContent = channel.group || "";
@@ -484,7 +494,7 @@ function playLocalChannel(channel) {
 async function castChannel(channel) {
   const session = currentCastSession();
   if (!session) throw new Error("Choose a Chromecast / Google TV receiver first.");
-  if (castSessionLoadInFlight) return;
+  if (guideState.cast.loadInFlight) return;
 
   const device = currentCastDeviceName();
   setCurrentChannel(channel);
@@ -493,7 +503,7 @@ async function castChannel(channel) {
   guideEls.playerMessage.textContent = `Connecting to ${device}…`;
   updateCastStatus(`Receiver session: ${device} · starting HLS relay on ${castMediaOrigin()}`);
 
-  castSessionLoadInFlight = true;
+  guideState.cast.loadInFlight = true;
   let relay = null;
   try {
     // Browser playback stays on the working fragmented-MP4 endpoint. Cast gets
@@ -501,7 +511,7 @@ async function castChannel(channel) {
     // pull discrete live media objects over the LAN.
     relay = await startCastRelay(channel);
     const mediaUrl = relay.mediaUrl;
-    lastCastMediaUrl = mediaUrl;
+    guideState.cast.lastMediaUrl = mediaUrl;
     guideEls.playerMessage.textContent = `Starting on ${device}…`;
     updateCastStatus(`Receiver session: ${device} · loading HLS ${mediaUrl}`);
 
@@ -533,9 +543,9 @@ async function castChannel(channel) {
     guideEls.playerMessage.textContent = `Playing on ${device}.`;
     updateCastStatus(`Receiver session: ${device} · playing HLS ${mediaUrl}`);
   } catch (error) {
-    const failedToken = relay?.token || currentCastPipelineToken;
-    if (failedToken && failedToken === currentCastPipelineToken) {
-      currentCastPipelineToken = relay?.previousToken || "";
+    const failedToken = relay?.token || guideState.cast.relayToken;
+    if (failedToken && failedToken === guideState.cast.relayToken) {
+      guideState.cast.relayToken = relay?.previousToken || "";
     }
     await stopCastRelayToken(failedToken);
     showLocalPlayer();
@@ -544,12 +554,12 @@ async function castChannel(channel) {
     updateCastStatus(`Receiver session: ${device} · HLS/loadMedia failed: ${detail}`);
     throw error;
   } finally {
-    castSessionLoadInFlight = false;
+    guideState.cast.loadInFlight = false;
   }
 }
 
 async function playChannel(channel) {
-  if (rokuPlaybackActive) {
+  if (guideState.roku.active) {
     try {
       await startRokuChannel(channel);
       return;
@@ -572,10 +582,10 @@ async function playChannel(channel) {
 }
 
 async function toggleCast() {
-  if (rokuPlaybackActive) {
+  if (guideState.roku.active) {
     await stopRokuPlayback({sendHome: true});
   }
-  if (!castApiReady || !castContext) {
+  if (!guideState.cast.apiReady || !guideState.cast.context) {
     updateCastStatus("Google Cast SDK is not ready yet.");
     return;
   }
@@ -585,8 +595,8 @@ async function toggleCast() {
     try {
       await stopRemoteMedia();
       await stopCastRelay();
-      castContext.endCurrentSession(true);
-      lastCastMediaUrl = "";
+      guideState.cast.context.endCurrentSession(true);
+      guideState.cast.lastMediaUrl = "";
     } catch (error) {
       console.error("Could not end Cast receiver session", error);
     }
@@ -601,7 +611,7 @@ async function toggleCast() {
   guideEls.castBtn.disabled = true;
   updateCastStatus("Opening Google Cast receiver picker…");
   try {
-    await castContext.requestSession();
+    await guideState.cast.context.requestSession();
     const newSession = currentCastSession();
     if (!newSession) {
       updateCastStatus("No Google Cast receiver session was created.");
@@ -610,10 +620,10 @@ async function toggleCast() {
 
     const device = currentCastDeviceName();
     updateCastStatus(`Receiver session connected to ${device}.`);
-    if (currentGuideChannel) {
+    if (guideState.currentChannel) {
       // One deliberate loadMedia call after requestSession resolves. exp5 could
       // race this against SESSION_STARTED and send the same channel twice.
-      await castChannel(currentGuideChannel);
+      await castChannel(guideState.currentChannel);
     } else {
       guideEls.playerMessage.textContent = `Connected to ${device}. Press Play on a channel to load it on the receiver.`;
     }
@@ -629,18 +639,18 @@ async function toggleCast() {
 
 function initializeCastApi() {
   try {
-    castContext = cast.framework.CastContext.getInstance();
-    castContext.setOptions({
+    guideState.cast.context = cast.framework.CastContext.getInstance();
+    guideState.cast.context.setOptions({
       receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
       autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
     });
 
-    castContext.addEventListener(
+    guideState.cast.context.addEventListener(
       cast.framework.CastContextEventType.CAST_STATE_CHANGED,
       () => updateCastStatus()
     );
 
-    castContext.addEventListener(
+    guideState.cast.context.addEventListener(
       cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
       event => {
         const started = event.sessionState === cast.framework.SessionState.SESSION_STARTED
@@ -652,11 +662,11 @@ function initializeCastApi() {
           // selected receiver gets exactly one explicit loadMedia request.
           updateCastStatus(`Receiver session connected to ${currentCastDeviceName()}.`);
         } else if (ended) {
-          lastCastMediaUrl = "";
+          guideState.cast.lastMediaUrl = "";
           stopCastRelay();
           showLocalPlayer();
           updateCastStatus("Chromecast disconnected.");
-          if (currentGuideChannel) {
+          if (guideState.currentChannel) {
             guideEls.playerMessage.textContent = "Chromecast disconnected. Press Play to resume locally.";
           }
           renderGuide();
@@ -667,10 +677,10 @@ function initializeCastApi() {
       }
     );
 
-    castApiReady = true;
+    guideState.cast.apiReady = true;
     updateCastStatus();
   } catch (error) {
-    castApiReady = false;
+    guideState.cast.apiReady = false;
     console.error("Cast initialization failed", error);
     updateCastStatus(`Cast initialization failed: ${error?.message || error}.`);
   }

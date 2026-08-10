@@ -23,13 +23,16 @@ from typing import Iterable, List
 
 import sports
 from backup import create_database_backup
+from database import connect as connect_database
+from settings import SETTINGS
+from runtime_state import RUNTIME_STATE
 
 
 APP_DIR = Path(__file__).resolve().parent
 # Runtime state can live outside the source tree. Docker Compose points this at
 # a persistent volume so rebuilding the container does not erase the database,
 # cached playlist, generated guide, or EPG source configuration.
-DATA_DIR = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR))).expanduser().resolve()
+DATA_DIR = SETTINGS.data_dir
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR = DATA_DIR / "exports"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,15 +52,15 @@ COMBINED_EPG_PATH = EXPORT_DIR / "epg.xml"
 
 PLAYLIST_NAME = "channels.m3u"
 PLAYLIST_PATH = EXPORT_DIR / PLAYLIST_NAME
-PORT = int(os.environ.get("M3U_PORT", "9999"))
-DEV_PORT = int(os.environ.get("M3U_DEV_PORT", "9998"))
+PORT = SETTINGS.port
+DEV_PORT = SETTINGS.dev_port
 
-SCHEDULE_HOUR = int(os.environ.get("MASTER_REFRESH_HOUR", "3"))
-SCHEDULE_MINUTE = int(os.environ.get("MASTER_REFRESH_MINUTE", "0"))
-MAX_PROVIDER_CHANNELS = int(os.environ.get("M3U_MAX_PROVIDER_CHANNELS", "50000"))
-PROVIDER_CHANNEL_WARNING = int(os.environ.get("M3U_PROVIDER_CHANNEL_WARNING", "20000"))
-MAX_PROVIDER_PLAYLIST_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_PLAYLIST_BYTES", str(96 * 1024 * 1024)))
-MAX_PROVIDER_JSON_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_JSON_BYTES", str(96 * 1024 * 1024)))
+SCHEDULE_HOUR = SETTINGS.schedule_hour
+SCHEDULE_MINUTE = SETTINGS.schedule_minute
+MAX_PROVIDER_CHANNELS = SETTINGS.max_provider_channels
+PROVIDER_CHANNEL_WARNING = SETTINGS.provider_channel_warning
+MAX_PROVIDER_PLAYLIST_BYTES = SETTINGS.max_provider_playlist_bytes
+MAX_PROVIDER_JSON_BYTES = SETTINGS.max_provider_json_bytes
 
 channels: List[dict] = []
 selected_ids: set[int] = set()
@@ -74,7 +77,7 @@ master_refresh_time = "03:00"
 last_master_update: str | None = None
 last_master_duration_seconds: float | None = None
 last_master_trigger: str | None = None
-master_update_runtime = {"running": False, "started_at": None, "trigger": None, "started_monotonic": None}
+master_update_runtime = RUNTIME_STATE.master_update
 
 # IPTV-EPG country feeds are optional system-wide fallback/enrichment sources.
 # They apply to every selected manual channel in Combined XMLTV and are also
@@ -114,23 +117,17 @@ PUBLIC_EPG_REGISTRY = [
 PUBLIC_EPG_CODES = {code for code, _name in PUBLIC_EPG_REGISTRY}
 public_epg_enabled_codes: set[str] = {"US"}
 public_epg_state: dict[str, dict] = {}
-MAX_PUBLIC_EPG_COMPRESSED_BYTES = int(os.environ.get("M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES", str(256 * 1024 * 1024)))
+MAX_PUBLIC_EPG_COMPRESSED_BYTES = SETTINGS.max_public_epg_compressed_bytes
 
 scheduler_started = False
 
-state_lock = threading.RLock()
-scan_lock = threading.Lock()
-scan_cancel_event = threading.Event()
-provider_progress_lock = threading.Lock()
-provider_progress = {
-    "active": False,
-    "stage": "Idle",
-    "detail": "",
-    "channel_count": None,
-    "started_at": None,
-    "updated_at": None,
-    "status": "idle",
-}
+# Compatibility aliases keep the public core module surface stable while the
+# process-local synchronization state lives in one explicit object.
+state_lock = RUNTIME_STATE.state_lock
+scan_lock = RUNTIME_STATE.scan_lock
+scan_cancel_event = RUNTIME_STATE.scan_cancel_event
+provider_progress_lock = RUNTIME_STATE.provider_progress_lock
+provider_progress = RUNTIME_STATE.provider_progress
 
 
 class SportsScanError(RuntimeError):
@@ -205,57 +202,7 @@ class Entry:
 
 
 def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS selections (
-            key TEXT PRIMARY KEY,
-            name TEXT,
-            group_title TEXT,
-            url TEXT NOT NULL,
-            tvg_id TEXT NOT NULL DEFAULT '',
-            sort_order INTEGER
-        )
-        """
-    )
-    for statement in (
-        "ALTER TABLE selections ADD COLUMN sort_order INTEGER",
-        "ALTER TABLE selections ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''",
-    ):
-        try:
-            conn.execute(statement)
-        except sqlite3.OperationalError:
-            pass
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS custom_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            slug TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS group_channels (
-            group_id INTEGER NOT NULL,
-            channel_key TEXT NOT NULL,
-            name TEXT,
-            group_title TEXT,
-            url TEXT NOT NULL,
-            tvg_id TEXT NOT NULL DEFAULT '',
-            PRIMARY KEY (group_id, channel_key),
-            FOREIGN KEY (group_id) REFERENCES custom_groups(id) ON DELETE CASCADE
-        )
-        """
-    )
-    try:
-        conn.execute("ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
-    conn.commit()
+    conn = connect_database(DB_PATH)
     sports.init_db(DB_PATH)
     return conn
 
