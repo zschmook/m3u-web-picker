@@ -4,6 +4,7 @@ from flask import Response, jsonify, redirect, request, send_file
 
 import core
 import sports
+from guide_epg import enrich_guide_channels
 from media import browser, hls
 from settings import load_settings
 from playback import roku
@@ -65,7 +66,13 @@ def register_guide_routes(app):
     @app.get("/api/guide/channels")
     def api_guide_channels():
         items = core.curated_channels_for_guide()
-        response = jsonify(count=len(items), channels=items)
+        sports_settings = sports.get_settings(core.DB_PATH)
+        items, epg_status = enrich_guide_channels(
+            items,
+            core.COMBINED_EPG_PATH,
+            timezone_name=str(sports_settings.get("timezone", "America/New_York")),
+        )
+        response = jsonify(count=len(items), channels=items, epg=epg_status)
         return no_cache(response)
 
     @app.post("/api/guide/cast/start")
