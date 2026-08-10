@@ -30,7 +30,8 @@ def _matching_rules_with_progress(event, rule_index):
             progress["matched"] += 1
         processed = progress["processed"]
         total = progress["total"]
-        if processed == total or processed % 10 == 0:
+        publish_every = progress["publish_every"]
+        if processed == total or processed % publish_every == 0:
             sports.update_scan_stage(
                 progress["db_path"],
                 f"{progress['matched']} of {total} sports matched",
@@ -45,6 +46,9 @@ def _select_events_with_progress(ctx):
         "processed": 0,
         "matched": 0,
         "total": total,
+        # Keep progress responsive for small scans without hammering SQLite on
+        # large provider catalogs. At most about 50 intermediate writes.
+        "publish_every": max(1, total // 50),
     }
     sports.update_scan_stage(ctx.db_path, f"0 of {total} sports matched")
     try:
@@ -79,22 +83,47 @@ def index():
     status.style.width = "100%";
     brand.appendChild(status);
 
-    // While an update runs, the header is intentionally one line only:
+    // While an update runs, this header panel is intentionally one line only:
     // "XX of YY sports matched". Timing remains in Master Update on the right.
     const originalRenderSportsScanStatus = renderSportsScanStatus;
+    let lastMatchText = "";
+    let wasRunning = false;
+
     renderSportsScanStatus = function() {
       originalRenderSportsScanStatus();
+
       const scan = sportsState.scan || {running: false};
       const running = Boolean(masterUpdateBusy || masterUpdateState.running || scan.running);
-      if (!running) return;
-
       const heading = status.querySelector(".sports-scan-status-heading");
       const title = document.getElementById("sportsScanStatusTitle");
       const details = document.getElementById("sportsScanStatusDetails");
       const spinner = document.getElementById("sportsScanStatusSpinner");
+
+      if (running && !wasRunning) lastMatchText = "";
+      wasRunning = running;
+
+      if (!running) {
+        if (heading) heading.style.marginBottom = "";
+        if (details) details.classList.remove("d-none");
+        return;
+      }
+
+      const stage = String(scan.stage || "").trim();
+      if (/^\d+ of \d+ sports matched$/i.test(stage)) {
+        lastMatchText = stage;
+      }
+
+      // Preparation/publish/validation stages stay off this panel. Once the
+      // matcher starts, retain the last real match count until the cycle ends.
+      if (!lastMatchText) {
+        status.classList.add("d-none");
+        return;
+      }
+
+      status.classList.remove("d-none");
       if (heading) heading.style.marginBottom = "0";
       if (spinner) spinner.classList.add("d-none");
-      if (title) title.textContent = scan.stage || "0 of 0 sports matched";
+      if (title) title.textContent = lastMatchText;
       if (details) details.classList.add("d-none");
     };
   })();
