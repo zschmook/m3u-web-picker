@@ -95,7 +95,13 @@
     (() => {
       const castButton = document.getElementById("guideCastBtn");
       const rokuButton = document.getElementById("guideRokuBtn");
-      let castDisconnectHandoffChannel = null;
+      let castDisconnectSequence = 0;
+      let castDisconnectHandoff = null;
+
+      function sameChannel(left, right) {
+        if (!left || !right) return false;
+        return String(left.play_url || "") === String(right.play_url || "");
+      }
 
       function clearRokuDiscovery(message) {
         guideState.roku.host = "";
@@ -172,32 +178,44 @@
         event.preventDefault();
         event.stopImmediatePropagation();
         await stopRokuPlayback({sendHome: true});
-        if (channel) playLocalChannel(channel);
+        if (channel && sameChannel(guideState.currentChannel, channel) && !guideState.roku.active) {
+          playLocalChannel(channel);
+        }
+      }
+
+      function finishCastDisconnectHandoff(id) {
+        const pending = castDisconnectHandoff;
+        if (!pending || pending.id !== id) return;
+        castDisconnectHandoff = null;
+        if (!pending.channel) return;
+        if (currentCastSession()) return;
+        if (!sameChannel(guideState.currentChannel, pending.channel)) return;
+        playLocalChannel(pending.channel);
       }
 
       async function handoffCastToLocal(event) {
         if (!currentCastSession()) return;
         const channel = guideState.currentChannel;
+        const id = ++castDisconnectSequence;
         event.preventDefault();
         event.stopImmediatePropagation();
-        castDisconnectHandoffChannel = channel || null;
+        castDisconnectHandoff = {id, channel: channel || null};
         try {
           await stopRemoteMedia();
           await stopCastRelay();
           guideState.cast.lastMediaUrl = "";
           guideState.cast.context.endCurrentSession(true);
         } catch (error) {
-          castDisconnectHandoffChannel = null;
+          if (castDisconnectHandoff?.id === id) castDisconnectHandoff = null;
           console.error("Could not hand Cast playback back to the browser", error);
           return;
         }
 
+        // SESSION_ENDED owns the normal handoff. This is only a guarded fallback
+        // in case the Cast SDK tears the session down without delivering the event.
         window.setTimeout(() => {
-          if (castDisconnectHandoffChannel === channel && !currentCastSession()) {
-            castDisconnectHandoffChannel = null;
-            if (channel) playLocalChannel(channel);
-          }
-        }, 1500);
+          if (!currentCastSession()) finishCastDisconnectHandoff(id);
+        }, 4000);
       }
 
       function attachCastDisconnectHandoff(attempt) {
@@ -206,10 +224,10 @@
           guideState.cast.context.addEventListener(
             cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
             event => {
-              if (event.sessionState !== cast.framework.SessionState.SESSION_ENDED || !castDisconnectHandoffChannel) return;
-              const channel = castDisconnectHandoffChannel;
-              castDisconnectHandoffChannel = null;
-              playLocalChannel(channel);
+              if (event.sessionState !== cast.framework.SessionState.SESSION_ENDED) return;
+              const pending = castDisconnectHandoff;
+              if (!pending) return;
+              finishCastDisconnectHandoff(pending.id);
             }
           );
           return;
