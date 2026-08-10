@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from datetime import datetime
 
@@ -209,10 +211,10 @@ def migrate_generated_xmltv_ids(conn: sqlite3.Connection) -> None:
             )
         event_title = str(row["event_title"] or "").strip()
         if not event_title:
-            event_title = _s.re.sub(
+            event_title = re.sub(
                 r"\s+—\s+[^—]+$",
                 "",
-                _s.re.sub(
+                re.sub(
                     r"^[^•]+•\s*",
                     "",
                     str(row["display_name"] or "Sports event"),
@@ -237,7 +239,7 @@ def migrate_generated_xmltv_ids(conn: sqlite3.Connection) -> None:
             (
                 new_tvg_id,
                 source_tvg_id,
-                _s.json.dumps(raw),
+                json.dumps(raw),
                 event_title,
                 event_end,
                 row["id"],
@@ -245,7 +247,7 @@ def migrate_generated_xmltv_ids(conn: sqlite3.Connection) -> None:
         )
     conn.execute(
         "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
-        (migration_key, _s.json.dumps(True)),
+        (migration_key, json.dumps(True)),
     )
 
 
@@ -277,11 +279,11 @@ def migrate_generated_slot_ids(conn: sqlite3.Connection) -> None:
             SET tvg_id = ?, raw_json = ?
             WHERE id = ?
             """,
-            (new_tvg_id, _s.json.dumps(raw), row["id"]),
+            (new_tvg_id, json.dumps(raw), row["id"]),
         )
     conn.execute(
         "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
-        (migration_key, _s.json.dumps(True)),
+        (migration_key, json.dumps(True)),
     )
 
 
@@ -301,7 +303,7 @@ def migrate_refresh_time(conn: sqlite3.Connection) -> None:
     hour, minute = _s._refresh_time_parts(legacy)
     conn.execute(
         "INSERT INTO sports_settings(key, value) VALUES ('refresh_time', ?)",
-        (_s.json.dumps(f"{hour:02d}:{minute:02d}"),),
+        (json.dumps(f"{hour:02d}:{minute:02d}"),),
     )
 
 
@@ -309,7 +311,7 @@ def insert_default_settings(conn: sqlite3.Connection) -> None:
     for key, value in _s.DEFAULT_SETTINGS.items():
         conn.execute(
             "INSERT OR IGNORE INTO sports_settings(key, value) VALUES (?, ?)",
-            (key, _s.json.dumps(value)),
+            (key, json.dumps(value)),
         )
 
 
@@ -330,7 +332,7 @@ def ensure_disabled_cache_anchor(conn: sqlite3.Connection) -> None:
     if not enabled_value and generated_count and not disabled_at_row:
         conn.execute(
             "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
-            (_s.SPORTS_DISABLED_AT_KEY, _s.json.dumps(_s._now_iso())),
+            (_s.SPORTS_DISABLED_AT_KEY, json.dumps(_s._now_iso())),
         )
 
 
@@ -362,9 +364,9 @@ def seed_catalog(conn: sqlite3.Connection) -> None:
                 name,
                 subtitle,
                 league_id,
-                _s.json.dumps(aliases),
+                json.dumps(aliases),
                 logo,
-                _s.json.dumps(metadata),
+                json.dumps(metadata),
                 now,
             ),
         )
@@ -435,7 +437,7 @@ def migrate_taxonomy_rules(conn: sqlite3.Connection) -> None:
         )
     conn.execute(
         "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
-        (migration_key, _s.json.dumps(True)),
+        (migration_key, json.dumps(True)),
     )
 
 
@@ -462,7 +464,7 @@ def remove_legacy_demo_rules(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM sports_rules")
     conn.execute(
         "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
-        (migration_key, _s.json.dumps(True)),
+        (migration_key, json.dumps(True)),
     )
 
 
