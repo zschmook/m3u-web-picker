@@ -26,9 +26,14 @@ def index():
 @app.get("/guide")
 def guide():
     html = render_template("guide.html")
+    html = html.replace(
+        "</head>",
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=now-next-1">\n</head>',
+    )
     return html.replace(
         "</body>",
-        '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n</body>',
+        '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=now-next-1"></script>\n</body>',
     )
 
 
