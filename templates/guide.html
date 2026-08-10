@@ -97,6 +97,7 @@
       const rokuButton = document.getElementById("guideRokuBtn");
       let castDisconnectSequence = 0;
       let castDisconnectHandoff = null;
+      let remoteTransitionBusy = false;
 
       function sameChannel(left, right) {
         if (!left || !right) return false;
@@ -191,15 +192,44 @@
         if (count < 100) window.setTimeout(() => attachCastDiscovery(count + 1), 100);
       }
 
-      async function handoffRokuToLocal(event) {
-        if (!guideState.roku.active) return;
-        const channel = guideState.currentChannel;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        await stopRokuPlayback({sendHome: true});
-        if (channel && sameChannel(guideState.currentChannel, channel) && !guideState.roku.active) {
-          playLocalChannel(channel);
+      function setRemoteTransitionBusy(busy) {
+        remoteTransitionBusy = Boolean(busy);
+        if (remoteTransitionBusy) {
+          castButton.disabled = true;
+          rokuButton.disabled = true;
         }
+      }
+
+      async function withRemoteTransition(work) {
+        if (remoteTransitionBusy) return;
+        setRemoteTransitionBusy(true);
+        try {
+          await work();
+        } finally {
+          remoteTransitionBusy = false;
+          updateRokuControls();
+          updateCastStatus();
+          syncRemoteButtonStyle(castButton);
+          syncRemoteButtonStyle(rokuButton);
+        }
+      }
+
+      async function waitForCastSessionEnd(timeoutMs = 4000) {
+        const deadline = Date.now() + timeoutMs;
+        while (currentCastSession() && Date.now() < deadline) {
+          await new Promise(resolve => window.setTimeout(resolve, 75));
+        }
+        return !currentCastSession();
+      }
+
+      async function stopCastForRemoteSwitch() {
+        if (!currentCastSession()) return;
+        await stopRemoteMedia();
+        await stopCastRelay();
+        guideState.cast.lastMediaUrl = "";
+        guideState.cast.context.endCurrentSession(true);
+        const ended = await waitForCastSessionEnd();
+        if (!ended) throw new Error("Cast session did not disconnect before Roku handoff.");
       }
 
       function finishCastDisconnectHandoff(id) {
@@ -212,29 +242,75 @@
         playLocalChannel(pending.channel);
       }
 
-      async function handoffCastToLocal(event) {
+      async function disconnectRokuToLocal() {
+        if (!guideState.roku.active) return;
+        const channel = guideState.currentChannel;
+        await stopRokuPlayback({sendHome: true});
+        if (channel && sameChannel(guideState.currentChannel, channel) && !guideState.roku.active) {
+          playLocalChannel(channel);
+        }
+      }
+
+      async function disconnectCastToLocal() {
         if (!currentCastSession()) return;
         const channel = guideState.currentChannel;
         const id = ++castDisconnectSequence;
-        event.preventDefault();
-        event.stopImmediatePropagation();
         castDisconnectHandoff = {id, channel: channel || null};
         try {
           await stopRemoteMedia();
           await stopCastRelay();
           guideState.cast.lastMediaUrl = "";
           guideState.cast.context.endCurrentSession(true);
+          const ended = await waitForCastSessionEnd();
+          if (ended) finishCastDisconnectHandoff(id);
         } catch (error) {
           if (castDisconnectHandoff?.id === id) castDisconnectHandoff = null;
           console.error("Could not hand Cast playback back to the browser", error);
-          return;
         }
+      }
 
-        // SESSION_ENDED owns the normal handoff. This is only a guarded fallback
-        // in case the Cast SDK tears the session down without delivering the event.
-        window.setTimeout(() => {
-          if (!currentCastSession()) finishCastDisconnectHandoff(id);
-        }, 4000);
+      async function handleRokuButtonClick(event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (remoteTransitionBusy) return;
+
+        await withRemoteTransition(async () => {
+          if (guideState.roku.active) {
+            await disconnectRokuToLocal();
+            return;
+          }
+
+          const channel = guideState.currentChannel;
+          if (!channel) {
+            updateRokuControls("Press Play on a channel first.");
+            return;
+          }
+
+          if (currentCastSession()) {
+            await stopCastForRemoteSwitch();
+          }
+          if (sameChannel(guideState.currentChannel, channel)) {
+            await toggleRoku();
+          }
+        });
+      }
+
+      async function handleCastButtonClick(event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (remoteTransitionBusy) return;
+
+        await withRemoteTransition(async () => {
+          if (currentCastSession()) {
+            await disconnectCastToLocal();
+            return;
+          }
+
+          // toggleCast already performs Roku -> Cast teardown in sequence. The
+          // shared transition lock prevents another remote action until the
+          // picker resolves and that handoff completes.
+          await toggleCast();
+        });
       }
 
       function attachCastDisconnectHandoff(attempt) {
@@ -254,8 +330,8 @@
         if (count < 100) window.setTimeout(() => attachCastDisconnectHandoff(count + 1), 100);
       }
 
-      rokuButton.addEventListener("click", handoffRokuToLocal, true);
-      castButton.addEventListener("click", handoffCastToLocal, true);
+      rokuButton.addEventListener("click", handleRokuButtonClick, true);
+      castButton.addEventListener("click", handleCastButtonClick, true);
       discoverRoku();
       attachCastDiscovery(0);
       attachCastDisconnectHandoff(0);
