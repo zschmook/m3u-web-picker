@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import concurrent.futures
 import ipaddress
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,25 +49,83 @@ def _request(host: str, path: str, *, method: str = "GET", timeout: float = 4.0)
         raise RuntimeError(f"Timed out reaching Roku at {normalized}:8060.") from exc
 
 
-def device_info(host: str) -> dict[str, str]:
-    payload = _request(host, "/query/device-info", timeout=3.0)
+def _parse_device_info(payload: bytes) -> dict[str, str]:
     try:
         root = ET.fromstring(payload)
     except ET.ParseError as exc:
         raise RuntimeError("Roku answered, but device-info XML could not be parsed.") from exc
+    if root.tag != "device-info":
+        raise RuntimeError("Port 8060 answered, but it was not a Roku ECP device.")
 
     def text(name: str) -> str:
         node = root.find(name)
         return (node.text or "").strip() if node is not None else ""
 
-    friendly = text("user-device-name") or text("friendly-device-name") or text("model-name") or "Roku"
+    model = text("model-name")
+    serial = text("serial-number")
+    device_id = text("device-id")
+    if not (model or serial or device_id):
+        raise RuntimeError("Port 8060 answered, but Roku device identity was missing.")
+
+    friendly = text("user-device-name") or text("friendly-device-name") or model or "Roku"
     return {
         "name": friendly,
-        "model": text("model-name"),
+        "model": model,
         "model_number": text("model-number"),
-        "serial_number": text("serial-number"),
+        "serial_number": serial,
         "software_version": text("software-version"),
     }
+
+
+def device_info(host: str, *, timeout: float = 3.0) -> dict[str, str]:
+    payload = _request(host, "/query/device-info", timeout=timeout)
+    return _parse_device_info(payload)
+
+
+def _roku_port_open(host: str, *, timeout: float) -> bool:
+    try:
+        with socket.create_connection((host, 8060), timeout=timeout):
+            return True
+    except (OSError, TimeoutError):
+        return False
+
+
+def discover_devices(
+    lan_host: str,
+    *,
+    connect_timeout: float = 0.15,
+    request_timeout: float = 0.8,
+    max_workers: int = 64,
+) -> list[dict[str, str]]:
+    """Discover and verify Roku ECP devices on the LAN host's /24 subnet."""
+    try:
+        address = ipaddress.ip_address(str(lan_host or "").strip())
+    except ValueError as exc:
+        raise ValueError("Automatic Roku discovery needs the local LAN IPv4 address.") from exc
+    if address.version != 4 or not str(address).startswith("10."):
+        raise ValueError("Automatic Roku discovery currently expects a 10.x.x.x LAN address.")
+
+    network = ipaddress.ip_network(f"{address}/24", strict=False)
+    hosts = [str(candidate) for candidate in network.hosts()]
+
+    def probe(host: str) -> dict[str, str] | None:
+        if not _roku_port_open(host, timeout=connect_timeout):
+            return None
+        try:
+            info = device_info(host, timeout=request_timeout)
+        except (ValueError, RuntimeError):
+            return None
+        return {"host": host, **info}
+
+    devices: list[dict[str, str]] = []
+    workers = max(1, min(int(max_workers), len(hosts)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        for result in executor.map(probe, hosts):
+            if result:
+                devices.append(result)
+
+    devices.sort(key=lambda item: ipaddress.ip_address(item["host"]))
+    return devices
 
 
 def launch_dev(host: str, media_url: str) -> None:
