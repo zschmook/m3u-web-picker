@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import atexit
+import os
 from flask import Flask, render_template, send_from_directory
 
 from api import register_routes
+from api.hdhr_discovery import start_hdhr_discovery, stop_hdhr_discovery
 from core import DEV_PORT, PORT
 from settings import SETTINGS
 
@@ -61,6 +64,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_port = DEV_PORT if args.dev else PORT
+
+    # In debug mode Werkzeug starts a reloader parent and then the real serving
+    # child. Bind UDP 65001 only in the serving process so discovery has one
+    # authoritative responder instead of two competing threads.
+    serving_process = (not args.dev) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if serving_process and start_hdhr_discovery():
+        atexit.register(stop_hdhr_discovery)
+
     app.run(
         host="0.0.0.0",
         port=run_port,
