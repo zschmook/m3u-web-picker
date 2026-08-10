@@ -9,6 +9,7 @@ from flask import Response, jsonify, redirect, request, send_file, stream_with_c
 import core
 import sports
 from . import cast_hls
+from . import roku
 
 
 def _ffmpeg_browser_response(target: str) -> Response:
@@ -136,6 +137,16 @@ def _resolve_guide_play_target(play_url: str) -> str:
     generated = re.fullmatch(r"/guide/play/sports/(\d+)", value)
     if generated:
         return sports.generated_stream_target(core.DB_PATH, int(generated.group(1)))
+    return ""
+
+
+def _guide_media_origin() -> str:
+    lan_host = str(os.environ.get("M3U_LAN_HOST", "") or "").strip()
+    external_port = str(os.environ.get("M3U_EXTERNAL_PORT", "1000") or "1000").strip()
+    if lan_host:
+        return f"http://{lan_host}:{external_port}"
+    if request.host and request.host.split(":", 1)[0] not in {"localhost", "127.0.0.1"}:
+        return f"{request.scheme}://{request.host}"
     return ""
 
 
@@ -626,16 +637,10 @@ def register_routes(app):
     def api_guide_config():
         lan_host = str(os.environ.get("M3U_LAN_HOST", "") or "").strip()
         external_port = str(os.environ.get("M3U_EXTERNAL_PORT", "1000") or "1000").strip()
-        if lan_host:
-            media_origin = f"http://{lan_host}:{external_port}"
-        elif request.host and request.host.split(":", 1)[0] not in {"localhost", "127.0.0.1"}:
-            media_origin = f"{request.scheme}://{request.host}"
-        else:
-            media_origin = ""
         response = jsonify(
             lan_host=lan_host,
             external_port=external_port,
-            media_origin=media_origin,
+            media_origin=_guide_media_origin(),
             sender_origin=f"{request.scheme}://{request.host}",
         )
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -685,6 +690,89 @@ def register_routes(app):
         response = jsonify(ok=True, stopped=stopped)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
+
+    @app.post("/api/guide/roku/test")
+    def api_guide_roku_test():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            host = roku.normalize_host(data.get("roku_host", ""))
+            info = roku.device_info(host)
+        except (ValueError, RuntimeError) as exc:
+            return jsonify(error=str(exc)), 502
+        response = jsonify(ok=True, roku_host=host, device=info)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.post("/api/guide/roku/start")
+    def api_guide_roku_start():
+        data = request.get_json(force=True, silent=True) or {}
+        play_url = str(data.get("play_url", "") or "")
+        target = _resolve_guide_play_target(play_url)
+        if not target:
+            return jsonify(error="Curated stream not found."), 404
+        media_origin = _guide_media_origin()
+        if not media_origin:
+            return jsonify(error="LAN media relay is not configured."), 409
+        try:
+            host = roku.normalize_host(data.get("roku_host", ""))
+            session = cast_hls.start_session(target)
+            playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
+            media_url = media_origin.rstrip("/") + playlist_path
+            roku.launch_dev(host, media_url)
+            try:
+                info = roku.device_info(host)
+            except RuntimeError:
+                info = {"name": "Roku"}
+        except (ValueError, RuntimeError) as exc:
+            if "session" in locals():
+                cast_hls.stop_session(session.token)
+            return jsonify(error=str(exc)), 502
+        response = jsonify(
+            ok=True,
+            roku_host=host,
+            device=info,
+            token=session.token,
+            playlist_path=playlist_path,
+            media_url=media_url,
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.post("/api/guide/roku/stop")
+    def api_guide_roku_stop():
+        data = request.get_json(force=True, silent=True) or {}
+        token = str(data.get("token", "") or "")
+        stopped = cast_hls.stop_session(token) if token else False
+        host = str(data.get("roku_host", "") or "").strip()
+        home_sent = False
+        if host:
+            try:
+                roku.send_home(host)
+                home_sent = True
+            except (ValueError, RuntimeError):
+                home_sent = False
+        response = jsonify(ok=True, stopped=stopped, home_sent=home_sent)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.route("/guide/roku/<token>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def guide_roku_hls(token: str, filename: str):
+        if request.method == "OPTIONS":
+            return _cast_cors(Response(status=204))
+        path = cast_hls.safe_media_file(token, filename)
+        if path is None:
+            return _cast_cors(Response("Roku stream not found.\n", status=404, content_type="text/plain; charset=utf-8"))
+        if filename == "stream.m3u8":
+            response = send_file(path, mimetype="application/x-mpegurl", conditional=True)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        else:
+            response = send_file(path, mimetype="video/mp2t", conditional=True)
+            response.headers["Cache-Control"] = "public, max-age=30"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Accel-Buffering"] = "no"
+        return _cast_cors(response)
 
     @app.route("/guide/cast/<token>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
     def guide_cast_hls(token: str, filename: str):

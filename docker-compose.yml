@@ -9,7 +9,7 @@
 #
 # Open:
 #   http://localhost:1000  (Cast control on this Mac)
-#   http://10.0.0.22:1000  (LAN access / Chromecast media relay)
+#   http://10.0.0.22:1000  (LAN access / Chromecast/Roku media relay)
 #
 # Stop/remove only this experiment:
 #   docker compose down
@@ -37,7 +37,7 @@ services:
       FLASK_DEBUG: "1"
       PYTHONUNBUFFERED: "1"
       M3U_BACKUP_ENABLED: "false"
-      # exp8: the Chromecast/Google TV fetches Cast-only HLS from the Mac over the LAN.
+      # exp8: the Chromecast/Google TV and Roku fetch HLS from the Mac over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
       M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-1000}"
       M3U_DATA_DIR: /app/debug-data

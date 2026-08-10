@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/guide.css', v='v30-experiments-exp9') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/guide.css', v='v30-experiments-exp11-roku-bundled') }}">
 </head>
 <body class="guide-body">
   <main class="guide-shell container-fluid py-3">
@@ -33,6 +33,7 @@
         </div>
         <div class="guide-player-actions">
           <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Cast</button>
+          <button id="guideRokuBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Roku</button>
           <button id="guideStopBtn" class="btn btn-outline-light btn-sm" type="button">Stop</button>
         </div>
       </div>
@@ -40,7 +41,7 @@
       <video id="guidePlayer" class="guide-player" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
       <div id="guideCastScreen" class="guide-cast-screen d-none">
         <div class="guide-cast-icon" aria-hidden="true">▰</div>
-        <div class="guide-cast-screen-title">Casting to <span id="guideCastScreenDevice">Cast device</span></div>
+        <div class="guide-cast-screen-title"><span id="guideRemoteScreenVerb">Casting to</span> <span id="guideCastScreenDevice">Cast device</span></div>
         <div id="guideCastScreenChannel" class="small-muted"></div>
       </div>
 
@@ -55,6 +56,12 @@
             <button id="guideLanTestBtn" class="btn btn-outline-light btn-sm guide-lan-test" type="button">Test LAN</button>
           </div>
           <div id="guideCastStatus" class="small-muted guide-cast-status">Cast SDK loading…</div>
+          <div class="guide-roku-row">
+            <label class="guide-cast-host-label" for="guideRokuHost">Roku TV IP</label>
+            <input id="guideRokuHost" class="form-control form-control-sm guide-roku-host" type="text" inputmode="decimal" placeholder="10.0.0.x" autocomplete="off">
+            <button id="guideRokuTestBtn" class="btn btn-outline-light btn-sm" type="button">Test Roku</button>
+          </div>
+          <div id="guideRokuStatus" class="small-muted guide-cast-status">Enter the Roku TV IP, then sideload the included receiver app.</div>
         </div>
       </details>
     </section>
@@ -83,7 +90,7 @@
     </section>
   </main>
 
-  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-exp9') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-exp11-roku-bundled') }}"></script>
   <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 </body>
 </html>

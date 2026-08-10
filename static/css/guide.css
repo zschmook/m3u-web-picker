@@ -274,3 +274,16 @@
     width: 78px;
   }
 }
+
+.guide-roku-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem .6rem;
+  margin-top: .7rem;
+}
+
+.guide-roku-host {
+  width: 170px;
+  max-width: 100%;
+}

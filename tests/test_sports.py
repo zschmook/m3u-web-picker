@@ -3340,7 +3340,7 @@ http://provider.test/phillies.ts
         self.assertIn("runMasterUpdate", javascript)
         self.assertIn("/playlist/channels.m3u", javascript)
         self.assertIn("/epg/epg.xml", javascript)
-        self.assertIn("v='v30-experiments-exp9'", html)
+        self.assertIn("v='v30-experiments-exp11-roku-bundled'", html)
         self.assertIn('id="masterUpdateEnabled"', html)
         self.assertIn('id="masterUpdateTime"', html)
         self.assertIn('id="masterUpdateNowBtn"', html)
