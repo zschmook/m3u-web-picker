@@ -96,6 +96,20 @@ def register_guide_routes(app):
         response = jsonify(ok=True, stopped=stopped)
         return no_cache(response)
 
+    @app.get("/api/guide/roku/discover")
+    def api_guide_roku_discover():
+        settings = load_settings()
+        lan_host = str(settings.lan_host or "").strip()
+        if not lan_host:
+            return no_cache(jsonify(ok=True, devices=[], subnet=""))
+        try:
+            devices = roku.discover_devices(lan_host)
+        except ValueError as exc:
+            return no_cache(jsonify(ok=True, devices=[], subnet="", warning=str(exc)))
+        parts = lan_host.split(".")
+        subnet = ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else ""
+        return no_cache(jsonify(ok=True, devices=devices, subnet=subnet))
+
     @app.post("/api/guide/roku/test")
     def api_guide_roku_test():
         data = request.get_json(force=True, silent=True) or {}
