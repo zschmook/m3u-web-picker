@@ -43,19 +43,20 @@ def register_sports_routes(app):
 
     @app.get("/api/sports/schedule-api")
     def api_sports_schedule_api():
-        return jsonify(schedule_api=sports.schedule_api_status(core.DB_PATH))
+        return jsonify(schedule_api=sports.schedule_api_status_payload(core.DB_PATH))
 
     @app.patch("/api/sports/schedule-api")
     def api_update_sports_schedule_api():
         data = request.get_json(force=True, silent=True) or {}
         try:
-            payload = sports.update_schedule_api_config(
+            sports.update_schedule_api_config(
                 core.DB_PATH,
                 enabled=data.get("enabled") if "enabled" in data else None,
                 url=data.get("url") if "url" in data else None,
                 api_key=data.get("api_key") if "api_key" in data else None,
                 clear_key=bool(data.get("clear_key", False)),
             )
+            payload = sports.schedule_api_status_payload(core.DB_PATH)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except Exception as exc:
@@ -74,7 +75,7 @@ def register_sports_routes(app):
             return jsonify(error="Could not refresh schedule API."), 500
         return jsonify(
             result=result,
-            schedule_api=sports.schedule_api_status(core.DB_PATH),
+            schedule_api=sports.schedule_api_status_payload(core.DB_PATH),
         )
 
     @app.get("/api/sports/catalog")
