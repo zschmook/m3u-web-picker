@@ -123,6 +123,22 @@
     }
   }
 
+  function polishScheduleApiStaticCopy() {
+    const section = document.querySelector(".sports-schedule-api");
+    if (!section) return;
+
+    for (const header of section.querySelectorAll(".schedule-api-table thead th")) {
+      if (header.textContent.trim() === "Last Updated") header.textContent = "Last Success";
+    }
+
+    const help = [...section.querySelectorAll(".small-muted")].find(element =>
+      element.textContent.includes("Normal Master Update and Update Now reuse")
+    );
+    if (help) {
+      help.textContent = "Normal Master Update and Update Now reuse a valid same-day schedule cache. Refresh API schedules deliberately bypasses that cache for planned API-backed datasets. Team/conference selections are filtered locally from the minimum unique datasets; unsupported sports continue through provider/EPG matching without an API call.";
+    }
+  }
+
   function syncScheduleApiSaveButton() {
     const api = sportsState.schedule_api || {};
     const keyInput = document.getElementById("sportsScheduleApiKey");
@@ -260,6 +276,7 @@
   function enhanceScheduleApiUi() {
     const api = sportsState.schedule_api || {};
     polishScheduleApiCredentialControls();
+    polishScheduleApiStaticCopy();
     renderScheduleApiSummary(api);
     renderScheduleApiDatasetTable(api);
 
