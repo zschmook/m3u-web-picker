@@ -91,6 +91,33 @@
   </main>
 
   <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-exp11-roku-bundled') }}"></script>
+  <script>
+    (() => {
+      const lanButton = document.getElementById("guideLanTestBtn");
+      const rokuButton = document.getElementById("guideRokuTestBtn");
+      const rokuHost = document.getElementById("guideRokuHost");
+      const castRelay = document.getElementById("guideCastRelay");
+      let attempts = 0;
+
+      const runAutomaticDiagnostics = () => {
+        const relay = String(castRelay?.textContent || "").trim();
+        const relayReady = Boolean(relay)
+          && relay !== "detecting…"
+          && relay !== "LAN relay not configured"
+          && relay !== "LAN relay unavailable";
+
+        if (!relayReady && attempts++ < 50) {
+          window.setTimeout(runAutomaticDiagnostics, 100);
+          return;
+        }
+
+        if (relayReady && lanButton && !lanButton.disabled) lanButton.click();
+        if (String(rokuHost?.value || "").trim() && rokuButton && !rokuButton.disabled) rokuButton.click();
+      };
+
+      runAutomaticDiagnostics();
+    })();
+  </script>
   <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 </body>
 </html>
