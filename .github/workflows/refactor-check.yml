@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - experiments-refacor-work
+  pull_request:
+    branches:
+      - experiments-refacor
   workflow_dispatch:
 
 jobs:
