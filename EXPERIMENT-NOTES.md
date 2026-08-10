@@ -152,3 +152,24 @@ If Roku is active, the user presses Cast, and then cancels Google's native Cast 
 - Keep testing remote teardown/reconnect behavior against additional Roku and Cast firmware/device combinations.
 
 The detailed current architecture and setup instructions live in `CASTING.md`.
+
+## Schedule API health/status cleanup — Aug. 10, 2026
+
+The experimental Schedule API UI must distinguish configuration from actual dataset health. A saved API key and enabled switch mean API-SPORTS is **configured**; they do not mean every planned dataset has a usable schedule cache.
+
+The planned-dataset table now uses per-dataset states:
+
+- **Cached** — every date required by the configured event window has a same-day cache matching the current request parameters. A successful zero-game response still counts as a valid cache.
+- **No successful cache** — the dataset is planned but has never produced a usable cache.
+- **Stale cache** — older cache data exists, but the currently required window has not been refreshed successfully.
+- **Refresh failed** — the most recent network refresh failed and no cache is available.
+- **Using cached fallback** — the latest refresh failed, but an existing cache remains available.
+- **Partial refresh** — some required dataset work succeeded while some failed.
+- **Reference data issue** — NCAA schedule data may be cached, but a currently required conference-membership/reference refresh failed.
+- **Disabled / Needs key** — API schedules are unavailable by configuration.
+
+Refresh-attempt health is persisted as credential-free internal state in SQLite so failures survive normal UI polling and page reloads. The API key itself is never copied into this health payload. Health persistence happens once per schedule refresh and is explicitly best-effort: failure to write diagnostic health must never fail a sports update or modify the published sports lineup.
+
+The credential row is also intentionally quieter: **Save/Replace API key** is the primary action, while **Remove saved key** is a small destructive action beside status rather than a large equal-weight button. **Refresh API schedules** bypasses the same-day schedule cache for the planned API datasets only.
+
+Provider/EPG matching remains the fallback whenever an API-backed dataset cannot supply usable current schedule authority. This health UI is meant to make that fallback visible instead of showing a misleading global `Active` state.
