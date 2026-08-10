@@ -18,6 +18,16 @@ HDHR_MODEL = "HDTC-2US"
 HDHR_TUNER_COUNT = 2
 HDHR_FIRMWARE_VERSION = "20260810"
 
+_HDHR_HTTP_PREFIXES = (
+    "/discover.json",
+    "/lineup_status.json",
+    "/lineup.json",
+    "/device.xml",
+    "/capability",
+    "/hdhr/stream/",
+    "/auto/v",
+)
+
 
 def _base_url() -> str:
     return request.host_url.rstrip("/")
@@ -71,6 +81,18 @@ def _device_xml() -> bytes:
 
 
 def register_hdhr_routes(app):
+    @app.after_request
+    def hdhr_http_headers(response):
+        if request.path.startswith(_HDHR_HTTP_PREFIXES):
+            # Real HDHomeRun HTTP endpoints explicitly allow browser/WebView
+            # cross-origin access. The official app probes discover.json with
+            # fetch(), so matching that behavior matters here.
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Range"
+            response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
+        return response
+
     @app.get("/discover.json")
     def hdhr_discover():
         base = _base_url()
