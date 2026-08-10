@@ -29,6 +29,7 @@ TYPE_DISCOVER_RPY = 0x0003
 TAG_DEVICE_TYPE = 0x01
 TAG_DEVICE_ID = 0x02
 TAG_TUNER_COUNT = 0x10
+TAG_LINEUP_URL = 0x27
 TAG_BASE_URL = 0x2A
 TAG_MULTI_TYPE = 0x2D
 
@@ -106,8 +107,24 @@ def _seal_frame(frame_type: int, payload: bytes) -> bytes:
 
 def _device_id_is_valid(device_id: int) -> bool:
     # SiliconDust's published device-ID checksum algorithm.
-    lookup = (0xA, 0x5, 0xF, 0x6, 0x7, 0xC, 0x1, 0xB,
-              0x9, 0x2, 0x8, 0xD, 0x4, 0x3, 0xE, 0x0)
+    lookup = (
+        0xA,
+        0x5,
+        0xF,
+        0x6,
+        0x7,
+        0xC,
+        0x1,
+        0xB,
+        0x9,
+        0x2,
+        0x8,
+        0xD,
+        0x4,
+        0x3,
+        0xE,
+        0x0,
+    )
     checksum = 0
     checksum ^= lookup[(device_id >> 28) & 0x0F]
     checksum ^= (device_id >> 24) & 0x0F
@@ -144,18 +161,22 @@ def _request_matches(data: bytes, device_id: int) -> bool:
         return False
     if DEVICE_TYPE_TUNER not in device_types and DEVICE_TYPE_WILDCARD not in device_types:
         return False
-    if requested_ids and not any(value in {device_id, DEVICE_ID_WILDCARD} for value in requested_ids):
+    if requested_ids and not any(
+        value in {device_id, DEVICE_ID_WILDCARD} for value in requested_ids
+    ):
         return False
     return True
 
 
 def _reply(base_url: str, device_id: int, tuner_count: int) -> bytes:
+    lineup_url = f"{base_url}/lineup.json"
     payload = b"".join(
         (
             _tlv(TAG_DEVICE_TYPE, struct.pack(">I", DEVICE_TYPE_TUNER)),
             _tlv(TAG_DEVICE_ID, struct.pack(">I", device_id)),
             _tlv(TAG_TUNER_COUNT, bytes((tuner_count,))),
             _tlv(TAG_BASE_URL, base_url.encode("utf-8")),
+            _tlv(TAG_LINEUP_URL, lineup_url.encode("utf-8")),
         )
     )
     return _seal_frame(TYPE_DISCOVER_RPY, payload)
@@ -211,7 +232,9 @@ def _parse_device_id(text: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Answer HDHomeRun discovery on the Mac host")
+    parser = argparse.ArgumentParser(
+        description="Answer HDHomeRun discovery on the Mac host"
+    )
     parser.add_argument(
         "--lan-host",
         default=os.environ.get("M3U_LAN_HOST", ""),
@@ -220,7 +243,9 @@ def main() -> int:
     parser.add_argument(
         "--external-port",
         type=int,
-        default=int(os.environ.get("M3U_EXTERNAL_PORT", str(DEFAULT_EXTERNAL_PORT))),
+        default=int(
+            os.environ.get("M3U_EXTERNAL_PORT", str(DEFAULT_EXTERNAL_PORT))
+        ),
         help=f"HTTP facade port (default: {DEFAULT_EXTERNAL_PORT})",
     )
     parser.add_argument(
@@ -237,7 +262,11 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        lan_host = _private_ipv4(args.lan_host) if args.lan_host else _detect_macos_lan_host()
+        lan_host = (
+            _private_ipv4(args.lan_host)
+            if args.lan_host
+            else _detect_macos_lan_host()
+        )
         device_id = _parse_device_id(args.device_id)
     except (ValueError, OSError) as exc:
         print(f"HDHomeRun host discovery: {exc}", file=sys.stderr)
@@ -247,7 +276,10 @@ def main() -> int:
         print("HDHomeRun host discovery: invalid external port", file=sys.stderr)
         return 2
     if not 1 <= args.tuners <= 255:
-        print("HDHomeRun host discovery: tuner count must be 1..255", file=sys.stderr)
+        print(
+            "HDHomeRun host discovery: tuner count must be 1..255",
+            file=sys.stderr,
+        )
         return 2
 
     base_url = f"http://{lan_host}:{args.external_port}"
@@ -266,6 +298,7 @@ def main() -> int:
         f"HDHomeRun host discovery listening on UDP {DISCOVERY_PORT}; "
         f"advertising {base_url} as {device_id:08X} ({args.tuners} tuners)."
     )
+    print(f"Lineup URL: {base_url}/lineup.json")
     print("Ctrl-C to stop.")
 
     try:
