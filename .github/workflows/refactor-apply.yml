@@ -47,8 +47,8 @@ jobs:
 
           cat .refactor/taxonomy.b64.* | base64 -d | gzip -d > /tmp/taxonomy.patch
           printf '%s  %s\n' '5e834fd22168b6f2947060421b6b3087999d6e6bdda0b9567192a09b2ecdf363' /tmp/taxonomy.patch | sha256sum -c -
-          git apply --check /tmp/taxonomy.patch
-          git apply /tmp/taxonomy.patch
+          patch --dry-run --batch -p1 < /tmp/taxonomy.patch
+          patch --batch -p1 < /tmp/taxonomy.patch
 
           rm -rf .refactor
           rm -f .github/workflows/refactor-apply.yml
