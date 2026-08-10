@@ -56,7 +56,9 @@ def _lineup_rows() -> list[dict]:
             {
                 "GuideNumber": number,
                 "GuideName": name,
-                "URL": f"{base}/hdhr/stream/{number}",
+                # Match the native HDHomeRun HTTP live-TV URL shape. The
+                # /hdhr/stream/<number> route remains available as an alias.
+                "URL": f"{base}/auto/v{number}",
             }
         )
     return output
@@ -123,7 +125,6 @@ def register_hdhr_routes(app):
             FirmwareName="hdhomerun",
             FirmwareVersion=HDHR_FIRMWARE_VERSION,
             DeviceID=HDHR_DEVICE_ID,
-            DeviceAuth="m3u-web-picker",
             BaseURL=base,
             LineupURL=f"{base}/lineup.json",
             TunerCount=HDHR_TUNER_COUNT,
