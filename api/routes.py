@@ -5,6 +5,11 @@ and output concerns can evolve independently without turning this file back
 into a monolith.
 """
 
+# Kept as a compatibility import because existing tests and external tooling
+# patch ``api.routes.shutil.which`` to simulate ffmpeg availability. Python's
+# module cache means that patch still reaches the shared media.ffmpeg helper.
+import shutil  # noqa: F401
+
 from .epg import register_epg_routes
 from .groups import register_group_routes
 from .guide import register_guide_routes
