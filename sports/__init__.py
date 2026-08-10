@@ -30,6 +30,7 @@ from . import scan_state as _scan_state  # noqa: E402
 from . import catalog as _catalog  # noqa: E402
 from . import generated as _generated  # noqa: E402
 from . import scan as _scan  # noqa: E402
+from . import schedule_refresh as _schedule_refresh  # noqa: E402
 
 _install(
     _storage,
@@ -114,3 +115,7 @@ _install(
     ),
 )
 _install(_scan, ("scan_channels",))
+_install(
+    _schedule_refresh,
+    ("refresh_schedule_api_if_due", "refresh_schedule_api_if_due_async"),
+)
