@@ -1,12 +1,72 @@
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import sports as _s
 
 
-def schedule_api_status_payload(db_path: Path | str) -> dict:
+def _schedule_api_current_cache_coverage(
+    db_path: Path | str,
+    dataset_id: str,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    dataset = _s.SCHEDULE_API_DATASETS.get(str(dataset_id or ""))
+    if not dataset:
+        return {"required_dates": [], "current_dates": [], "current": False}
+
+    settings = _s.get_settings(db_path)
+    timezone_name = str(settings.get("timezone", "America/New_York"))
+    timezone = ZoneInfo(timezone_name)
+    local_now = (now or datetime.now().astimezone()).astimezone(timezone)
+    required_dates = _s._schedule_api_required_dates(local_now, settings)
+    fetched_on = local_now.date().isoformat()
+    season = _s._schedule_api_dataset_season(dataset, local_now)
+    current_dates = []
+
+    with closing(_s._connect(db_path)) as conn:
+        for schedule_date in required_dates:
+            row = conn.execute(
+                """
+                SELECT fetched_on, request_key
+                FROM sports_schedule_api_cache
+                WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
+                """,
+                (
+                    dataset["source"],
+                    dataset["league_id"],
+                    season,
+                    schedule_date.isoformat(),
+                ),
+            ).fetchone()
+            expected_key = _s._schedule_api_request_key(
+                dataset,
+                schedule_date=schedule_date,
+                season=season,
+                timezone=timezone_name,
+            )
+            if (
+                row
+                and str(row["fetched_on"] or "") == fetched_on
+                and str(row["request_key"] or "") == expected_key
+            ):
+                current_dates.append(schedule_date.isoformat())
+
+    required_values = [value.isoformat() for value in required_dates]
+    return {
+        "required_dates": required_values,
+        "current_dates": current_dates,
+        "current": bool(required_values) and len(current_dates) == len(required_values),
+    }
+
+
+def schedule_api_status_payload(
+    db_path: Path | str,
+    now: datetime | None = None,
+) -> dict:
     """Return credential-free API status with persisted per-dataset health."""
     api = dict(_s.schedule_api_status(db_path) or {})
     health = _s.schedule_api_refresh_health(db_path)
@@ -17,6 +77,11 @@ def schedule_api_status_payload(db_path: Path | str) -> dict:
         entry = dict(raw)
         dataset_id = str(entry.get("id") or "")
         attempt = dict(health_by_dataset.get(dataset_id) or {})
+        coverage = _schedule_api_current_cache_coverage(
+            db_path,
+            dataset_id,
+            now=now,
+        )
         entry["last_attempt_at"] = attempt.get("last_attempt_at")
         entry["last_attempt_dates"] = list(attempt.get("last_attempt_dates") or [])
         entry["last_success_at"] = attempt.get("last_success_at")
@@ -25,6 +90,9 @@ def schedule_api_status_payload(db_path: Path | str) -> dict:
         entry["stale_cache_used"] = bool(attempt.get("stale_cache_used"))
         entry["reference_error"] = str(attempt.get("reference_error") or "")
         entry["reference_error_at"] = attempt.get("reference_error_at")
+        entry["required_cache_dates"] = coverage["required_dates"]
+        entry["current_cache_dates"] = coverage["current_dates"]
+        entry["cache_current"] = bool(coverage["current"])
 
         has_cache_record = bool(entry.get("last_fetch_at"))
         enabled = bool(entry.get("enabled"))
@@ -47,9 +115,12 @@ def schedule_api_status_payload(db_path: Path | str) -> dict:
         elif attempt_status == "partial":
             status_code = "partial"
             status_label = "Partial refresh"
-        elif has_cache_record:
+        elif entry["cache_current"]:
             status_code = "cached"
             status_label = "Cached"
+        elif has_cache_record:
+            status_code = "stale"
+            status_label = "Stale cache"
         else:
             status_code = "no_cache"
             status_label = "No successful cache"
@@ -65,7 +136,7 @@ def schedule_api_status_payload(db_path: Path | str) -> dict:
     }
     api["dataset_summary"] = {
         "planned": len(entries),
-        "cached": sum(1 for item in entries if item.get("last_fetch_at")),
+        "cached": sum(1 for item in entries if item.get("cache_current")),
         "healthy": sum(1 for item in entries if item.get("status_code") == "cached"),
         "issues": sum(
             1
@@ -103,5 +174,5 @@ def status_payload(db_path: Path | str, now: datetime | None = None) -> dict:
         "next_update": next_run.isoformat(),
         "disabled_cache": cache,
         "numbering": _s.numbering_plan(settings),
-        "schedule_api": schedule_api_status_payload(db_path),
+        "schedule_api": schedule_api_status_payload(db_path, now=now),
     }
