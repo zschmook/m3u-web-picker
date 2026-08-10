@@ -8,8 +8,8 @@
 #   docker compose up -d --build
 #
 # Open:
-#   http://localhost:1000  (Cast control on this Mac)
-#   http://10.0.0.22:1000  (LAN access / Chromecast/Roku media relay)
+#   http://localhost:10000  (Cast control on this Mac)
+#   http://10.0.0.22:10000  (LAN access / Chromecast/Roku media relay)
 #
 # Stop/remove only this experiment:
 #   docker compose down
@@ -30,8 +30,8 @@ services:
     container_name: m3u-picker-v30-experiments
 
     ports:
-      # Experimental host port 1000 -> Flask debug port 9998 in the container.
-      - "0.0.0.0:1000:9998"
+      # Experimental host port 10000 -> Flask debug port 9998 in the container.
+      - "0.0.0.0:10000:9998"
 
     environment:
       FLASK_DEBUG: "1"
@@ -39,7 +39,7 @@ services:
       M3U_BACKUP_ENABLED: "false"
       # exp8: the Chromecast/Google TV and Roku fetch HLS from the Mac over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
-      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-1000}"
+      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
       M3U_DATA_DIR: /app/debug-data
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
