@@ -398,10 +398,10 @@
                   <input id="sportsScheduleApiKey" class="form-control" type="password" autocomplete="new-password" placeholder="Enter API-SPORTS key">
                 </div>
                 <div class="col-lg-2 d-grid">
-                  <button id="sportsScheduleApiSave" class="btn btn-outline-primary" type="button">Save API</button>
+                  <button id="sportsScheduleApiSave" class="btn btn-outline-primary" type="button">Save API key</button>
                 </div>
                 <div class="col-lg-2 d-grid">
-                  <button id="sportsScheduleApiRemove" class="btn btn-outline-danger" type="button">Remove API</button>
+                  <button id="sportsScheduleApiRemove" class="btn btn-outline-danger d-none" type="button">Remove API key</button>
                 </div>
               </div>
             </fieldset>
@@ -607,18 +607,34 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='v30-experiments-exp11-roku-bundled') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='v30-experiments-exp12-schedule-api-state') }}"></script>
   <script>
     (() => {
-      // The sports status poll re-renders API status every 30 seconds. Keep any
-      // unsaved API key exactly as the user entered it; only Save API is allowed
-      // to clear the field after a successful PATCH.
+      // Keep unsaved credentials untouched by background sports status renders,
+      // and present saved credential state separately from the selected-dataset plan.
       const originalRenderSportsScheduleApi = renderSportsScheduleApi;
       renderSportsScheduleApi = function() {
         const keyInput = document.getElementById("sportsScheduleApiKey");
         const pendingKey = keyInput?.value || "";
         originalRenderSportsScheduleApi();
+
+        const api = sportsState.schedule_api || {};
+        const configured = Boolean(api.key_configured || api.configured);
         if (keyInput && pendingKey) keyInput.value = pendingKey;
+
+        const removeButton = document.getElementById("sportsScheduleApiRemove");
+        if (removeButton) {
+          removeButton.classList.toggle("d-none", !configured);
+          removeButton.disabled = !configured;
+        }
+
+        const status = document.getElementById("sportsScheduleApiStatus");
+        const datasets = api.plan?.datasets || [];
+        if (status && configured && api.enabled && !datasets.length) {
+          status.textContent = "API key saved ✓ • API-SPORTS configured • no supported sports selected yet.";
+        } else if (status && configured && !api.enabled) {
+          status.textContent = "API key saved ✓ • Schedule API disabled • legacy provider/EPG matching active.";
+        }
       };
     })();
   </script>
