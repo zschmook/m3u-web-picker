@@ -71,6 +71,7 @@ def schedule_api_status_payload(
     api = dict(_s.schedule_api_status(db_path) or {})
     health = _s.schedule_api_refresh_health(db_path)
     health_by_dataset = dict(health.get("datasets") or {})
+    reference_datasets = set((api.get("plan") or {}).get("reference_datasets") or [])
     entries = []
 
     for raw in api.get("apis") or []:
@@ -90,6 +91,9 @@ def schedule_api_status_payload(
         entry["stale_cache_used"] = bool(attempt.get("stale_cache_used"))
         entry["reference_error"] = str(attempt.get("reference_error") or "")
         entry["reference_error_at"] = attempt.get("reference_error_at")
+        entry["reference_required"] = bool(
+            dataset_id == "ncaa" and "ncaa_membership" in reference_datasets
+        )
         entry["required_cache_dates"] = coverage["required_dates"]
         entry["current_cache_dates"] = coverage["current_dates"]
         entry["cache_current"] = bool(coverage["current"])
@@ -115,6 +119,9 @@ def schedule_api_status_payload(
         elif attempt_status == "partial":
             status_code = "partial"
             status_label = "Partial refresh"
+        elif entry["reference_required"] and entry["reference_error"]:
+            status_code = "partial"
+            status_label = "Reference data issue"
         elif entry["cache_current"]:
             status_code = "cached"
             status_label = "Cached"
