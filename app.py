@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import os
-
 from flask import Flask, render_template, send_from_directory
 
 from api import register_routes
 from core import DEV_PORT, PORT
+from settings import SETTINGS
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("M3U_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
+app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
 
 @app.get("/")

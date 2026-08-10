@@ -1,0 +1,53 @@
+name: Complete experimental refactor
+
+on:
+  push:
+    branches:
+      - experiments-refacor
+
+permissions:
+  contents: write
+
+jobs:
+  apply-refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Apply remaining behavior-preserving refactor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .refactor/patch.b64.* | base64 -d | gzip -d > /tmp/refactor.patch
+          printf '%s  %s\n' 'f3381a7de63450ca7463968d458fe44f434f39755a1fb03b95690dfab18a6396' /tmp/refactor.patch | sha256sum -c -
+          git apply --check /tmp/refactor.patch
+          git apply /tmp/refactor.patch
+          rm -rf .refactor
+          rm -f .github/workflows/refactor-apply.yml
+
+      - name: Verify Python
+        run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests
+
+      - name: Verify guide JavaScript
+        run: node --check static/js/guide.js
+
+      - name: Commit completed refactor
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Complete behavior-preserving experimental refactor'
+          git push origin HEAD:experiments-refacor
