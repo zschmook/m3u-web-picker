@@ -47,7 +47,7 @@
             <input id="masterUpdateTime" class="form-control form-control-sm master-time-input" type="time" value="03:00">
             <button id="masterUpdateNowBtn" class="btn btn-primary btn-sm" type="button">Update Now</button>
             <div id="masterUpdateRunning" class="master-update-running d-none" role="status" aria-live="polite">
-              <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+              <span id="providerOperationSpinner" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
               <span id="masterUpdateRunningText">Updating • 0:00</span>
             </div>
           </div>
@@ -90,7 +90,7 @@
 
         <div id="providerOperationStatus" class="provider-operation-status d-none mb-3" role="status" aria-live="polite">
           <div class="d-flex align-items-center gap-2">
-            <span id="providerOperationSpinner" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <span id="providerOperationSpinner2" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <strong id="providerOperationStage">Preparing provider…</strong>
             <span id="providerOperationElapsed" class="ms-auto small-muted">0s elapsed</span>
           </div>
@@ -608,5 +608,19 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/app.js', v='v30-experiments-exp11-roku-bundled') }}"></script>
+  <script>
+    (() => {
+      // The sports status poll re-renders API status every 30 seconds. Keep any
+      // unsaved API key exactly as the user entered it; only Save API is allowed
+      // to clear the field after a successful PATCH.
+      const originalRenderSportsScheduleApi = renderSportsScheduleApi;
+      renderSportsScheduleApi = function() {
+        const keyInput = document.getElementById("sportsScheduleApiKey");
+        const pendingKey = keyInput?.value || "";
+        originalRenderSportsScheduleApi();
+        if (keyInput && pendingKey) keyInput.value = pendingKey;
+      };
+    })();
+  </script>
 </body>
 </html>
