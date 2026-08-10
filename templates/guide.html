@@ -103,6 +103,25 @@
         return String(left.play_url || "") === String(right.play_url || "");
       }
 
+      function syncRemoteButtonStyle(button) {
+        const active = String(button?.textContent || "").trim().startsWith("Disconnect");
+        button?.classList.toggle("btn-success", active);
+        button?.classList.toggle("btn-outline-light", !active);
+      }
+
+      const remoteButtonObserver = new MutationObserver(mutations => {
+        for (const mutation of mutations) {
+          const button = mutation.target?.nodeType === Node.TEXT_NODE
+            ? mutation.target.parentElement
+            : mutation.target;
+          if (button === castButton || button === rokuButton) syncRemoteButtonStyle(button);
+        }
+      });
+      for (const button of [castButton, rokuButton]) {
+        syncRemoteButtonStyle(button);
+        remoteButtonObserver.observe(button, {childList: true, characterData: true, subtree: true});
+      }
+
       function clearRokuDiscovery(message) {
         guideState.roku.host = "";
         guideState.roku.deviceName = "Roku TV";
