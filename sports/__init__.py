@@ -32,6 +32,7 @@ _scan_state = import_module(f"{__name__}.scan_state")
 _catalog = import_module(f"{__name__}.catalog")
 _schedule_api = import_module(f"{__name__}.schedule_api")
 _generated = import_module(f"{__name__}.generated")
+_events = import_module(f"{__name__}.events")
 _rules = import_module(f"{__name__}.rules")
 _feeds = import_module(f"{__name__}.feeds")
 _epg_io = import_module(f"{__name__}.epg_io")
@@ -181,6 +182,31 @@ _install(
         "generated_rows",
         "generated_stream_target",
         "generated_channel_payloads",
+    ),
+)
+_install(
+    _events,
+    (
+        "_utc_instant",
+        "_channel_text",
+        "_league_matches",
+        "_college_football_match",
+        "_detect_league",
+        "_detect_sport_tags",
+        "_detect_sport",
+        "_strip_provider_prefix",
+        "_extract_event_datetime",
+        "_team_catalog",
+        "_build_team_lookup",
+        "_find_team_id",
+        "_infer_baseball_league",
+        "_event_from_text",
+        "_event_has_usable_timing",
+        "_primary_event_end",
+        "_event_end",
+        "_event_overlaps_window",
+        "_event_overlaps_replay_context",
+        "_event_is_stale",
     ),
 )
 _install(
