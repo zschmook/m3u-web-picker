@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Iterable
 
@@ -35,7 +36,7 @@ def _feed_type(channel: dict, event: dict, team_id: str = "") -> str:
     text = _s._channel_text(channel).lower()
     if "backup" in text:
         return "backup"
-    if _s.re.search(r"espa[nñ]ol|spanish|\bes\b", text, _s.re.I):
+    if re.search(r"espa[nñ]ol|spanish|\bes\b", text, re.I):
         return "spanish"
     if team_id and team_id == event.get("away_team_id"):
         return "away"
