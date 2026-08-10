@@ -5,7 +5,7 @@ This document covers the experimental local playback, Google Cast, and Roku play
 The experimental TV Guide runs at:
 
 ```text
-http://localhost:1000/guide
+http://localhost:10000/guide
 ```
 
 The browser remains the controller and the Mac remains the media relay. Provider stream URLs, credentials, tokens, and source-specific details stay server-side.
@@ -30,7 +30,7 @@ The controller should normally stay on `localhost`. Cast and Roku receivers fetc
 
 ## Experimental Docker/LAN layout
 
-The experimental stack is isolated from the normal M3U Web Picker instance and publishes the application on host port `1000`.
+The experimental stack is isolated from the normal M3U Web Picker instance and publishes the application on host port `10000`.
 
 Typical startup:
 
@@ -41,7 +41,7 @@ docker compose up -d --build
 Then open:
 
 ```text
-http://localhost:1000/guide
+http://localhost:10000/guide
 ```
 
 Runtime/debug state lives under:
@@ -59,14 +59,14 @@ On macOS, the repository includes:
 The current test network uses a `10.x.x.x` LAN. The app's receiver-facing URLs therefore look like:
 
 ```text
-http://10.x.x.x:1000/guide/cast/<token>/stream.m3u8
+http://10.x.x.x:10000/guide/cast/<token>/stream.m3u8
 ```
 
 The exact LAN address is runtime-specific; do not hard-code the example address into future logic.
 
 ## Local browser playback
 
-1. Open `http://localhost:1000/guide`.
+1. Open `http://localhost:10000/guide`.
 2. Find a channel in the curated lineup.
 3. Press **Play**.
 4. The browser uses the ffmpeg-backed H.264/AAC fragmented-MP4 path.
@@ -107,7 +107,7 @@ Google Cast uses the Cast Application Framework sender plus the default receiver
 ### Requirements
 
 - Mac and Cast receiver must be on the same LAN.
-- Open the sender/controller at `http://localhost:1000/guide`.
+- Open the sender/controller at `http://localhost:10000/guide`.
 - The receiver-facing HLS URL must be reachable over the Mac's LAN address.
 
 ### Starting Cast playback
@@ -191,7 +191,7 @@ Roku permits only one sideloaded developer application at a time.
 
 Normal use no longer requires manually typing the Roku IP before every session. Automatic discovery chooses the remembered/first Roku and fills the Diagnostics field.
 
-1. Open `http://localhost:1000/guide`.
+1. Open `http://localhost:10000/guide`.
 2. Press **Play** on a channel.
 3. Press **Roku**.
 4. M3U Web Picker launches the sideloaded receiver and passes the current HLS session.
