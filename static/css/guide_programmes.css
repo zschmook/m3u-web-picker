@@ -1,0 +1,105 @@
+.guide-channel-main {
+  align-items: flex-start;
+}
+
+.guide-channel-copy {
+  min-width: 0;
+  width: 100%;
+}
+
+.guide-channel-identity {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  min-width: 0;
+  color: #9ca3af;
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+.guide-channel-identity-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-programme-now {
+  display: flex;
+  align-items: baseline;
+  gap: .45rem;
+  min-width: 0;
+  margin-top: .15rem;
+}
+
+.guide-programme-now-badge {
+  flex: 0 0 auto;
+  color: #86efac;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.guide-programme-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f9fafb;
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.guide-programme-time {
+  flex: 0 0 auto;
+  color: #d1d5db;
+  font-size: .78rem;
+  white-space: nowrap;
+}
+
+.guide-programme-subtitle {
+  margin-top: .05rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #cbd5e1;
+  font-size: .8rem;
+}
+
+.guide-programme-next,
+.guide-programme-empty {
+  margin-top: .12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9ca3af;
+  font-size: .78rem;
+}
+
+.guide-programme-next-label {
+  color: #93c5fd;
+  font-weight: 700;
+}
+
+.guide-programme-empty {
+  font-style: italic;
+}
+
+.guide-epg-warning {
+  color: #fbbf24;
+}
+
+.guide-logo {
+  margin-top: .15rem;
+}
+
+@media (max-width: 760px) {
+  .guide-programme-now {
+    display: block;
+  }
+
+  .guide-programme-time {
+    display: block;
+    margin-top: .05rem;
+  }
+}
