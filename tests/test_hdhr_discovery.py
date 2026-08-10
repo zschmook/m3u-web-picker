@@ -20,9 +20,10 @@ from api.hdhr_discovery import (
     _seal_frame,
     _tlv,
 )
+from api.hdhr import HDHR_DEVICE_ID
 
 
-DEVICE_ID = 0x1234ABCD
+DEVICE_ID = int(HDHR_DEVICE_ID, 16)
 
 
 class HdHomeRunDiscoveryPacketTests(unittest.TestCase):
@@ -57,7 +58,7 @@ class HdHomeRunDiscoveryPacketTests(unittest.TestCase):
         values = {tag: value for tag, value in _parse_tlvs(payload)}
         self.assertEqual(
             struct.unpack(">I", values[HDHR_TAG_DEVICE_TYPE])[0],
-            HDHR_DEVICE_TYPE_TUNER,
+            DEVICE_ID * 0 + HDHR_DEVICE_TYPE_TUNER,
         )
         self.assertEqual(
             struct.unpack(">I", values[HDHR_TAG_DEVICE_ID])[0],
