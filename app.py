@@ -13,38 +13,13 @@ app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 @app.get("/")
 def index():
     html = render_template("index.html")
+    html = html.replace(
+        "</head>",
+        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=schedule-api-health-1">\n</head>',
+    )
     return html.replace(
         "</body>",
-        """
-<script>
-  (() => {
-    const brand = document.querySelector(".app-brand-block");
-    const status = document.getElementById("sportsScanStatus");
-    if (!brand || !status) return;
-    brand.style.flex = "1 1 620px";
-    status.classList.remove("mb-3");
-    status.classList.add("mt-4");
-    status.style.width = "100%";
-    brand.appendChild(status);
-
-    // The sports status panel reports scan/matching progress only. The master
-    // update controls on the right already own the elapsed-time counter.
-    const originalRenderSportsScanStatus = renderSportsScanStatus;
-    renderSportsScanStatus = function() {
-      originalRenderSportsScanStatus();
-      const scan = sportsState.scan || {running: false};
-      const running = Boolean(masterUpdateBusy || masterUpdateState.running || scan.running);
-      if (!running) return;
-      const details = document.getElementById("sportsScanStatusDetails");
-      if (!details) return;
-      details.textContent = details.textContent
-        .split(" • ")
-        .filter(part => !/^Elapsed\b/i.test(part.trim()))
-        .join(" • ");
-    };
-  })();
-</script>
-</body>""",
+        '<script src="/static/js/experiments_ui.js?v=schedule-api-health-1"></script>\n</body>',
     )
 
 
