@@ -95,6 +95,7 @@
     (() => {
       const castButton = document.getElementById("guideCastBtn");
       const rokuButton = document.getElementById("guideRokuBtn");
+      let castDisconnectHandoffChannel = null;
 
       function clearRokuDiscovery(message) {
         guideState.roku.host = "";
@@ -165,8 +166,62 @@
         if (count < 100) window.setTimeout(() => attachCastDiscovery(count + 1), 100);
       }
 
+      async function handoffRokuToLocal(event) {
+        if (!guideState.roku.active) return;
+        const channel = guideState.currentChannel;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        await stopRokuPlayback({sendHome: true});
+        if (channel) playLocalChannel(channel);
+      }
+
+      async function handoffCastToLocal(event) {
+        if (!currentCastSession()) return;
+        const channel = guideState.currentChannel;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        castDisconnectHandoffChannel = channel || null;
+        try {
+          await stopRemoteMedia();
+          await stopCastRelay();
+          guideState.cast.lastMediaUrl = "";
+          guideState.cast.context.endCurrentSession(true);
+        } catch (error) {
+          castDisconnectHandoffChannel = null;
+          console.error("Could not hand Cast playback back to the browser", error);
+          return;
+        }
+
+        window.setTimeout(() => {
+          if (castDisconnectHandoffChannel === channel && !currentCastSession()) {
+            castDisconnectHandoffChannel = null;
+            if (channel) playLocalChannel(channel);
+          }
+        }, 1500);
+      }
+
+      function attachCastDisconnectHandoff(attempt) {
+        const count = Number(attempt || 0);
+        if (window.cast?.framework && guideState.cast.context) {
+          guideState.cast.context.addEventListener(
+            cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+            event => {
+              if (event.sessionState !== cast.framework.SessionState.SESSION_ENDED || !castDisconnectHandoffChannel) return;
+              const channel = castDisconnectHandoffChannel;
+              castDisconnectHandoffChannel = null;
+              playLocalChannel(channel);
+            }
+          );
+          return;
+        }
+        if (count < 100) window.setTimeout(() => attachCastDisconnectHandoff(count + 1), 100);
+      }
+
+      rokuButton.addEventListener("click", handoffRokuToLocal, true);
+      castButton.addEventListener("click", handoffCastToLocal, true);
       discoverRoku();
       attachCastDiscovery(0);
+      attachCastDisconnectHandoff(0);
     })();
   </script>
   <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
