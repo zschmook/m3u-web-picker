@@ -11,8 +11,7 @@ from media import mpegts
 from .http import no_cache
 
 
-# Must satisfy SiliconDust's HDHomeRun device-ID checksum rule. 1234ABCD did
-# not; 1234ABC2 does. Keep discovery + HTTP identity on the same value.
+# Must satisfy SiliconDust's HDHomeRun device-ID checksum rule.
 HDHR_DEVICE_ID = "1234ABC2"
 HDHR_FRIENDLY_NAME = "M3U Web Picker"
 HDHR_MODEL = "HDTC-2US"
@@ -64,88 +63,69 @@ def _device_xml() -> bytes:
     ElementTree.SubElement(device, "deviceType").text = "urn:schemas-upnp-org:device:MediaServer:1"
     ElementTree.SubElement(device, "friendlyName").text = HDHR_FRIENDLY_NAME
     ElementTree.SubElement(device, "manufacturer").text = "Silicondust"
-    ElementTree.SubElement(device, "manufacturerURL").text = "https://www.silicondust.com/"
-    ElementTree.SubElement(device, "modelDescription").text = "HDHomeRun"
-    ElementTree.SubElement(device, "modelName").text = "HDHomeRun"
+    ElementTree.SubElement(device, "modelName").text = HDHR_MODEL
     ElementTree.SubElement(device, "modelNumber").text = HDHR_MODEL
     ElementTree.SubElement(device, "serialNumber").text = HDHR_DEVICE_ID
     ElementTree.SubElement(device, "UDN").text = f"uuid:{HDHR_DEVICE_ID}"
-    ElementTree.SubElement(device, "presentationURL").text = "/"
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
-
-
-def _discover_payload() -> dict:
-    base = _base_url()
-    return {
-        "FriendlyName": HDHR_FRIENDLY_NAME,
-        "Manufacturer": "Silicondust",
-        "ModelNumber": HDHR_MODEL,
-        "FirmwareName": "hdhomerun",
-        "FirmwareVersion": HDHR_FIRMWARE_VERSION,
-        "DeviceID": HDHR_DEVICE_ID,
-        "DeviceAuth": "test1234",
-        "BaseURL": base,
-        "LineupURL": f"{base}/lineup.json",
-        "TunerCount": HDHR_TUNER_COUNT,
-    }
-
-
-def _find_channel(number: int) -> dict | None:
-    target = str(number)
-    for channel in core.curated_channels_for_guide():
-        if str(channel.get("number", "") or "").strip() == target:
-            return channel
-    return None
-
-
-def _stream_response(number: int):
-    channel = _find_channel(number)
-    if not channel:
-        return Response("Channel not found.\n", status=404, content_type="text/plain; charset=utf-8")
-
-    if request.method == "HEAD":
-        return Response(status=200, content_type="video/mp2t")
-
-    target = _resolve_play_url(str(channel.get("play_url", "") or ""))
-    if not target:
-        return Response("Channel source is unavailable.\n", status=404, content_type="text/plain; charset=utf-8")
-    return mpegts.response_for(target)
 
 
 def register_hdhr_routes(app):
     @app.get("/discover.json")
-    def hdhr_discover_json():
-        return no_cache(jsonify(_discover_payload()))
+    def hdhr_discover():
+        base = _base_url()
+        response = jsonify(
+            FriendlyName=HDHR_FRIENDLY_NAME,
+            Manufacturer="Silicondust",
+            ModelNumber=HDHR_MODEL,
+            FirmwareName="hdhomerun",
+            FirmwareVersion=HDHR_FIRMWARE_VERSION,
+            DeviceID=HDHR_DEVICE_ID,
+            DeviceAuth="m3u-web-picker",
+            BaseURL=base,
+            LineupURL=f"{base}/lineup.json",
+            TunerCount=HDHR_TUNER_COUNT,
+        )
+        return no_cache(response)
 
     @app.get("/lineup_status.json")
     def hdhr_lineup_status():
-        return no_cache(
-            jsonify(
-                {
-                    "ScanInProgress": 0,
-                    "ScanPossible": 0,
-                    "Source": "Cable",
-                    "SourceList": ["Cable"],
-                }
-            )
+        response = jsonify(
+            ScanInProgress=0,
+            ScanPossible=0,
+            Source="Cable",
+            SourceList=["Cable"],
         )
+        return no_cache(response)
 
     @app.get("/lineup.json")
     def hdhr_lineup():
         return no_cache(jsonify(_lineup_rows()))
 
     @app.get("/device.xml")
-    def hdhr_device_xml():
-        return no_cache(Response(_device_xml(), content_type="application/xml; charset=utf-8"))
-
     @app.get("/capability")
-    def hdhr_capability():
-        return no_cache(jsonify(_discover_payload()))
+    def hdhr_device():
+        response = Response(_device_xml(), content_type="application/xml; charset=utf-8")
+        return no_cache(response)
 
-    @app.route("/hdhr/stream/<int:number>", methods=["GET", "HEAD"])
-    def hdhr_stream(number: int):
-        return _stream_response(number)
-
-    @app.route("/auto/v<int:number>", methods=["GET", "HEAD"])
-    def hdhr_auto_stream(number: int):
-        return _stream_response(number)
+    @app.route("/hdhr/stream/<guide_number>", methods=["GET", "HEAD"])
+    @app.route("/auto/v<guide_number>", methods=["GET", "HEAD"])
+    def hdhr_stream(guide_number: str):
+        channel = next(
+            (
+                item
+                for item in core.curated_channels_for_guide()
+                if str(item.get("number", "") or "").strip() == str(guide_number).strip()
+            ),
+            None,
+        )
+        if channel is None:
+            return Response("Channel not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        target = _resolve_play_url(str(channel.get("play_url", "") or ""))
+        if not target:
+            return Response("Channel stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        if request.method == "HEAD":
+            response = Response(status=200, content_type="video/mp2t")
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return response
+        return mpegts.response_for(target)
