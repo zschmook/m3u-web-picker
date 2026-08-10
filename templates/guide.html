@@ -16,8 +16,8 @@
         <div id="guideStatus" class="small-muted" aria-live="polite">Loading curated lineup…</div>
       </div>
       <div class="d-flex gap-2 align-items-center">
-        <button id="guideCastBtn" class="btn btn-outline-light btn-sm d-none" type="button" disabled>Cast</button>
-        <button id="guideRokuBtn" class="btn btn-outline-light btn-sm d-none" type="button" disabled>Roku</button>
+        <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Google Cast receivers">Cast</button>
+        <button id="guideRokuBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Roku devices">Roku</button>
         <button id="guideRefreshBtn" class="btn btn-outline-light btn-sm" type="button">Refresh</button>
         <button id="guideCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
       </div>
@@ -57,9 +57,13 @@
           </div>
           <div id="guideCastStatus" class="small-muted guide-cast-status">Cast SDK loading…</div>
           <div class="guide-roku-row">
-            <label class="guide-cast-host-label" for="guideRokuHost">Roku TV IP</label>
-            <input id="guideRokuHost" class="form-control form-control-sm guide-roku-host" type="text" inputmode="decimal" placeholder="10.0.0.x" autocomplete="off">
-            <button id="guideRokuTestBtn" class="btn btn-outline-light btn-sm" type="button">Test Roku</button>
+            <label class="guide-cast-host-label" for="guideRokuDevice">Roku device</label>
+            <select id="guideRokuDevice" class="form-select form-select-sm guide-roku-host" disabled>
+              <option value="">Discovering…</option>
+            </select>
+            <input id="guideRokuHost" type="hidden" value="">
+            <button id="guideRokuDiscoverBtn" class="btn btn-outline-light btn-sm" type="button">Rediscover</button>
+            <button id="guideRokuTestBtn" class="btn btn-outline-light btn-sm" type="button">Test</button>
           </div>
           <div id="guideRokuStatus" class="small-muted guide-cast-status">Discovering Roku devices…</div>
         </div>
@@ -95,6 +99,9 @@
     (() => {
       const castButton = document.getElementById("guideCastBtn");
       const rokuButton = document.getElementById("guideRokuBtn");
+      const rokuDeviceSelect = document.getElementById("guideRokuDevice");
+      const rokuDiscoverButton = document.getElementById("guideRokuDiscoverBtn");
+      let discoveredRokus = [];
       let castDisconnectSequence = 0;
       let castDisconnectHandoff = null;
       let remoteTransitionBusy = false;
@@ -123,14 +130,34 @@
         remoteButtonObserver.observe(button, {childList: true, characterData: true, subtree: true});
       }
 
+      function renderRokuChoices(devices, selectedHost = "") {
+        discoveredRokus = Array.isArray(devices) ? devices : [];
+        if (!discoveredRokus.length) {
+          rokuDeviceSelect.innerHTML = '<option value="">No Roku found</option>';
+          rokuDeviceSelect.disabled = true;
+          return;
+        }
+        rokuDeviceSelect.innerHTML = discoveredRokus.map(device => {
+          const host = String(device?.host || "").trim();
+          const name = String(device?.name || "Roku TV").trim();
+          const model = String(device?.model || "").trim();
+          const label = `${name}${model ? ` · ${model}` : ""} · ${host}`;
+          return `<option value="${escapeHtml(host)}">${escapeHtml(label)}</option>`;
+        }).join("");
+        rokuDeviceSelect.disabled = false;
+        if (selectedHost && discoveredRokus.some(device => device.host === selectedHost)) {
+          rokuDeviceSelect.value = selectedHost;
+        }
+      }
+
       function clearRokuDiscovery(message) {
         guideState.roku.host = "";
         guideState.roku.deviceName = "Roku TV";
         guideEls.rokuHost.value = "";
         localStorage.removeItem("m3u-guide-roku-host");
-        rokuButton.classList.add("d-none");
+        renderRokuChoices([]);
         rokuButton.disabled = true;
-        rokuButton.title = "";
+        rokuButton.title = "No Roku discovered";
         guideEls.rokuStatus.textContent = message || "No Roku found on the local subnet.";
       }
 
@@ -140,13 +167,17 @@
         guideState.roku.host = host;
         guideState.roku.deviceName = device?.name || "Roku TV";
         guideEls.rokuHost.value = host;
+        if (!rokuDeviceSelect.disabled) rokuDeviceSelect.value = host;
         localStorage.setItem("m3u-guide-roku-host", host);
         updateRokuControls(`Found ${guideState.roku.deviceName}${device?.model ? ` · ${device.model}` : ""} at ${host}.`);
-        rokuButton.classList.remove("d-none");
         rokuButton.title = `${guideState.roku.deviceName} · ${host}`;
       }
 
-      async function discoverRoku() {
+      async function discoverRoku(attempt = 0) {
+        const prior = rokuDiscoverButton.textContent;
+        rokuDiscoverButton.disabled = true;
+        rokuDiscoverButton.textContent = "Scanning…";
+        guideEls.rokuStatus.textContent = "Discovering Roku devices on the local subnet…";
         try {
           const response = await fetch(`/api/guide/roku/discover?_=${Date.now()}`, {cache: "no-store"});
           const data = await response.json();
@@ -154,13 +185,19 @@
           const devices = Array.isArray(data.devices) ? data.devices : [];
           if (!devices.length) {
             clearRokuDiscovery(data.warning || `No Roku found${data.subnet ? ` on ${data.subnet}` : ""}.`);
+            if (attempt < 2) window.setTimeout(() => discoverRoku(attempt + 1), 2500);
             return;
           }
           const savedHost = localStorage.getItem("m3u-guide-roku-host") || "";
-          useDiscoveredRoku(devices.find(device => device.host === savedHost) || devices[0]);
+          const selected = devices.find(device => device.host === savedHost) || devices[0];
+          renderRokuChoices(devices, selected?.host || "");
+          useDiscoveredRoku(selected);
         } catch (error) {
           clearRokuDiscovery(`Roku discovery failed: ${error?.message || error}.`);
           console.error("Automatic Roku discovery failed", error);
+        } finally {
+          rokuDiscoverButton.disabled = false;
+          rokuDiscoverButton.textContent = prior;
         }
       }
 
@@ -168,12 +205,12 @@
         if (!window.cast?.framework || !guideState.cast.context) return false;
         const castState = state || guideState.cast.context.getCastState?.();
         const available = Boolean(castState) && castState !== cast.framework.CastState.NO_DEVICES_AVAILABLE;
-        castButton.classList.toggle("d-none", !available);
         if (available) {
           castButton.title = "Google Cast receiver available";
           updateCastStatus();
         } else {
-          castButton.title = "";
+          castButton.disabled = true;
+          castButton.title = "No Google Cast receivers found";
           guideEls.castStatus.textContent = "No Google Cast receivers found.";
         }
         return true;
@@ -306,9 +343,6 @@
             return;
           }
 
-          // toggleCast already performs Roku -> Cast teardown in sequence. The
-          // shared transition lock prevents another remote action until the
-          // picker resolves and that handoff completes.
           await toggleCast();
         });
       }
@@ -330,6 +364,11 @@
         if (count < 100) window.setTimeout(() => attachCastDisconnectHandoff(count + 1), 100);
       }
 
+      rokuDeviceSelect.addEventListener("change", () => {
+        const device = discoveredRokus.find(item => item.host === rokuDeviceSelect.value);
+        if (device) useDiscoveredRoku(device);
+      });
+      rokuDiscoverButton.addEventListener("click", () => discoverRoku(0));
       rokuButton.addEventListener("click", handleRokuButtonClick, true);
       castButton.addEventListener("click", handleCastButtonClick, true);
       discoverRoku();
