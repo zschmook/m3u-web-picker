@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from contextlib import closing
 from pathlib import Path
 from typing import Iterable
@@ -96,9 +98,9 @@ def _upsert_catalog_item(
             display_name,
             subtitle,
             league_id,
-            _s.json.dumps(sorted(set(alias for alias in aliases if alias))),
+            json.dumps(sorted(set(alias for alias in aliases if alias))),
             logo_url,
-            _s.json.dumps(metadata),
+            json.dumps(metadata),
             source,
             _s._now_iso(),
         ),
@@ -115,7 +117,7 @@ def _team_feed_identity(channel: dict) -> tuple[str, str, str] | None:
         normalized = _s._normalize(team)
         if not normalized or any(word in normalized for word in _s.NETWORK_WORDS):
             continue
-        if _s.re.fullmatch(r"\d+|\d+\s*(am|pm)?", normalized):
+        if re.fullmatch(r"\d+|\d+\s*(am|pm)?", normalized):
             continue
         return league_id, f"{league_id}:{_s._slug(team)}", team
     return None
