@@ -16,59 +16,23 @@ SCHEDULE_MODES = {"daily", "interval"}
 MIN_INTERVAL_HOURS = 1
 MAX_INTERVAL_HOURS = 24
 ESTIMATED_EVENT_HOURS = {
-    "mlb": 4,
-    "milb": 4,
-    "ncaa-baseball": 4,
-    "international-baseball": 4,
-    "nfl": 4,
-    "ncaaf-fbs": 4,
-    "ncaaf-fcs": 4,
-    "ncaaf-d2": 4,
-    "ncaaf-d3": 4,
-    "naia-football": 4,
-    "njcaa-football": 4,
-    "high-school-football": 4,
-    "nba": 3,
-    "wnba": 3,
-    "nba-g-league": 3,
-    "ncaab-men": 3,
-    "ncaab-women": 3,
-    "international-basketball": 3,
-    "nhl": 3,
-    "ahl": 3,
-    "ncaa-hockey": 3,
-    "international-hockey": 3,
-    "mls": 3,
-    "nwsl": 3,
-    "premier-league": 3,
-    "la-liga": 3,
-    "uefa-champions-league": 3,
-    "international-soccer": 3,
-    "cricket-test": 8,
-    "cricket-odi": 8,
-    "cricket-t20": 5,
-    "cricket-ipl": 5,
-    "cricket-domestic": 8,
-    "rugby-union-international": 3,
-    "rugby-union-club": 3,
-    "rugby-league-nrl": 3,
-    "rugby-league-super": 3,
-    "rugby-league-origin": 3,
-    "poker": 8,
-    "wsop": 8,
-    "wpt": 8,
-    "ept": 8,
-    "golf": 8,
-    "pga-tour": 8,
-    "lpga-tour": 8,
-    "liv-golf": 8,
-    "dp-world-tour": 8,
-    "golf-majors": 8,
-    "cycling": 6,
-    "tour-de-france": 6,
-    "giro-ditalia": 6,
-    "vuelta-espana": 6,
-    "tour-california": 6,
+    "mlb": 4, "milb": 4, "ncaa-baseball": 4, "international-baseball": 4,
+    "nfl": 4, "ncaaf-fbs": 4, "ncaaf-fcs": 4, "ncaaf-d2": 4,
+    "ncaaf-d3": 4, "naia-football": 4, "njcaa-football": 4,
+    "high-school-football": 4, "nba": 3, "wnba": 3, "nba-g-league": 3,
+    "ncaab-men": 3, "ncaab-women": 3, "international-basketball": 3,
+    "nhl": 3, "ahl": 3, "ncaa-hockey": 3, "international-hockey": 3,
+    "mls": 3, "nwsl": 3, "premier-league": 3, "la-liga": 3,
+    "uefa-champions-league": 3, "international-soccer": 3,
+    "cricket-test": 8, "cricket-odi": 8, "cricket-t20": 5,
+    "cricket-ipl": 5, "cricket-domestic": 8,
+    "rugby-union-international": 3, "rugby-union-club": 3,
+    "rugby-league-nrl": 3, "rugby-league-super": 3, "rugby-league-origin": 3,
+    "poker": 8, "wsop": 8, "wpt": 8, "ept": 8,
+    "golf": 8, "pga-tour": 8, "lpga-tour": 8, "liv-golf": 8,
+    "dp-world-tour": 8, "golf-majors": 8,
+    "cycling": 6, "tour-de-france": 6, "giro-ditalia": 6,
+    "vuelta-espana": 6, "tour-california": 6,
 }
 
 
@@ -112,9 +76,7 @@ def _record_malformed_entry(
     diagnostics[key] = int(diagnostics.get(key, 0)) + 1
     samples = diagnostics.setdefault("samples", [])
     if len(samples) < MAX_MALFORMED_SAMPLES:
-        clean_label = re.sub(
-            r"\s+", " ", str(label or "unnamed entry")
-        ).strip()
+        clean_label = re.sub(r"\s+", " ", str(label or "unnamed entry")).strip()
         samples.append(
             {
                 "source": source.upper(),
@@ -168,13 +130,8 @@ def _smart_team_name(value: str) -> str:
     if value.isupper():
         value = value.title()
     replacements = {
-        "76Ers": "76ers",
-        "Fc": "FC",
-        "Sc": "SC",
-        "Ucla": "UCLA",
-        "Usc": "USC",
-        "Lsu": "LSU",
-        "Smu": "SMU",
+        "76Ers": "76ers", "Fc": "FC", "Sc": "SC", "Ucla": "UCLA",
+        "Usc": "USC", "Lsu": "LSU", "Smu": "SMU",
     }
     for before, after in replacements.items():
         value = re.sub(rf"\b{re.escape(before)}\b", after, value)
@@ -186,3 +143,11 @@ def _json_load(value: str, fallback):
         return json.loads(value)
     except Exception:
         return fallback
+
+
+def _is_sd_channel(channel: dict) -> bool:
+    group = str(channel.get("group", "") or "").strip().upper()
+    name = str(channel.get("name", "") or "").strip()
+    return group == "LOW BANDWIDTH" or bool(
+        re.search(r"(?:^|[ |_-])SD(?:$|[ |_-])", name, re.I)
+    )
