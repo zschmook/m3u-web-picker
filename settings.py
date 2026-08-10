@@ -58,7 +58,7 @@ def load_settings() -> AppSettings:
         ),
         cast_hls_dir=cast_hls_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
-        external_port=_env_int("M3U_EXTERNAL_PORT", 1000),
+        external_port=_env_int("M3U_EXTERNAL_PORT", 10000),
     )
 
 
