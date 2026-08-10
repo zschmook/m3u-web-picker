@@ -1,3 +1,4 @@
+# Temporary self-removing workflow used only on experiments-refacor.
 name: Complete experimental refactor
 
 on:
