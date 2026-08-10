@@ -32,6 +32,8 @@ _catalog = import_module(f"{__name__}.catalog")
 _generated = import_module(f"{__name__}.generated")
 _rules = import_module(f"{__name__}.rules")
 _feeds = import_module(f"{__name__}.feeds")
+_guide = import_module(f"{__name__}.guide")
+_guide_validation = import_module(f"{__name__}.guide_validation")
 _scan = import_module(f"{__name__}.scan")
 _schedule_refresh = import_module(f"{__name__}.schedule_refresh")
 
@@ -138,6 +140,32 @@ _install(
         "_feed_label",
         "_preferred_feed_logo",
         "_build_feeds",
+    ),
+)
+_install(
+    _guide,
+    (
+        "_xmltv_time",
+        "_parse_iso_datetime",
+        "_serialize_programme_record",
+        "_serialize_epg_programme",
+        "_parse_programme_record",
+        "_epg_programme_from_item",
+        "_event_duration",
+        "_clean_feed_subtitle",
+        "build_sports_xmltv",
+        "build_combined_xmltv",
+        "_write_prepared_epg_files",
+        "rebuild_epg_exports",
+    ),
+)
+_install(
+    _guide_validation,
+    (
+        "_local_xml_name",
+        "_xmltv_index",
+        "_playlist_tvg_ids",
+        "validate_guide_exports",
     ),
 )
 _install(_scan, ("scan_channels",))
