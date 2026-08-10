@@ -21,14 +21,14 @@
       </div>
     </header>
 
-    <section id="guidePlayerPanel" class="guide-player-panel d-none mb-3" aria-live="polite">
+    <section id="guidePlayerPanel" class="guide-player-panel mb-3" aria-live="polite">
       <div class="guide-player-heading">
         <div class="guide-player-copy">
           <div class="guide-player-kicker">
-            <span id="guidePlaybackBadge" class="badge rounded-pill text-bg-secondary">Local</span>
-            <span id="guideNowPlayingLabel" class="small-muted">Now playing</span>
+            <span id="guidePlaybackBadge" class="badge rounded-pill text-bg-secondary">Ready</span>
+            <span id="guideNowPlayingLabel" class="small-muted">Select a channel</span>
           </div>
-          <div id="guidePlayerTitle" class="guide-player-title">—</div>
+          <div id="guidePlayerTitle" class="guide-player-title">Cast / Roku</div>
           <div id="guidePlayerMeta" class="small-muted guide-player-meta"></div>
         </div>
         <div class="guide-player-actions">
@@ -38,7 +38,7 @@
         </div>
       </div>
 
-      <video id="guidePlayer" class="guide-player" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
+      <video id="guidePlayer" class="guide-player d-none" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
       <div id="guideCastScreen" class="guide-cast-screen d-none">
         <div class="guide-cast-icon" aria-hidden="true">▰</div>
         <div class="guide-cast-screen-title"><span id="guideRemoteScreenVerb">Casting to</span> <span id="guideCastScreenDevice">Cast device</span></div>
