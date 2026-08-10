@@ -24,6 +24,7 @@ def _install(module, names: tuple[str, ...]) -> None:
         globals()[name] = getattr(module, name)
 
 
+_common = import_module(f"{__name__}.common")
 _storage = import_module(f"{__name__}.storage")
 _numbering = import_module(f"{__name__}.numbering")
 _scheduling = import_module(f"{__name__}.scheduling")
@@ -37,7 +38,42 @@ _guide = import_module(f"{__name__}.guide")
 _guide_validation = import_module(f"{__name__}.guide_validation")
 _scan = import_module(f"{__name__}.scan")
 _schedule_refresh = import_module(f"{__name__}.schedule_refresh")
+_status = import_module(f"{__name__}.status")
 
+_install(
+    _common,
+    (
+        "MAX_MALFORMED_SAMPLES",
+        "XMLTV_GENERATOR_NAME",
+        "GUIDE_PREGAME_HOURS",
+        "GUIDE_POSTGAME_HOURS",
+        "SPORTS_DISABLED_CACHE_HOURS",
+        "SPORTS_DISABLED_AT_KEY",
+        "SPORTS_INTERVAL_ANCHOR_KEY",
+        "SCHEDULE_MODES",
+        "MIN_INTERVAL_HOURS",
+        "MAX_INTERVAL_HOURS",
+        "ESTIMATED_EVENT_HOURS",
+        "MalformedSportsEntry",
+        "ScanCancelled",
+        "CancelCheck",
+        "EVENT_END_GRACE",
+        "EVENT_MERGE_TOLERANCE",
+        "REPLAY_ATTACH_WINDOW",
+        "LOGICAL_EVENT_DAY_ROLLOVER_HOUR",
+        "MAX_ESTIMATED_EVENT_DURATION",
+        "_raise_if_cancelled",
+        "_new_scan_diagnostics",
+        "_record_malformed_entry",
+        "_malformed_count",
+        "_log_malformed_summary",
+        "_now_iso",
+        "_slug",
+        "_normalize",
+        "_smart_team_name",
+        "_json_load",
+    ),
+)
 _install(
     _storage,
     (
@@ -184,3 +220,4 @@ _install(
     _schedule_refresh,
     ("refresh_schedule_api_if_due", "refresh_schedule_api_if_due_async"),
 )
+_install(_status, ("status_payload",))
