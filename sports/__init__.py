@@ -30,6 +30,7 @@ _numbering = import_module(f"{__name__}.numbering")
 _scheduling = import_module(f"{__name__}.scheduling")
 _scan_state = import_module(f"{__name__}.scan_state")
 _catalog = import_module(f"{__name__}.catalog")
+_schedule_api = import_module(f"{__name__}.schedule_api")
 _generated = import_module(f"{__name__}.generated")
 _rules = import_module(f"{__name__}.rules")
 _feeds = import_module(f"{__name__}.feeds")
@@ -141,6 +142,32 @@ _install(
         "add_rule",
         "update_rule",
         "delete_rule",
+    ),
+)
+_install(
+    _schedule_api,
+    (
+        "_schedule_api_secret",
+        "_schedule_api_rule_league_id",
+        "schedule_api_request_plan",
+        "_schedule_api_dataset_season",
+        "_schedule_api_cache_summary",
+        "schedule_api_status",
+        "update_schedule_api_config",
+        "_schedule_api_required_dates",
+        "_schedule_api_request_key",
+        "_schedule_api_dataset_games_url",
+        "_schedule_api_games_url",
+        "_schedule_api_scheduled_start",
+        "_schedule_api_game_fields",
+        "_upsert_schedule_api_team",
+        "_fetch_schedule_api_dataset_date",
+        "_conference_catalog_map",
+        "_match_ncaa_conference_id",
+        "_refresh_ncaa_reference_metadata_if_needed",
+        "_schedule_api_authoritative_leagues",
+        "_filter_provider_events_by_authoritative_schedule",
+        "schedule_api_events_for_window",
     ),
 )
 _install(
