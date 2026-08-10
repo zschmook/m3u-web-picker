@@ -404,15 +404,21 @@ async def refresh_schedule_api_if_due_async(
             cached.append(stale)
 
     warning = " ".join(dict.fromkeys(item for item in warnings if item))
-    _record_schedule_api_refresh_health(
-        db_path,
-        plan=plan,
-        fetched=fetched,
-        cached=cached,
-        failures=failures,
-        reference_failures=reference_failures,
-        warning=warning,
-    )
+    # Health is diagnostic telemetry. It is intentionally persisted once per
+    # schedule refresh, never in the event-matching hot path, and a telemetry
+    # write failure must not turn a usable sports refresh into a failed update.
+    try:
+        _record_schedule_api_refresh_health(
+            db_path,
+            plan=plan,
+            fetched=fetched,
+            cached=cached,
+            failures=failures,
+            reference_failures=reference_failures,
+            warning=warning,
+        )
+    except Exception as exc:
+        print(f"Could not persist schedule API health ({type(exc).__name__}).")
 
     available = _available_canonical_event_count(db_path, plan)
     return {
