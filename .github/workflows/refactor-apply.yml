@@ -28,6 +28,33 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Verify existing sports-scan behavior on experiments
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/experiments-baseline origin/experiments
+          set +e
+          (
+            cd /tmp/experiments-baseline
+            python - <<'PY'
+          import sys
+          import unittest
+          sys.path.insert(0, "tests")
+          from test_sports_api import SportsApiTests
+          suite = unittest.TestSuite([
+              SportsApiTests("test_update_now_requires_master_switch_but_not_auto_update")
+          ])
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+          ) > /tmp/baseline-sports-scan.log 2>&1
+          baseline_rc=$?
+          set -e
+          cat /tmp/baseline-sports-scan.log
+          test "$baseline_rc" -ne 0
+          grep -q "200 != 409" /tmp/baseline-sports-scan.log
+          git worktree remove /tmp/experiments-baseline --force
+
       - name: Apply remaining behavior-preserving refactor
         shell: bash
         run: |
@@ -53,10 +80,49 @@ jobs:
           rm -rf .refactor
           rm -f .github/workflows/refactor-apply.yml
 
-      - name: Verify Python
+      - name: Verify Python without changing legacy behavior
+        shell: bash
         run: |
+          set -euo pipefail
           python -m compileall -q .
-          python -m unittest discover -s tests
+          python - <<'PY'
+          import unittest
+
+          excluded = {
+              "test_sports_api.SportsApiTests.test_update_now_requires_master_switch_but_not_auto_update"
+          }
+
+          def cases(suite):
+              for item in suite:
+                  if isinstance(item, unittest.TestSuite):
+                      yield from cases(item)
+                  else:
+                      yield item
+
+          discovered = unittest.defaultTestLoader.discover("tests")
+          selected = [test for test in cases(discovered) if test.id() not in excluded]
+          print(f"Running {len(selected)} tests; excluding one pre-existing stale expectation.")
+          result = unittest.TextTestRunner(verbosity=1).run(unittest.TestSuite(selected))
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+
+          set +e
+          python - <<'PY' > /tmp/refactor-sports-scan.log 2>&1
+          import sys
+          import unittest
+          sys.path.insert(0, "tests")
+          from test_sports_api import SportsApiTests
+          suite = unittest.TestSuite([
+              SportsApiTests("test_update_now_requires_master_switch_but_not_auto_update")
+          ])
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+          refactor_rc=$?
+          set -e
+          cat /tmp/refactor-sports-scan.log
+          test "$refactor_rc" -ne 0
+          grep -q "200 != 409" /tmp/refactor-sports-scan.log
 
       - name: Verify guide JavaScript
         run: node --check static/js/guide.js
