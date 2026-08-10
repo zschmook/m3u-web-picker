@@ -42,6 +42,7 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             payload["LineupURL"],
             "http://10.0.0.22:10000/lineup.json",
         )
+        self.assertNotIn("DeviceAuth", payload)
 
     def test_discover_matches_hdhomerun_cross_origin_behavior(self):
         response = self.client.get(
@@ -68,12 +69,12 @@ class HdHomeRunFacadeTests(unittest.TestCase):
                 {
                     "GuideNumber": "7",
                     "GuideName": "NBC 10",
-                    "URL": "http://10.0.0.22:10000/hdhr/stream/7",
+                    "URL": "http://10.0.0.22:10000/auto/v7",
                 },
                 {
                     "GuideNumber": "1000",
                     "GuideName": "Phillies vs Nationals",
-                    "URL": "http://10.0.0.22:10000/hdhr/stream/1000",
+                    "URL": "http://10.0.0.22:10000/auto/v1000",
                 },
             ],
         )
