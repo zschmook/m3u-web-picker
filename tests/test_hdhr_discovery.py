@@ -3,6 +3,7 @@ from __future__ import annotations
 import struct
 import unittest
 
+from api.hdhr import HDHR_DEVICE_ID
 from api.hdhr_discovery import (
     HDHR_DEVICE_ID_WILDCARD,
     HDHR_DEVICE_TYPE_TUNER,
@@ -20,7 +21,6 @@ from api.hdhr_discovery import (
     _seal_frame,
     _tlv,
 )
-from api.hdhr import HDHR_DEVICE_ID
 
 
 DEVICE_ID = int(HDHR_DEVICE_ID, 16)
@@ -58,7 +58,7 @@ class HdHomeRunDiscoveryPacketTests(unittest.TestCase):
         values = {tag: value for tag, value in _parse_tlvs(payload)}
         self.assertEqual(
             struct.unpack(">I", values[HDHR_TAG_DEVICE_TYPE])[0],
-            DEVICE_ID * 0 + HDHR_DEVICE_TYPE_TUNER,
+            HDHR_DEVICE_TYPE_TUNER,
         )
         self.assertEqual(
             struct.unpack(">I", values[HDHR_TAG_DEVICE_ID])[0],
