@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ import sports as _s
 
 
 SCHEDULE_FETCH_CONCURRENCY = 2
+SCHEDULE_API_HEALTH_SETTING = "__schedule_api_health"
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,140 @@ class ScheduleFetchWork:
     had_cache: bool
 
 
+def schedule_api_refresh_health(db_path: Path | str) -> dict:
+    """Return persisted, credential-free refresh-attempt health."""
+    _s.init_db(db_path)
+    with closing(_s._connect(db_path)) as conn:
+        row = conn.execute(
+            "SELECT value FROM sports_settings WHERE key = ?",
+            (SCHEDULE_API_HEALTH_SETTING,),
+        ).fetchone()
+    if not row:
+        return {"datasets": {}, "last_refresh_at": None, "last_warning": ""}
+    value = _s._json_load(row["value"], {})
+    if not isinstance(value, dict):
+        return {"datasets": {}, "last_refresh_at": None, "last_warning": ""}
+    datasets = value.get("datasets")
+    value["datasets"] = datasets if isinstance(datasets, dict) else {}
+    value.setdefault("last_refresh_at", None)
+    value.setdefault("last_warning", "")
+    return value
+
+
+def _save_schedule_api_refresh_health(db_path: Path | str, health: dict) -> None:
+    _s.init_db(db_path)
+    with closing(_s._connect(db_path)) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+            (SCHEDULE_API_HEALTH_SETTING, json.dumps(health, separators=(",", ":"))),
+        )
+        conn.commit()
+
+
+def _record_schedule_api_refresh_health(
+    db_path: Path | str,
+    *,
+    plan: dict,
+    fetched: list[dict],
+    cached: list[dict],
+    failures: list[dict],
+    reference_failures: list[dict],
+    warning: str,
+) -> None:
+    health = schedule_api_refresh_health(db_path)
+    datasets = dict(health.get("datasets") or {})
+    recorded_at = _s._now_iso()
+
+    for planned in plan.get("datasets") or []:
+        dataset_id = str(planned.get("id") or "")
+        if not dataset_id:
+            continue
+        entry = dict(datasets.get(dataset_id) or {})
+        entry.update(
+            {
+                "id": dataset_id,
+                "label": str(planned.get("label") or dataset_id),
+                "product": str(planned.get("product") or ""),
+            }
+        )
+
+        successes = [
+            item for item in fetched if str(item.get("dataset") or "") == dataset_id
+        ]
+        dataset_failures = [
+            item for item in failures if str(item.get("dataset") or "") == dataset_id
+        ]
+        cache_hits = [
+            item for item in cached if str(item.get("dataset") or "") == dataset_id
+        ]
+        dataset_reference_failures = [
+            item
+            for item in reference_failures
+            if str(item.get("dataset") or "") == dataset_id
+        ]
+
+        if successes or dataset_failures:
+            entry["last_attempt_at"] = recorded_at
+            entry["last_attempt_dates"] = sorted(
+                {
+                    str(item.get("date") or "")
+                    for item in [*successes, *dataset_failures]
+                    if str(item.get("date") or "")
+                }
+            )
+
+        if successes:
+            successful_times = [
+                str(item.get("fetched_at") or "") for item in successes if item.get("fetched_at")
+            ]
+            entry["last_success_at"] = max(successful_times) if successful_times else recorded_at
+
+        if dataset_failures:
+            errors = list(
+                dict.fromkeys(
+                    str(item.get("error") or "Schedule API refresh failed.")
+                    for item in dataset_failures
+                )
+            )
+            entry["last_error"] = " ".join(errors)
+            entry["last_attempt_status"] = "partial" if successes else "failed"
+            entry["stale_cache_used"] = any(
+                bool(item.get("stale_cache_used")) for item in dataset_failures
+            )
+        elif successes:
+            entry["last_error"] = ""
+            entry["last_attempt_status"] = "success"
+            entry["stale_cache_used"] = False
+        elif cache_hits:
+            entry["last_cache_use_at"] = recorded_at
+
+        if dataset_reference_failures:
+            entry["reference_error"] = " ".join(
+                dict.fromkeys(
+                    str(item.get("error") or "Schedule API reference refresh failed.")
+                    for item in dataset_reference_failures
+                )
+            )
+            entry["reference_error_at"] = recorded_at
+        elif dataset_id == "ncaa" and successes:
+            # A successful NCAA schedule fetch does not guarantee standings/reference
+            # data was requested, so only clear an old reference error when this run
+            # did not report one and the plan still requires that reference dataset.
+            if "ncaa_membership" in set(plan.get("reference_datasets") or []):
+                entry["reference_error"] = ""
+
+        datasets[dataset_id] = entry
+
+    health.update(
+        {
+            "datasets": datasets,
+            "last_refresh_at": recorded_at,
+            "last_warning": str(warning or ""),
+        }
+    )
+    _save_schedule_api_refresh_health(db_path, health)
+
+
 async def _refresh_reference_if_needed(
     db_path: Path | str,
     *,
@@ -32,12 +168,12 @@ async def _refresh_reference_if_needed(
     api_key: str,
     season: int,
     cancel_check: _s.CancelCheck,
-) -> tuple[dict | None, str]:
+) -> tuple[dict | None, dict | None]:
     if (
         dataset["id"] != "ncaa"
         or "ncaa_membership" not in set(plan.get("reference_datasets") or [])
     ):
-        return None, ""
+        return None, None
     try:
         result = await asyncio.to_thread(
             _s._refresh_ncaa_reference_metadata_if_needed,
@@ -47,9 +183,14 @@ async def _refresh_reference_if_needed(
             force=False,
             cancel_check=cancel_check,
         )
-        return result, ""
+        return result, None
     except ValueError as exc:
-        return None, str(exc)
+        return None, {
+            "dataset": str(dataset.get("id") or "ncaa"),
+            "scope": str(dataset.get("label") or "NCAA Football"),
+            "kind": "reference",
+            "error": str(exc),
+        }
 
 
 def _cached_request_matches(
@@ -90,7 +231,7 @@ async def _fetch_dataset_date(
     api_key: str,
     cancel_check: _s.CancelCheck,
     semaphore: asyncio.Semaphore,
-) -> tuple[dict | None, str, dict | None]:
+) -> tuple[dict | None, dict | None, dict | None]:
     async with semaphore:
         _s._raise_if_cancelled(cancel_check)
         try:
@@ -105,8 +246,15 @@ async def _fetch_dataset_date(
                 fetched_on=work.fetched_on,
                 cancel_check=cancel_check,
             )
-            return result, "", None
+            return result, None, None
         except ValueError as exc:
+            failure = {
+                "dataset": str(work.dataset.get("id") or ""),
+                "scope": str(work.dataset.get("label") or ""),
+                "date": work.schedule_date.isoformat(),
+                "error": str(exc),
+                "stale_cache_used": bool(work.had_cache),
+            }
             stale = None
             if work.had_cache:
                 stale = {
@@ -114,7 +262,7 @@ async def _fetch_dataset_date(
                     "date": work.schedule_date.isoformat(),
                     "stale": True,
                 }
-            return None, str(exc), stale
+            return None, failure, stale
 
 
 def _available_canonical_event_count(db_path: Path | str, plan: dict) -> int:
@@ -152,6 +300,8 @@ async def refresh_schedule_api_if_due_async(
             "used": False,
             "fetched": [],
             "cached": [],
+            "failures": [],
+            "reference_failures": [],
             "warning": "",
             "plan": plan,
         }
@@ -161,6 +311,8 @@ async def refresh_schedule_api_if_due_async(
             "used": False,
             "fetched": [],
             "cached": [],
+            "failures": [],
+            "reference_failures": [],
             "warning": "",
             "plan": plan,
             "message": (
@@ -174,14 +326,16 @@ async def refresh_schedule_api_if_due_async(
     timezone_name = str(settings.get("timezone", "America/New_York"))
     fetched: list[dict] = []
     cached: list[dict] = []
+    failures: list[dict] = []
     warnings: list[str] = []
     reference: list[dict] = []
+    reference_failures: list[dict] = []
     work_items: list[ScheduleFetchWork] = []
 
     for dataset in plan["datasets"]:
         _s._raise_if_cancelled(cancel_check)
         season = _s._schedule_api_dataset_season(dataset, local_now)
-        reference_result, reference_warning = await _refresh_reference_if_needed(
+        reference_result, reference_failure = await _refresh_reference_if_needed(
             db_path,
             dataset=dataset,
             plan=plan,
@@ -191,8 +345,9 @@ async def refresh_schedule_api_if_due_async(
         )
         if reference_result is not None:
             reference.append(reference_result)
-        if reference_warning:
-            warnings.append(reference_warning)
+        if reference_failure is not None:
+            reference_failures.append(reference_failure)
+            warnings.append(str(reference_failure.get("error") or ""))
 
         for schedule_date in required_dates:
             _s._raise_if_cancelled(cancel_check)
@@ -239,13 +394,25 @@ async def refresh_schedule_api_if_due_async(
             for work in work_items
         )
     )
-    for result, warning, stale in results:
+    for result, failure, stale in results:
         if result is not None:
             fetched.append(result)
-        if warning:
-            warnings.append(warning)
+        if failure is not None:
+            failures.append(failure)
+            warnings.append(str(failure.get("error") or ""))
         if stale is not None:
             cached.append(stale)
+
+    warning = " ".join(dict.fromkeys(item for item in warnings if item))
+    _record_schedule_api_refresh_health(
+        db_path,
+        plan=plan,
+        fetched=fetched,
+        cached=cached,
+        failures=failures,
+        reference_failures=reference_failures,
+        warning=warning,
+    )
 
     available = _available_canonical_event_count(db_path, plan)
     return {
@@ -253,8 +420,10 @@ async def refresh_schedule_api_if_due_async(
         "used": available > 0,
         "fetched": fetched,
         "cached": cached,
+        "failures": failures,
         "reference": reference,
-        "warning": " ".join(dict.fromkeys(warnings)),
+        "reference_failures": reference_failures,
+        "warning": warning,
         "canonical_events_available": available,
         "plan": plan,
     }
