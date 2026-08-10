@@ -1,9 +1,156 @@
 from datetime import datetime
+import os
+import re
+import shutil
+import subprocess
 
-from flask import Response, jsonify, redirect, request, send_file
+from flask import Response, jsonify, redirect, request, send_file, stream_with_context
 
 import core
 import sports
+from . import cast_hls
+
+
+def _ffmpeg_browser_response(target: str) -> Response:
+    """Transcode one curated IPTV stream to browser-friendly fragmented MP4.
+
+    The provider URL never reaches the guide UI. ffmpeg reads it server-side and
+    emits H.264/AAC fMP4 on stdout. The process is torn down when the browser
+    closes or switches channels. This is intentionally an experimental,
+    one-viewer-at-a-time style path rather than a general media server.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return Response(
+            "Browser playback is unavailable because ffmpeg is not installed.\n",
+            status=503,
+            content_type="text/plain; charset=utf-8",
+        )
+
+    command = [
+        ffmpeg,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-i",
+        target,
+        "-map",
+        "0:v:0?",
+        "-map",
+        "0:a:0?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-max_muxing_queue_size",
+        "2048",
+        "-f",
+        "mp4",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
+        "-frag_duration",
+        "1000000",
+        "pipe:1",
+    ]
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+    except OSError as exc:
+        return Response(
+            f"Could not start ffmpeg: {exc}\n",
+            status=502,
+            content_type="text/plain; charset=utf-8",
+        )
+
+    def generate():
+        try:
+            if process.stdout is None:
+                return
+            while True:
+                chunk = process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process.stdout is not None:
+                try:
+                    process.stdout.close()
+                except Exception:
+                    pass
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+
+    response = Response(
+        stream_with_context(generate()),
+        content_type="video/mp4",
+        direct_passthrough=True,
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["X-Accel-Buffering"] = "no"
+    response.headers["Content-Disposition"] = 'inline; filename="live.mp4"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # The Google Cast Default Media Receiver fetches media directly from this
+    # endpoint, so the response must be usable cross-origin from the receiver.
+    # The provider URL still never leaves the server; this only exposes the
+    # already-curated ffmpeg output.
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Range, Content-Type"
+    response.headers["Access-Control-Expose-Headers"] = "Content-Type"
+    return response
+
+
+def _resolve_guide_play_target(play_url: str) -> str:
+    """Resolve a guide-owned opaque play path without trusting arbitrary URLs."""
+    value = str(play_url or "").split("?", 1)[0].strip()
+    manual = re.fullmatch(r"/guide/play/manual/([^/]+)", value)
+    if manual:
+        return core.manual_stream_target(manual.group(1))
+    generated = re.fullmatch(r"/guide/play/sports/(\d+)", value)
+    if generated:
+        return sports.generated_stream_target(core.DB_PATH, int(generated.group(1)))
+    return ""
+
+
+def _cast_cors(response: Response) -> Response:
+    # Cast adaptive-stream requests originate from the receiver application,
+    # not from the localhost sender page. Echo the actual Origin when present
+    # so the response satisfies CAF's adaptive-media CORS requirements.
+    origin = str(request.headers.get("Origin", "") or "").strip()
+    response.headers["Access-Control-Allow-Origin"] = origin or "*"
+    if origin:
+        response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Accept-Encoding, Content-Type, Range"
+    response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Accept-Ranges, Content-Type"
+    return response
 
 
 def register_routes(app):
@@ -85,7 +232,7 @@ def register_routes(app):
         }
         count = core.write_current_playlist()
         core.save_config()
-        return jsonify(count=count, path=str(core.PLAYLIST_PATH), url="/playlist/custom.m3u")
+        return jsonify(count=count, path=str(core.PLAYLIST_PATH), url="/playlist/channels.m3u")
 
     @app.get("/api/selection/order")
     def api_selection_order():
@@ -99,7 +246,7 @@ def register_routes(app):
         count = core.save_channel_order(keys)
         core.write_current_playlist()
         core.save_config()
-        return jsonify(count=count, url="/playlist/custom.m3u")
+        return jsonify(count=count, url="/playlist/channels.m3u")
 
     @app.get("/api/channels")
     def api_channels():
@@ -270,10 +417,10 @@ def register_routes(app):
             generated_sports=generated_count,
             saved_selections=len(core.load_selected_keys_from_db()),
             playlist_exists=core.PLAYLIST_PATH.exists(),
-            playlist_url="/playlist/custom.m3u",
+            playlist_url="/playlist/channels.m3u",
             playlist_all_url="/playlist/all.m3u",
             sports_epg_url="/epg/sports.xml",
-            combined_epg_url="/epg/combined.xml",
+            combined_epg_url="/epg/epg.xml",
             playlist_path=str(core.PLAYLIST_PATH),
             source_url_configured=bool(core.last_source_url),
             source_mode=core.source_mode,
@@ -379,6 +526,20 @@ def register_routes(app):
             return jsonify(error="Could not save schedule API settings."), 500
         return jsonify(schedule_api=payload)
 
+    @app.post("/api/sports/schedule-api/refresh")
+    def api_refresh_sports_schedule_api():
+        try:
+            result = sports.refresh_schedule_api_if_due(core.DB_PATH, force=True)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:
+            print(f"Could not refresh schedule API: {exc}")
+            return jsonify(error="Could not refresh schedule API."), 500
+        return jsonify(
+            result=result,
+            schedule_api=sports.schedule_api_status(core.DB_PATH),
+        )
+
     @app.get("/api/sports/catalog")
     def api_sports_catalog():
         return jsonify(
@@ -461,6 +622,114 @@ def register_routes(app):
             )
         )
 
+    @app.get("/api/guide/config")
+    def api_guide_config():
+        lan_host = str(os.environ.get("M3U_LAN_HOST", "") or "").strip()
+        external_port = str(os.environ.get("M3U_EXTERNAL_PORT", "1000") or "1000").strip()
+        if lan_host:
+            media_origin = f"http://{lan_host}:{external_port}"
+        elif request.host and request.host.split(":", 1)[0] not in {"localhost", "127.0.0.1"}:
+            media_origin = f"{request.scheme}://{request.host}"
+        else:
+            media_origin = ""
+        response = jsonify(
+            lan_host=lan_host,
+            external_port=external_port,
+            media_origin=media_origin,
+            sender_origin=f"{request.scheme}://{request.host}",
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.get("/api/guide/ping")
+    def api_guide_ping():
+        response = jsonify(ok=True, service="m3u-web-picker-v30-experiments", port=int(os.environ.get("M3U_EXTERNAL_PORT", "1000")))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        return response
+
+    @app.get("/api/guide/channels")
+    def api_guide_channels():
+        items = core.curated_channels_for_guide()
+        response = jsonify(count=len(items), channels=items)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.post("/api/guide/cast/start")
+    def api_guide_cast_start():
+        data = request.get_json(force=True, silent=True) or {}
+        play_url = str(data.get("play_url", "") or "")
+        target = _resolve_guide_play_target(play_url)
+        if not target:
+            return jsonify(error="Curated stream not found."), 404
+        try:
+            session = cast_hls.start_session(target)
+        except RuntimeError as exc:
+            return jsonify(error=str(exc)), 502
+        response = jsonify(
+            ok=True,
+            token=session.token,
+            playlist_path=f"/guide/cast/{session.token}/stream.m3u8",
+            content_type="application/x-mpegurl",
+            segment_format="mpeg2-ts",
+        )
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.post("/api/guide/cast/stop")
+    def api_guide_cast_stop():
+        data = request.get_json(force=True, silent=True) or {}
+        token = str(data.get("token", "") or "")
+        stopped = cast_hls.stop_session(token) if token else bool(cast_hls.stop_all_sessions())
+        response = jsonify(ok=True, stopped=stopped)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.route("/guide/cast/<token>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def guide_cast_hls(token: str, filename: str):
+        if request.method == "OPTIONS":
+            return _cast_cors(Response(status=204))
+        path = cast_hls.safe_media_file(token, filename)
+        if path is None:
+            return _cast_cors(Response("Cast stream not found.\n", status=404, content_type="text/plain; charset=utf-8"))
+        if filename == "stream.m3u8":
+            response = send_file(path, mimetype="application/x-mpegurl", conditional=True)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        else:
+            response = send_file(path, mimetype="video/mp2t", conditional=True)
+            response.headers["Cache-Control"] = "public, max-age=30"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Accel-Buffering"] = "no"
+        return _cast_cors(response)
+
+    @app.get("/guide/stream/manual/<token>")
+    def guide_manual_stream(token: str):
+        target = core.manual_stream_target(token)
+        if target:
+            response = redirect(target, code=307)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+        return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+
+    @app.get("/guide/play/manual/<token>")
+    def guide_play_manual(token: str):
+        target = core.manual_stream_target(token)
+        if not target:
+            return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        return _ffmpeg_browser_response(target)
+
+    @app.get("/guide/play/sports/<int:assigned_number>")
+    def guide_play_sports(assigned_number: int):
+        target = sports.generated_stream_target(core.DB_PATH, assigned_number)
+        if not target:
+            return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        return _ffmpeg_browser_response(target)
+
     def serve_named_epg(source_id: str):
         source = core.find_epg_source(source_id)
         if not source:
@@ -502,7 +771,7 @@ def register_routes(app):
 
     @app.get("/epg/<source_id>.xml")
     def named_epg(source_id: str):
-        if source_id in {"sports", "combined"}:
+        if source_id in {"sports", "combined", "epg"}:
             return Response("Not found.\n", status=404)
         return serve_named_epg(source_id)
 
@@ -521,6 +790,7 @@ def register_routes(app):
         response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.SPORTS_EPG_PATH.stat().st_mtime))
         return response
 
+    @app.get("/epg/epg.xml")
     @app.get("/epg/combined.xml")
     def combined_epg():
         core.ensure_epg_exports_current()
@@ -528,17 +798,18 @@ def register_routes(app):
             core.COMBINED_EPG_PATH,
             mimetype="application/xml",
             as_attachment=False,
-            download_name="combined.xml",
+            download_name="epg.xml",
         )
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
-        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.SPORTS_EPG_PATH.stat().st_mtime))
+        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.COMBINED_EPG_PATH.stat().st_mtime))
         return response
 
+    @app.get("/playlist/channels.m3u")
     @app.get("/playlist/custom.m3u")
     def playlist():
-        guide_url = request.url_root.rstrip("/") + "/epg/combined.xml"
+        guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
         if not core.PLAYLIST_PATH.exists():
             text = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"\n'
         else:

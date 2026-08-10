@@ -39,17 +39,72 @@ DEFAULT_SETTINGS = {
     "include_pregame": False,
     "use_backup_feeds": True,
     "exclude_sd": False,
-    # Optional authoritative schedule source. The API key itself is stored in
-    # an internal sports_settings row and is never returned to the browser.
+    # Optional authoritative schedule source. API-SPORTS is currently the
+    # only supported schedule provider. The API key itself is stored in an
+    # internal sports_settings row and is never returned to the browser.
     "schedule_api_enabled": False,
+    # Retained only so existing RC databases load cleanly. RC5 no longer asks
+    # users for a base URL; product hosts are owned by the adapters below.
     "schedule_api_url": "",
 }
 
 SCHEDULE_API_KEY_SETTING = "__schedule_api_key"
-SCHEDULE_API_SOURCE = "api-sports-baseball"
-SCHEDULE_API_LEAGUE_ID = "mlb"
-SCHEDULE_API_REMOTE_LEAGUE_ID = 1
-SCHEDULE_API_PROVIDER_NAME = "API-BASEBALL"
+SCHEDULE_API_PROVIDER_NAME = "API-SPORTS"
+SCHEDULE_API_PROVIDER_URL = "https://api-sports.io"
+SCHEDULE_API_SOURCE = "api-sports-baseball"  # backward-compatible MLB constant
+SCHEDULE_API_LEAGUE_ID = "mlb"               # backward-compatible MLB constant
+SCHEDULE_API_REMOTE_LEAGUE_ID = 1             # backward-compatible MLB constant
+
+# Schedule API support is deliberately explicit. Sports/leagues not listed
+# here continue through the existing provider + XMLTV matcher with no API call.
+# One API-SPORTS key works across these products, but each product has its own
+# host and response shape.
+SCHEDULE_API_DATASETS = {
+    "mlb": {
+        "id": "mlb",
+        "label": "MLB",
+        "product": "baseball",
+        "source": "api-sports-baseball",
+        "base_url": "https://v1.baseball.api-sports.io",
+        "league_id": "mlb",
+        "remote_league_id": 1,
+        "sport_id": "baseball",
+        "season_mode": "calendar",
+        "request_mode": "baseball_day",
+    },
+    "nfl": {
+        "id": "nfl",
+        "label": "NFL",
+        "product": "american_football",
+        "source": "api-sports-american-football",
+        "base_url": "https://v1.american-football.api-sports.io",
+        "league_id": "nfl",
+        "remote_league_id": 1,
+        "sport_id": "football",
+        "season_mode": "start_year",
+        "request_mode": "american_football",
+    },
+    "ncaa": {
+        "id": "ncaa",
+        "label": "NCAA Football",
+        "product": "american_football",
+        "source": "api-sports-american-football",
+        "base_url": "https://v1.american-football.api-sports.io",
+        "league_id": "ncaaf-fbs",
+        "remote_league_id": 2,
+        "sport_id": "football",
+        "season_mode": "start_year",
+        "request_mode": "american_football",
+    },
+}
+
+SCHEDULE_API_DATASET_BY_LEAGUE = {
+    value["league_id"]: key for key, value in SCHEDULE_API_DATASETS.items()
+}
+SCHEDULE_API_DATASETS_BY_SPORT = {
+    "baseball": ("mlb",),
+    "football": ("nfl", "ncaa"),
+}
 
 SCOPE_TYPES = {"league", "team", "conference", "sport"}
 RULE_PRIORITY = {"team": 0, "conference": 1, "league": 2, "sport": 3}
@@ -399,7 +454,7 @@ PREGAME_RE = re.compile(r"\b(pre[- ]?game|post[- ]?game|pregame|postgame)\b", re
 SCHEDULE_API_LIVE_CANDIDATE_WINDOW = timedelta(hours=3)
 SCHEDULE_API_MATCH_WINDOW = timedelta(hours=18)
 SCHEDULE_API_SUPPORT_RE = re.compile(
-    r"\b(?:pre[- ]?game|post[- ]?game|gameday|in[- ]game|squeeze[ -]?play|"
+    r"\b(?:pre[- ]?game|post[- ]?game|gameday|in-?game|squeeze[ -]?play|"
     r"bet(?:ting)?|wager(?:ing)?|odds|player props?|preview|recap|studio show)\b",
     re.I,
 )
@@ -801,6 +856,7 @@ def init_db(db_path: Path | str) -> None:
                 league_id TEXT NOT NULL,
                 season INTEGER NOT NULL,
                 schedule_date TEXT NOT NULL,
+                request_key TEXT NOT NULL DEFAULT '',
                 fetched_on TEXT NOT NULL,
                 fetched_at TEXT NOT NULL,
                 result_count INTEGER NOT NULL DEFAULT 0,
@@ -809,6 +865,16 @@ def init_db(db_path: Path | str) -> None:
             )
             """
         )
+        # RC5 normalizes the full adapter request into the cache identity.
+        # Existing RC2-RC4 databases get an empty key and naturally refetch
+        # once before becoming reusable by the new quota-aware planner.
+        try:
+            conn.execute(
+                "ALTER TABLE sports_schedule_api_cache "
+                "ADD COLUMN request_key TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sports_schedule_events (
@@ -829,6 +895,19 @@ def init_db(db_path: Path | str) -> None:
                 raw_json TEXT NOT NULL DEFAULT '{}',
                 fetched_at TEXT NOT NULL,
                 PRIMARY KEY (source, api_event_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sports_schedule_reference_cache (
+                source TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                fetched_at TEXT NOT NULL,
+                remaining_quota INTEGER,
+                raw_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (source, cache_key, season)
             )
             """
         )
@@ -1786,12 +1865,95 @@ def _schedule_api_secret(db_path: Path | str) -> str:
     return str(_json_load(row["value"], row["value"]) or "").strip()
 
 
-def schedule_api_status(db_path: Path | str) -> dict:
-    """Return credential-free schedule API state for the browser."""
+def _schedule_api_rule_league_id(rule: dict, catalog_by_key: dict) -> str:
+    scope_type = str(rule.get("scope_type") or "")
+    scope_id = str(rule.get("scope_id") or "")
+    if scope_type == "league":
+        return scope_id
+    item = catalog_by_key.get((scope_type, scope_id)) or {}
+    league_id = str(item.get("league_id") or "")
+    if league_id:
+        return league_id
+    if scope_type == "team" and ":" in scope_id:
+        return scope_id.split(":", 1)[0]
+    return ""
+
+
+def schedule_api_request_plan(db_path: Path | str) -> dict:
+    """Collapse user rules into the minimum API-SPORTS schedule datasets.
+
+    The number of API requests scales with unique supported sport/league/date
+    datasets, never with the number of selected teams, conferences, or
+    overlapping rules. Unsupported sports stay on the legacy provider/XMLTV
+    matcher and do not trigger API-SPORTS calls.
+    """
     settings = get_settings(db_path)
-    api_key = _schedule_api_secret(db_path)
-    url = str(settings.get("schedule_api_url", "") or "").strip()
-    enabled = bool(settings.get("schedule_api_enabled"))
+    rules = [rule for rule in get_rules(db_path) if rule.get("enabled")]
+    catalog = catalog_payload(db_path)
+    catalog_by_key = {(item["scope_type"], item["id"]): item for item in catalog}
+    dataset_ids: set[str] = set()
+    api_rules: list[str] = []
+    legacy_rules: list[str] = []
+    mixed_rules: list[str] = []
+    reference_datasets: set[str] = set()
+
+    if settings.get("everything_mode"):
+        dataset_ids.update(SCHEDULE_API_DATASETS)
+        mixed_rules.append("Everything Mode")
+
+    for rule in rules:
+        scope_type = str(rule.get("scope_type") or "")
+        scope_id = str(rule.get("scope_id") or "")
+        label = str(rule.get("display_name") or scope_id or "Sports selection")
+        matched_datasets: set[str] = set()
+        mixed = False
+
+        if scope_type == "sport":
+            matched_datasets.update(SCHEDULE_API_DATASETS_BY_SPORT.get(scope_id, ()))
+            # A broad sport can contain leagues that are not implemented by an
+            # API adapter, so its uncovered competitions still use legacy mode.
+            mixed = bool(matched_datasets)
+        else:
+            league_id = _schedule_api_rule_league_id(rule, catalog_by_key)
+            dataset_id = SCHEDULE_API_DATASET_BY_LEAGUE.get(league_id)
+            if dataset_id:
+                matched_datasets.add(dataset_id)
+                if scope_type == "conference" and dataset_id == "ncaa":
+                    reference_datasets.add("ncaa_membership")
+
+        if matched_datasets:
+            dataset_ids.update(matched_datasets)
+            if label not in api_rules:
+                api_rules.append(label)
+            if mixed and label not in mixed_rules:
+                mixed_rules.append(label)
+        else:
+            if label not in legacy_rules:
+                legacy_rules.append(label)
+
+    datasets = [dict(SCHEDULE_API_DATASETS[key]) for key in SCHEDULE_API_DATASETS if key in dataset_ids]
+    return {
+        "provider": SCHEDULE_API_PROVIDER_NAME,
+        "provider_url": SCHEDULE_API_PROVIDER_URL,
+        "datasets": datasets,
+        "dataset_ids": [item["id"] for item in datasets],
+        "api_rules": api_rules,
+        "legacy_rules": legacy_rules,
+        "mixed_rules": mixed_rules,
+        "reference_datasets": sorted(reference_datasets),
+        "uses_legacy": bool(legacy_rules or mixed_rules or settings.get("everything_mode")),
+    }
+
+
+def _schedule_api_dataset_season(dataset: dict, local_now: datetime) -> int:
+    if dataset.get("season_mode") == "start_year":
+        # API-NFL seasons use the year in which the season starts. January and
+        # February playoff/bowl games therefore belong to the previous year.
+        return local_now.year - 1 if local_now.month <= 2 else local_now.year
+    return local_now.year
+
+
+def _schedule_api_cache_summary(db_path: Path | str, dataset: dict) -> dict:
     with closing(_connect(db_path)) as conn:
         last = conn.execute(
             """
@@ -1801,64 +1963,88 @@ def schedule_api_status(db_path: Path | str) -> dict:
             ORDER BY fetched_at DESC
             LIMIT 1
             """,
-            (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
+            (dataset["source"], dataset["league_id"]),
         ).fetchone()
+        cached_event_count = int(
+            conn.execute(
+                """
+                SELECT COUNT(*) FROM sports_schedule_events
+                WHERE source = ? AND league_id = ?
+                """,
+                (dataset["source"], dataset["league_id"]),
+            ).fetchone()[0]
+        )
         cached_dates = [
             row["schedule_date"]
             for row in conn.execute(
                 """
-                SELECT schedule_date
-                FROM sports_schedule_api_cache
+                SELECT schedule_date FROM sports_schedule_api_cache
                 WHERE source = ? AND league_id = ?
                 ORDER BY schedule_date
                 """,
-                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
+                (dataset["source"], dataset["league_id"]),
             ).fetchall()
         ]
-        cached_event_count = int(
-            conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM sports_schedule_events
-                WHERE source = ? AND league_id = ?
-                """,
-                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID),
-            ).fetchone()[0]
-        )
-    configured = bool(url and api_key)
-    effective = bool(enabled and configured)
-    api_entry = None
-    if url or api_key:
-        api_entry = {
-            "id": SCHEDULE_API_SOURCE,
-            "provider": SCHEDULE_API_PROVIDER_NAME,
-            "scope": "MLB",
-            "url": url,
-            "enabled": enabled,
-            "configured": configured,
-            "effective": effective,
-            "key_configured": bool(api_key),
-            "last_fetch_at": last["fetched_at"] if last else None,
-            "last_result_count": int(last["result_count"] or 0) if last else 0,
-            "cached_event_count": cached_event_count,
-            "remaining_quota": last["remaining_quota"] if last else None,
-        }
     return {
-        "enabled": enabled,
-        "configured": configured,
-        "effective": effective,
-        "provider": SCHEDULE_API_PROVIDER_NAME,
-        "league": "MLB",
-        "url": url,
-        "key_configured": bool(api_key),
         "last_fetch_at": last["fetched_at"] if last else None,
         "last_fetch_date": last["schedule_date"] if last else None,
         "last_result_count": int(last["result_count"] or 0) if last else 0,
         "cached_event_count": cached_event_count,
         "remaining_quota": last["remaining_quota"] if last else None,
         "cached_dates": cached_dates,
+    }
+
+
+def schedule_api_status(db_path: Path | str) -> dict:
+    """Return credential-free API-SPORTS state and the rule-derived plan."""
+    settings = get_settings(db_path)
+    api_key = _schedule_api_secret(db_path)
+    enabled = bool(settings.get("schedule_api_enabled"))
+    configured = bool(api_key)
+    effective = bool(enabled and configured)
+    plan = schedule_api_request_plan(db_path)
+    entries = []
+    all_fetches = []
+    total_cached_events = 0
+    remaining_values = []
+    cached_dates: set[str] = set()
+    for dataset in plan["datasets"]:
+        summary = _schedule_api_cache_summary(db_path, dataset)
+        total_cached_events += summary["cached_event_count"]
+        if summary["last_fetch_at"]:
+            all_fetches.append(summary["last_fetch_at"])
+        if summary["remaining_quota"] is not None:
+            remaining_values.append(int(summary["remaining_quota"]))
+        cached_dates.update(summary["cached_dates"])
+        entries.append({
+            "id": dataset["id"],
+            "provider": SCHEDULE_API_PROVIDER_NAME,
+            "product": dataset["product"],
+            "scope": dataset["label"],
+            "url": dataset["base_url"],
+            "enabled": enabled,
+            "configured": configured,
+            "effective": effective,
+            "key_configured": bool(api_key),
+            **summary,
+        })
+
+    return {
+        "enabled": enabled,
+        "configured": configured,
+        "effective": effective,
+        "provider": SCHEDULE_API_PROVIDER_NAME,
+        "provider_url": SCHEDULE_API_PROVIDER_URL,
+        "key_configured": bool(api_key),
+        "last_fetch_at": max(all_fetches) if all_fetches else None,
+        "last_fetch_date": None,
+        "last_result_count": sum(item.get("last_result_count", 0) for item in entries),
+        "cached_event_count": total_cached_events,
+        "remaining_quota": min(remaining_values) if remaining_values else None,
+        "cached_dates": sorted(cached_dates),
         "fallback_mode": not effective,
-        "apis": [api_entry] if api_entry else [],
+        "plan": plan,
+        "apis": entries,
     }
 
 
@@ -1870,7 +2056,11 @@ def update_schedule_api_config(
     api_key: str | None = None,
     clear_key: bool = False,
 ) -> dict:
-    """Persist the optional schedule source without exposing its API key."""
+    """Persist API-SPORTS enable/key state without exposing the secret.
+
+    ``url`` is accepted only for upgrade compatibility with RC2-RC4 clients;
+    RC5 owns all API product base URLs internally and does not use a user URL.
+    """
     init_db(db_path)
     changes = {}
     if enabled is not None:
@@ -1906,34 +2096,166 @@ def _schedule_api_required_dates(scan_anchor: datetime, settings: dict) -> list[
     return values
 
 
-def _schedule_api_games_url(base_url: str, *, schedule_date: date, season: int, timezone: str) -> str:
-    parsed = urllib.parse.urlparse(str(base_url or "").strip())
+def _schedule_api_request_key(
+    dataset: dict,
+    *,
+    schedule_date: date,
+    season: int,
+    timezone: str,
+) -> str:
+    """Return a stable cache identity for the exact adapter request.
+
+    This deliberately includes provider/product/endpoint plus normalized
+    parameters so changing a timezone or adapter shape cannot accidentally
+    reuse a cache entry produced by a different request.
+    """
+    parameters = {
+        "date": schedule_date.isoformat(),
+        "timezone": str(timezone),
+    }
+    if dataset.get("request_mode") == "american_football":
+        parameters["league"] = str(dataset["remote_league_id"])
+        parameters["season"] = str(season)
+    payload = {
+        "provider": "api_sports",
+        "product": str(dataset.get("product") or ""),
+        "endpoint": "games",
+        "parameters": parameters,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _schedule_api_dataset_games_url(
+    dataset: dict,
+    *,
+    schedule_date: date,
+    season: int,
+    timezone: str,
+) -> str:
+    base_url = str(dataset.get("base_url") or "").strip()
+    parsed = urllib.parse.urlparse(base_url)
     if not parsed.scheme or not parsed.netloc:
-        raise ValueError("Schedule API URL is invalid.")
+        raise ValueError("Schedule API adapter URL is invalid.")
     path = parsed.path.rstrip("/")
-    if not path.endswith("/games"):
-        path = f"{path}/games" if path else "/games"
-    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-    # API-BASEBALL's free endpoint is most reliable with date + timezone.
-    # Fetch the day's baseball slate once and filter MLB (league id 1) locally.
-    # This also leaves the cached response strategy reusable for other baseball
-    # leagues without spending one request per league.
-    query.pop("league", None)
-    query.pop("season", None)
-    query.update(
-        {
-            "date": [schedule_date.isoformat()],
-            "timezone": [timezone],
-        }
+    path = f"{path}/games" if path else "/games"
+    query = {
+        "date": schedule_date.isoformat(),
+        "timezone": timezone,
+    }
+    if dataset.get("request_mode") == "american_football":
+        query["league"] = str(dataset["remote_league_id"])
+        query["season"] = str(season)
+    return urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, path, "", urllib.parse.urlencode(query), "")
     )
-    encoded = urllib.parse.urlencode(query, doseq=True)
-    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, path, "", encoded, ""))
 
 
-def _fetch_schedule_api_date(
+def _schedule_api_games_url(base_url: str, *, schedule_date: date, season: int, timezone: str) -> str:
+    """Backward-compatible helper for the tested API-BASEBALL day request."""
+    dataset = dict(SCHEDULE_API_DATASETS["mlb"])
+    dataset["base_url"] = str(base_url or dataset["base_url"]).rstrip("/")
+    return _schedule_api_dataset_games_url(
+        dataset,
+        schedule_date=schedule_date,
+        season=season,
+        timezone=timezone,
+    )
+
+
+def _schedule_api_scheduled_start(dataset: dict, game: dict, timezone_name: str) -> str:
+    if dataset.get("request_mode") == "american_football":
+        game_info = game.get("game") or {}
+        date_info = game_info.get("date") or {}
+        timestamp = date_info.get("timestamp")
+        try:
+            if timestamp is not None:
+                return datetime.fromtimestamp(int(timestamp), ZoneInfo(timezone_name)).isoformat()
+        except (TypeError, ValueError, OSError):
+            pass
+        day = str(date_info.get("date") or "").strip()
+        clock = str(date_info.get("time") or "").strip() or "00:00"
+        if day:
+            try:
+                return datetime.fromisoformat(f"{day}T{clock}").replace(
+                    tzinfo=ZoneInfo(timezone_name)
+                ).isoformat()
+            except (ValueError, TypeError):
+                return ""
+        return ""
+    return str(game.get("date") or "").strip()
+
+
+def _schedule_api_game_fields(dataset: dict, game: dict, timezone_name: str) -> dict | None:
+    if not isinstance(game, dict):
+        return None
+    league = game.get("league") or {}
+    try:
+        if int(league.get("id") or 0) != int(dataset["remote_league_id"]):
+            return None
+    except (TypeError, ValueError):
+        return None
+    if dataset.get("request_mode") == "american_football":
+        game_info = game.get("game") or {}
+        event_id = str(game_info.get("id") or "").strip()
+        status = game_info.get("status") or {}
+    else:
+        game_info = game
+        event_id = str(game.get("id") or "").strip()
+        status = game.get("status") or {}
+    scheduled_start = _schedule_api_scheduled_start(dataset, game, timezone_name)
+    if not event_id or not scheduled_start:
+        return None
+    teams = game.get("teams") or {}
+    return {
+        "event_id": event_id,
+        "scheduled_start": scheduled_start,
+        "status_short": str(status.get("short") or ""),
+        "status_long": str(status.get("long") or ""),
+        "home": teams.get("home") or {},
+        "away": teams.get("away") or {},
+        "raw": game,
+    }
+
+
+def _upsert_schedule_api_team(
+    conn: sqlite3.Connection,
+    *,
+    dataset: dict,
+    team: dict,
+    conference: str = "",
+) -> None:
+    name = str(team.get("name") or "").strip()
+    if not name:
+        return
+    league_id = str(dataset["league_id"])
+    scope_id = f"{league_id}:{_slug(name)}"
+    metadata = {
+        "sport_id": dataset["sport_id"],
+        "family": SPORT_NAMES.get(dataset["sport_id"], dataset["sport_id"]),
+        "api_provider": SCHEDULE_API_PROVIDER_NAME,
+        "api_product": dataset["product"],
+        "api_team_id": str(team.get("id") or ""),
+    }
+    if conference:
+        metadata["conference"] = conference
+    _upsert_catalog_item(
+        conn,
+        scope_type="team",
+        scope_id=scope_id,
+        display_name=name,
+        subtitle=f"{LEAGUE_NAMES.get(league_id, league_id.upper())} team • home and away games",
+        league_id=league_id,
+        aliases=[name],
+        logo_url=str(team.get("logo") or ""),
+        metadata=metadata,
+        source="api-sports",
+    )
+
+
+def _fetch_schedule_api_dataset_date(
     db_path: Path | str,
     *,
-    base_url: str,
+    dataset: dict,
     api_key: str,
     schedule_date: date,
     season: int,
@@ -1942,28 +2264,32 @@ def _fetch_schedule_api_date(
     cancel_check: CancelCheck = None,
 ) -> dict:
     _raise_if_cancelled(cancel_check)
-    url = _schedule_api_games_url(
-        base_url,
+    url = _schedule_api_dataset_games_url(
+        dataset,
         schedule_date=schedule_date,
         season=season,
         timezone=timezone,
     )
-    request = urllib.request.Request(
-        url,
-        headers={
-            "x-apisports-key": api_key,
-            "Accept": "application/json",
-            "User-Agent": "M3U-Web-Picker/22.1",
-        },
+    request_key = _schedule_api_request_key(
+        dataset,
+        schedule_date=schedule_date,
+        season=season,
+        timezone=timezone,
     )
+    # API-SPORTS documents GET-only endpoints authenticated by this header.
+    # Avoid optional framework headers so requests remain within that contract.
+    request = urllib.request.Request(url, headers={"x-apisports-key": api_key})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
             if len(raw) > 8 * 1024 * 1024:
                 raise ValueError("Schedule API response exceeded the 8 MB safety limit.")
             remaining_header = response.headers.get("x-ratelimit-requests-remaining")
+            minute_remaining_header = response.headers.get("X-RateLimit-Remaining")
     except Exception as exc:
-        raise ValueError(f"Could not fetch MLB schedule for {schedule_date.isoformat()}.") from exc
+        raise ValueError(
+            f"Could not fetch {dataset['label']} schedule for {schedule_date.isoformat()}."
+        ) from exc
     _raise_if_cancelled(cancel_check)
     try:
         payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
@@ -1977,11 +2303,18 @@ def _fetch_schedule_api_date(
         raise ValueError("Schedule API did not return a games list.")
     fetched_at = _now_iso()
     remaining = None
+    minute_remaining = None
     try:
         if remaining_header is not None:
             remaining = int(remaining_header)
     except (TypeError, ValueError):
-        remaining = None
+        pass
+    try:
+        if minute_remaining_header is not None:
+            minute_remaining = int(minute_remaining_header)
+    except (TypeError, ValueError):
+        pass
+
     with closing(_connect(db_path)) as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
@@ -1989,23 +2322,17 @@ def _fetch_schedule_api_date(
             DELETE FROM sports_schedule_events
             WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
             """,
-            (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID, season, schedule_date.isoformat()),
+            (dataset["source"], dataset["league_id"], season, schedule_date.isoformat()),
         )
         stored = 0
         for game in games:
-            if not isinstance(game, dict):
+            fields = _schedule_api_game_fields(dataset, game, timezone)
+            if not fields:
                 continue
-            league = game.get("league") or {}
-            if int(league.get("id") or 0) != SCHEDULE_API_REMOTE_LEAGUE_ID:
-                continue
-            event_id = str(game.get("id") or "").strip()
-            scheduled_start = str(game.get("date") or "").strip()
-            if not event_id or not scheduled_start:
-                continue
-            teams = game.get("teams") or {}
-            home = teams.get("home") or {}
-            away = teams.get("away") or {}
-            status = game.get("status") or {}
+            home = fields["home"]
+            away = fields["away"]
+            _upsert_schedule_api_team(conn, dataset=dataset, team=home)
+            _upsert_schedule_api_team(conn, dataset=dataset, team=away)
             conn.execute(
                 """
                 INSERT OR REPLACE INTO sports_schedule_events
@@ -2017,49 +2344,181 @@ def _fetch_schedule_api_date(
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    SCHEDULE_API_SOURCE,
-                    event_id,
-                    SCHEDULE_API_LEAGUE_ID,
-                    season,
-                    schedule_date.isoformat(),
-                    scheduled_start,
-                    str(status.get("short") or ""),
-                    str(status.get("long") or ""),
-                    str(home.get("id") or ""),
-                    str(home.get("name") or ""),
-                    str(home.get("logo") or ""),
-                    str(away.get("id") or ""),
-                    str(away.get("name") or ""),
-                    str(away.get("logo") or ""),
-                    json.dumps(game, separators=(",", ":")),
-                    fetched_at,
+                    dataset["source"], fields["event_id"], dataset["league_id"], season,
+                    schedule_date.isoformat(), fields["scheduled_start"],
+                    fields["status_short"], fields["status_long"],
+                    str(home.get("id") or ""), str(home.get("name") or ""), str(home.get("logo") or ""),
+                    str(away.get("id") or ""), str(away.get("name") or ""), str(away.get("logo") or ""),
+                    json.dumps(fields["raw"], separators=(",", ":")), fetched_at,
                 ),
             )
             stored += 1
         conn.execute(
             """
             INSERT OR REPLACE INTO sports_schedule_api_cache
-                (source, league_id, season, schedule_date, fetched_on,
+                (source, league_id, season, schedule_date, request_key, fetched_on,
                  fetched_at, result_count, remaining_quota)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                SCHEDULE_API_SOURCE,
-                SCHEDULE_API_LEAGUE_ID,
-                season,
-                schedule_date.isoformat(),
-                fetched_on,
-                fetched_at,
-                stored,
-                remaining,
+                dataset["source"], dataset["league_id"], season,
+                schedule_date.isoformat(), request_key, fetched_on, fetched_at, stored, remaining,
             ),
         )
         conn.commit()
     return {
+        "dataset": dataset["id"],
+        "scope": dataset["label"],
         "date": schedule_date.isoformat(),
         "games": stored,
         "remaining_quota": remaining,
+        "minute_remaining": minute_remaining,
         "fetched_at": fetched_at,
+        "url": url,
+        "request_key": request_key,
+    }
+
+
+def _conference_catalog_map(db_path: Path | str) -> dict[str, dict]:
+    return {
+        item["id"]: item
+        for item in catalog_payload(db_path, scope_type="conference")
+        if item.get("league_id") == "ncaaf-fbs"
+    }
+
+
+def _match_ncaa_conference_id(conference_name: str, conferences: dict[str, dict]) -> str:
+    normalized = _normalize(conference_name)
+    if not normalized:
+        return ""
+    for conference_id, item in conferences.items():
+        candidates = [item.get("name", ""), *item.get("aliases", [])]
+        for candidate in candidates:
+            value = _normalize(str(candidate or ""))
+            if value and (value == normalized or value in normalized or normalized in value):
+                return conference_id
+    return ""
+
+
+def _refresh_ncaa_reference_metadata_if_needed(
+    db_path: Path | str,
+    *,
+    api_key: str,
+    season: int,
+    force: bool = False,
+    cancel_check: CancelCheck = None,
+) -> dict:
+    """Cache NCAA conference membership once per season.
+
+    This is reference data, not a daily schedule request. It lets Big Ten/ACC/
+    SEC rules filter the single NCAA day slate locally without a call per team
+    or per conference.
+    """
+    dataset = SCHEDULE_API_DATASETS["ncaa"]
+    cache_key = "ncaa-standings-membership"
+    with closing(_connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT fetched_at, remaining_quota, raw_json
+            FROM sports_schedule_reference_cache
+            WHERE source = ? AND cache_key = ? AND season = ?
+            """,
+            (dataset["source"], cache_key, season),
+        ).fetchone()
+    if row and not force:
+        return {
+            "cached": True,
+            "fetched_at": row["fetched_at"],
+            "remaining_quota": row["remaining_quota"],
+        }
+
+    _raise_if_cancelled(cancel_check)
+    query = urllib.parse.urlencode({"league": dataset["remote_league_id"], "season": season})
+    url = f"{dataset['base_url']}/standings?{query}"
+    request = urllib.request.Request(url, headers={"x-apisports-key": api_key})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("Schedule API reference response exceeded the 8 MB safety limit.")
+            remaining_header = response.headers.get("x-ratelimit-requests-remaining")
+    except Exception as exc:
+        raise ValueError("Could not refresh NCAA conference membership.") from exc
+    try:
+        payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
+    except Exception as exc:
+        raise ValueError("Schedule API returned invalid NCAA standings JSON.") from exc
+    if payload.get("errors") if isinstance(payload, dict) else True:
+        raise ValueError("Schedule API reported an NCAA standings error.")
+    standings = payload.get("response")
+    if not isinstance(standings, list):
+        raise ValueError("Schedule API did not return NCAA standings.")
+    conferences = _conference_catalog_map(db_path)
+    memberships: dict[str, list[str]] = defaultdict(list)
+    remaining = None
+    try:
+        if remaining_header is not None:
+            remaining = int(remaining_header)
+    except (TypeError, ValueError):
+        pass
+    fetched_at = _now_iso()
+    with closing(_connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for item in standings:
+            if not isinstance(item, dict):
+                continue
+            conference_name = str(item.get("conference") or "").strip()
+            conference_id = _match_ncaa_conference_id(conference_name, conferences)
+            team = item.get("team") or {}
+            _upsert_schedule_api_team(
+                conn,
+                dataset=dataset,
+                team=team,
+                conference=conference_name,
+            )
+            team_name = str(team.get("name") or "").strip()
+            if conference_id and team_name:
+                memberships[conference_id].append(team_name)
+
+        for conference_id, team_names in memberships.items():
+            item = conferences.get(conference_id) or {}
+            metadata = dict(item.get("metadata") or {})
+            metadata["teams"] = sorted(set(team_names), key=str.casefold)
+            metadata["sport_id"] = "football"
+            metadata["family"] = "Football"
+            metadata["api_provider"] = SCHEDULE_API_PROVIDER_NAME
+            metadata["api_product"] = dataset["product"]
+            _upsert_catalog_item(
+                conn,
+                scope_type="conference",
+                scope_id=conference_id,
+                display_name=str(item.get("name") or conference_id),
+                subtitle=str(item.get("subtitle") or "FBS conference games"),
+                league_id="ncaaf-fbs",
+                aliases=list(item.get("aliases") or []),
+                logo_url=str(item.get("logo_url") or ""),
+                metadata=metadata,
+                source="api-sports",
+            )
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sports_schedule_reference_cache
+                (source, cache_key, season, fetched_at, remaining_quota, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dataset["source"], cache_key, season, fetched_at, remaining,
+                json.dumps({"memberships": memberships}, separators=(",", ":")),
+            ),
+        )
+        conn.commit()
+    return {
+        "cached": False,
+        "fetched_at": fetched_at,
+        "remaining_quota": remaining,
+        "conference_count": len(memberships),
+        "team_count": sum(len(values) for values in memberships.values()),
     }
 
 
@@ -2070,81 +2529,206 @@ def refresh_schedule_api_if_due(
     force: bool = False,
     cancel_check: CancelCheck = None,
 ) -> dict:
-    """Refresh MLB schedule cache at most once per local day unless forced.
+    """Refresh only the unique API-SPORTS datasets required by user rules.
 
-    This is intentionally the first step in a Sports Automation cycle. If the
-    optional API is disabled, blank, unavailable, or over quota, the normal
-    provider-derived matching path remains available.
+    Normal manual/master updates reuse a dataset/date cache fetched during the
+    same local day. ``force=True`` bypasses only the schedule cache; long-lived
+    season reference data (such as NCAA conference membership) is still reused.
     """
     settings = get_settings(db_path)
     timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
     local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
     state = schedule_api_status(db_path)
+    plan = state.get("plan") or schedule_api_request_plan(db_path)
     if not state.get("effective"):
-        return {"enabled": False, "used": False, "fetched": [], "cached": [], "warning": ""}
+        return {"enabled": False, "used": False, "fetched": [], "cached": [], "warning": "", "plan": plan}
+    if not plan.get("datasets"):
+        return {
+            "enabled": True,
+            "used": False,
+            "fetched": [],
+            "cached": [],
+            "warning": "",
+            "plan": plan,
+            "message": "No API-backed sports are selected; legacy matching remains active.",
+        }
+
     api_key = _schedule_api_secret(db_path)
-    base_url = str(settings.get("schedule_api_url", "") or "").strip()
-    season = local_now.year
     required_dates = _schedule_api_required_dates(local_now, settings)
     fetched_on = local_now.date().isoformat()
     fetched = []
     cached = []
-    warning = ""
-    for schedule_date in required_dates:
-        _raise_if_cancelled(cancel_check)
-        with closing(_connect(db_path)) as conn:
-            row = conn.execute(
-                """
-                SELECT fetched_on FROM sports_schedule_api_cache
-                WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
-                """,
-                (
-                    SCHEDULE_API_SOURCE,
-                    SCHEDULE_API_LEAGUE_ID,
-                    season,
-                    schedule_date.isoformat(),
-                ),
-            ).fetchone()
-        if not force and row and str(row["fetched_on"] or "") == fetched_on:
-            cached.append(schedule_date.isoformat())
-            continue
-        try:
-            fetched.append(
-                _fetch_schedule_api_date(
-                    db_path,
-                    base_url=base_url,
-                    api_key=api_key,
-                    schedule_date=schedule_date,
-                    season=season,
-                    timezone=str(settings.get("timezone", "America/New_York")),
-                    fetched_on=fetched_on,
-                    cancel_check=cancel_check,
+    warnings = []
+    reference = []
+
+    for dataset in plan["datasets"]:
+        season = _schedule_api_dataset_season(dataset, local_now)
+        if dataset["id"] == "ncaa" and "ncaa_membership" in set(plan.get("reference_datasets") or []):
+            try:
+                reference.append(
+                    _refresh_ncaa_reference_metadata_if_needed(
+                        db_path,
+                        api_key=api_key,
+                        season=season,
+                        force=False,
+                        cancel_check=cancel_check,
+                    )
                 )
+            except ValueError as exc:
+                # Static seed conference membership remains a fallback if the
+                # season metadata call is unavailable.
+                warnings.append(str(exc))
+
+        for schedule_date in required_dates:
+            _raise_if_cancelled(cancel_check)
+            request_key = _schedule_api_request_key(
+                dataset,
+                schedule_date=schedule_date,
+                season=season,
+                timezone=str(settings.get("timezone", "America/New_York")),
             )
-        except ValueError as exc:
-            # A schedule service outage must not take the user's television
-            # lineup down. Cached canonical events are used when available;
-            # otherwise the legacy provider-discovery path remains authoritative.
-            warning = str(exc)
-            cached.append(schedule_date.isoformat())
+            with closing(_connect(db_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT fetched_on, request_key FROM sports_schedule_api_cache
+                    WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
+                    """,
+                    (dataset["source"], dataset["league_id"], season, schedule_date.isoformat()),
+                ).fetchone()
+            if (
+                not force
+                and row
+                and str(row["fetched_on"] or "") == fetched_on
+                and str(row["request_key"] or "") == request_key
+            ):
+                cached.append({"dataset": dataset["id"], "date": schedule_date.isoformat()})
+                continue
+            try:
+                fetched.append(
+                    _fetch_schedule_api_dataset_date(
+                        db_path,
+                        dataset=dataset,
+                        api_key=api_key,
+                        schedule_date=schedule_date,
+                        season=season,
+                        timezone=str(settings.get("timezone", "America/New_York")),
+                        fetched_on=fetched_on,
+                        cancel_check=cancel_check,
+                    )
+                )
+            except ValueError as exc:
+                warnings.append(str(exc))
+                # Existing same-date cache is intentionally left in place and
+                # can still provide canonical identity. If it does not exist,
+                # that dataset naturally falls back to legacy matching.
+                if row:
+                    cached.append({"dataset": dataset["id"], "date": schedule_date.isoformat(), "stale": True})
+
+    available = 0
     with closing(_connect(db_path)) as conn:
-        available = int(
-            conn.execute(
-                """
-                SELECT COUNT(*) FROM sports_schedule_events
-                WHERE source = ? AND league_id = ? AND season = ?
-                """,
-                (SCHEDULE_API_SOURCE, SCHEDULE_API_LEAGUE_ID, season),
-            ).fetchone()[0]
-        )
+        for dataset in plan["datasets"]:
+            available += int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM sports_schedule_events WHERE source = ? AND league_id = ?",
+                    (dataset["source"], dataset["league_id"]),
+                ).fetchone()[0]
+            )
     return {
         "enabled": True,
         "used": available > 0,
         "fetched": fetched,
         "cached": cached,
-        "warning": warning,
+        "reference": reference,
+        "warning": " ".join(dict.fromkeys(warnings)),
         "canonical_events_available": available,
+        "plan": plan,
     }
+
+
+def _schedule_api_authoritative_leagues(
+    db_path: Path | str,
+    scan_anchor: datetime | None = None,
+) -> set[str]:
+    """Return leagues whose full requested window has a successful current cache.
+
+    A zero-result API response is authoritative only when the request itself
+    succeeded. Plan/auth/network/quota failures never write a current cache row,
+    so they intentionally fall back to legacy provider/XMLTV matching.
+    """
+    settings = get_settings(db_path)
+    state = schedule_api_status(db_path)
+    if not state.get("effective"):
+        return set()
+    datasets = (state.get("plan") or {}).get("datasets") or []
+    if not datasets:
+        return set()
+
+    timezone_name = str(settings.get("timezone", "America/New_York"))
+    timezone = ZoneInfo(timezone_name)
+    local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
+    fetched_on = local_now.date().isoformat()
+    required_dates = _schedule_api_required_dates(local_now, settings)
+    if not required_dates:
+        return set()
+
+    authoritative: set[str] = set()
+    with closing(_connect(db_path)) as conn:
+        for planned_dataset in datasets:
+            dataset = SCHEDULE_API_DATASETS.get(str(planned_dataset.get("id") or ""), planned_dataset)
+            if not dataset.get("source") or not dataset.get("league_id"):
+                continue
+            season = _schedule_api_dataset_season(dataset, local_now)
+            complete = True
+            for schedule_date in required_dates:
+                row = conn.execute(
+                    """
+                    SELECT fetched_on, request_key
+                    FROM sports_schedule_api_cache
+                    WHERE source = ? AND league_id = ? AND season = ? AND schedule_date = ?
+                    """,
+                    (
+                        dataset["source"], dataset["league_id"], season,
+                        schedule_date.isoformat(),
+                    ),
+                ).fetchone()
+                expected_key = _schedule_api_request_key(
+                    dataset,
+                    schedule_date=schedule_date,
+                    season=season,
+                    timezone=timezone_name,
+                )
+                if (
+                    not row
+                    or str(row["fetched_on"] or "") != fetched_on
+                    or str(row["request_key"] or "") != expected_key
+                ):
+                    complete = False
+                    break
+            if complete:
+                authoritative.add(str(dataset["league_id"]))
+    return authoritative
+
+
+def _filter_provider_events_by_authoritative_schedule(
+    provider_events: list[dict],
+    authoritative_leagues: set[str],
+    *,
+    include_replays: bool,
+) -> list[dict]:
+    """Suppress invented current games when a canonical league window succeeded.
+
+    If replays/classics are disabled, API-backed leagues may only contribute
+    provider airings that mapped to a canonical game. Legacy-only sports and
+    any league whose API request failed remain untouched.
+    """
+    if include_replays or not authoritative_leagues:
+        return provider_events
+    return [
+        event
+        for event in provider_events
+        if str(event.get("league_id") or "") not in authoritative_leagues
+        or bool(event.get("has_schedule_api_identity"))
+    ]
 
 
 def schedule_api_events_for_window(
@@ -2152,7 +2736,12 @@ def schedule_api_events_for_window(
     scan_anchor: datetime | None = None,
 ) -> list[dict]:
     settings = get_settings(db_path)
-    if not schedule_api_status(db_path).get("effective"):
+    state = schedule_api_status(db_path)
+    if not state.get("effective"):
+        return []
+    plan = state.get("plan") or {}
+    datasets = plan.get("datasets") or []
+    if not datasets:
         return []
     timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
     local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
@@ -2161,33 +2750,31 @@ def schedule_api_events_for_window(
     if not required_dates:
         return []
     placeholders = ",".join("?" for _ in required_dates)
+    rows = []
     with closing(_connect(db_path)) as conn:
-        # Only dates that belong to the current Sports Automation window can
-        # supply canonical anchors. This prevents an older cached matchup from
-        # hijacking a new provider event when today's optional API fetch is
-        # unavailable. Missing dates simply use the legacy provider-derived path.
-        rows = conn.execute(
-            f"""
-            SELECT e.*
-            FROM sports_schedule_events e
-            INNER JOIN sports_schedule_api_cache c
-              ON c.source = e.source
-             AND c.league_id = e.league_id
-             AND c.season = e.season
-             AND c.schedule_date = e.schedule_date
-            WHERE e.source = ? AND e.league_id = ?
-              AND e.season IN (?, ?)
-              AND e.schedule_date IN ({placeholders})
-            ORDER BY e.scheduled_start
-            """,
-            (
-                SCHEDULE_API_SOURCE,
-                SCHEDULE_API_LEAGUE_ID,
-                local_now.year - 1,
-                local_now.year,
-                *required_dates,
-            ),
-        ).fetchall()
+        for dataset in datasets:
+            season = _schedule_api_dataset_season(dataset, local_now)
+            rows.extend(
+                conn.execute(
+                    f"""
+                    SELECT e.*
+                    FROM sports_schedule_events e
+                    INNER JOIN sports_schedule_api_cache c
+                      ON c.source = e.source
+                     AND c.league_id = e.league_id
+                     AND c.season = e.season
+                     AND c.schedule_date = e.schedule_date
+                    WHERE e.source = ? AND e.league_id = ?
+                      AND e.season IN (?, ?)
+                      AND e.schedule_date IN ({placeholders})
+                    ORDER BY e.scheduled_start
+                    """,
+                    (
+                        dataset["source"], dataset["league_id"], season - 1, season,
+                        *required_dates,
+                    ),
+                ).fetchall()
+            )
     output = []
     for row in rows:
         try:
@@ -2197,14 +2784,16 @@ def schedule_api_events_for_window(
             start = start.astimezone(timezone)
         except Exception:
             continue
-        # Keep a generous edge around the current window so replay/time-shifted
-        # provider rows can still be assigned to the correct canonical game.
         if not (window_start - timedelta(hours=18) <= start < window_end + timedelta(hours=18)):
             continue
+        dataset_id = SCHEDULE_API_DATASET_BY_LEAGUE.get(str(row["league_id"]), "")
+        dataset = SCHEDULE_API_DATASETS.get(dataset_id, {})
         output.append({
             "api_source": str(row["source"]),
             "api_event_id": str(row["api_event_id"]),
-            "league_id": SCHEDULE_API_LEAGUE_ID,
+            "api_dataset": dataset_id,
+            "league_id": str(row["league_id"]),
+            "sport_id": str(dataset.get("sport_id") or LEAGUE_SPORTS.get(str(row["league_id"]), "")),
             "season": int(row["season"]),
             "scheduled_start": start,
             "status_short": str(row["status_short"] or ""),
@@ -2217,7 +2806,6 @@ def schedule_api_events_for_window(
             "away_logo": str(row["away_logo"] or ""),
         })
     return output
-
 
 def should_run_scheduled(db_path: Path | str, now: datetime | None = None) -> bool:
     settings = get_settings(db_path)
@@ -2339,6 +2927,22 @@ def download_xmltv_bytes(
         raise ValueError("The provider response did not look like XMLTV data.")
     return raw
 
+
+
+
+def _utc_instant(value: datetime, default_tz: ZoneInfo | None = None) -> datetime | None:
+    """Normalize one timestamp to a UTC-aware instant for comparisons.
+
+    XMLTV may use fixed offsets while schedule APIs use named zones. Python can
+    normally subtract both directly, but forcing one comparison timeline also
+    protects against a provider timestamp that arrives without tzinfo. Display
+    conversion remains in the configured Sports Automation timezone.
+    """
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=default_tz or ZoneInfo("UTC"))
+    return value.astimezone(ZoneInfo("UTC"))
 
 def _parse_xmltv_time(value: str, default_tz: ZoneInfo) -> datetime | None:
     value = str(value or "").strip()
@@ -2712,14 +3316,20 @@ def _event_from_text(
     identity = "-".join(filter(None, [league_id or sport_id or "sports", away_id or _slug(away_name), home_id or _slug(home_name)]))
     if not match:
         identity = "-".join(filter(None, [league_id or sport_id or "sports", _slug(display_name)]))
-    variant_match = EVENT_VARIANT_RE.search(full_text)
+    # Only the event title may define an explicit doubleheader variant.
+    # Descriptions such as "Game 2 of 3" describe a series position, not a
+    # second game in a same-day doubleheader; using full_text here split the
+    # same Phillies game into multiple logical events in RC2.
+    variant_match = EVENT_VARIANT_RE.search(cleaned)
     if variant_match:
-        variant = variant_match.group("number") or {
-            "first": "1",
-            "second": "2",
-        }.get(str(variant_match.group("word") or "").lower(), "")
-        if variant:
-            identity = f"{identity}:game-{variant}"
+        trailing = cleaned[variant_match.end():]
+        if not re.match(r"\s+of\s+\d+\b", trailing, re.I):
+            variant = variant_match.group("number") or {
+                "first": "1",
+                "second": "2",
+            }.get(str(variant_match.group("word") or "").lower(), "")
+            if variant:
+                identity = f"{identity}:game-{variant}"
     event_base_key = f"{event_date.isoformat()}:{identity}"
 
     return {
@@ -3291,6 +3901,8 @@ def _merge_event_records(existing: dict, incoming: dict) -> dict:
         "api_status_long",
         "api_home_id",
         "api_away_id",
+        "api_home_logo",
+        "api_away_logo",
     ):
         if not existing.get(key) and incoming.get(key):
             existing[key] = incoming.get(key)
@@ -3311,7 +3923,11 @@ def _timed_events_are_same_slot(left: dict, right: dict) -> bool:
     if not isinstance(left_start, datetime) or not isinstance(right_start, datetime):
         return False
     try:
-        delta = abs((left_start - right_start).total_seconds())
+        left_utc = _utc_instant(left_start)
+        right_utc = _utc_instant(right_start)
+        if left_utc is None or right_utc is None:
+            return False
+        delta = abs((left_utc - right_utc).total_seconds())
     except Exception:
         return False
     return delta <= EVENT_MERGE_TOLERANCE.total_seconds()
@@ -3349,11 +3965,19 @@ def _schedule_api_candidate_text(event: dict) -> str:
 def _schedule_api_supporting_content(event: dict) -> bool:
     """Return True for same-matchup studio/betting/support rows, not the game.
 
-    This is deliberately scoped to API-assisted canonicalization.  These rows
-    remain valid EPG content elsewhere; they simply must not be promoted to the
-    live stream for a canonical game merely because both team names appear.
+    Prefer the selected XMLTV programme when one exists.  A merged provider
+    cluster can contain both a nearby Gameday/support row and the real live
+    programme; stale source text from the support row must not taint the live
+    candidate after ``_merge_event_records`` has selected the better programme.
+    Fall back to raw provider text only when there is no useful programme text.
     """
-    return bool(SCHEDULE_API_SUPPORT_RE.search(_schedule_api_candidate_text(event)))
+    programme = _event_programme(event)
+    programme_text = " ".join(
+        str(value or "")
+        for value in (programme.get("title"), programme.get("description"))
+    ).strip()
+    candidate_text = programme_text or str(event.get("source_text") or "")
+    return bool(SCHEDULE_API_SUPPORT_RE.search(candidate_text))
 
 
 def _schedule_api_candidate_duration(event: dict) -> timedelta | None:
@@ -3389,7 +4013,11 @@ def _schedule_api_live_candidate_score(
     if not isinstance(start, datetime):
         return None
     try:
-        delta = abs(start - canonical_start)
+        start_utc = _utc_instant(start)
+        canonical_utc = _utc_instant(canonical_start)
+        if start_utc is None or canonical_utc is None:
+            return None
+        delta = abs(start_utc - canonical_utc)
     except Exception:
         return None
     if delta > SCHEDULE_API_LIVE_CANDIDATE_WINDOW:
@@ -3726,6 +4354,11 @@ def _schedule_api_anchor_events(
     settings: dict,
     team_lookup: dict,
 ) -> list[dict]:
+    """Turn cached API-SPORTS rows into canonical event anchors.
+
+    The cached row already carries the normalized M3U Web Picker league/sport
+    identity, so this function is deliberately product-agnostic.
+    """
     teams = team_lookup.get("teams", [])
     timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
     anchors = []
@@ -3736,27 +4369,37 @@ def _schedule_api_anchor_events(
         if start.tzinfo is None:
             start = start.replace(tzinfo=timezone)
         start = start.astimezone(timezone)
+
+        league_id = str(item.get("league_id") or "").strip()
+        sport_id = str(item.get("sport_id") or "").strip()
+        api_source = str(item.get("api_source") or "").strip()
+        api_dataset = str(item.get("api_dataset") or "").strip()
+        if not league_id or not api_source:
+            continue
+
         away_id, away_name = _find_team_id(
-            str(item.get("away_name", "")), SCHEDULE_API_LEAGUE_ID, teams, team_lookup
+            str(item.get("away_name", "")), league_id, teams, team_lookup
         )
         home_id, home_name = _find_team_id(
-            str(item.get("home_name", "")), SCHEDULE_API_LEAGUE_ID, teams, team_lookup
+            str(item.get("home_name", "")), league_id, teams, team_lookup
         )
         if not away_id or not home_id:
             continue
         event_id = str(item.get("api_event_id") or "").strip()
         if not event_id:
             continue
+
         status_short = str(item.get("status_short") or "").upper()
-        identity = f"{SCHEDULE_API_SOURCE}:{event_id}"
+        identity = f"{api_source}:{event_id}"
+        league_name = LEAGUE_NAMES.get(league_id, league_id.upper())
         anchors.append({
             "event_key": identity,
             "event_base_key": identity,
             "event_identity": identity,
             "event_date": start.date().isoformat(),
-            "league_id": SCHEDULE_API_LEAGUE_ID,
-            "sport_id": "baseball",
-            "sport_tags": ["baseball"],
+            "league_id": league_id,
+            "sport_id": sport_id,
+            "sport_tags": [sport_id] if sport_id else [],
             "display_name": f"{away_name} at {home_name}",
             "away_team_id": away_id,
             "away_team_name": away_name,
@@ -3769,17 +4412,19 @@ def _schedule_api_anchor_events(
             "source_kind": "schedule_api",
             "source_kinds": ["schedule_api"],
             "source_channels": [],
-            "source_text": f"MLB {away_name} at {home_name}",
+            "source_text": f"{league_name} {away_name} at {home_name}",
             "has_schedule_api_anchor": True,
             "api_event_id": event_id,
-            "api_source": str(item.get("api_source") or SCHEDULE_API_SOURCE),
+            "api_source": api_source,
+            "api_dataset": api_dataset,
             "api_status_short": status_short,
             "api_status_long": str(item.get("status_long") or ""),
             "api_home_id": str(item.get("home_api_id") or ""),
             "api_away_id": str(item.get("away_api_id") or ""),
+            "api_home_logo": str(item.get("home_logo") or ""),
+            "api_away_logo": str(item.get("away_logo") or ""),
         })
     return anchors
-
 
 def _apply_schedule_api_identity(
     provider_events: list[dict],
@@ -3788,30 +4433,38 @@ def _apply_schedule_api_identity(
     """Map provider airings to canonical API game IDs before logical merging."""
     if not api_anchors:
         return provider_events
+
     by_matchup: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    supported_leagues: set[str] = set()
     for anchor in api_anchors:
+        league_id = str(anchor.get("league_id") or "")
+        supported_leagues.add(league_id)
         key = (
-            str(anchor.get("league_id") or ""),
+            league_id,
             str(anchor.get("away_team_id") or ""),
             str(anchor.get("home_team_id") or ""),
         )
         by_matchup[key].append(anchor)
+
     output = []
     for event in provider_events:
-        if str(event.get("league_id") or "") != SCHEDULE_API_LEAGUE_ID:
+        league_id = str(event.get("league_id") or "")
+        if league_id not in supported_leagues:
             output.append(event)
             continue
+
         away_id = str(event.get("away_team_id") or "")
         home_id = str(event.get("home_team_id") or "")
-        candidates = list(by_matchup.get((SCHEDULE_API_LEAGUE_ID, away_id, home_id), []))
+        candidates = list(by_matchup.get((league_id, away_id, home_id), []))
         if not candidates:
             # Some providers reverse vs/at semantics. Team identity is still
-            # strong enough to find the canonical game, while the API retains
+            # strong enough to find the canonical game; the API retains
             # authoritative home/away roles for feed preference.
-            candidates = list(by_matchup.get((SCHEDULE_API_LEAGUE_ID, home_id, away_id), []))
+            candidates = list(by_matchup.get((league_id, home_id, away_id), []))
         if not candidates:
             output.append(event)
             continue
+
         event_start = event.get("start")
         if isinstance(event_start, datetime):
             ranked = []
@@ -3819,9 +4472,13 @@ def _apply_schedule_api_identity(
                 anchor_start = anchor.get("start")
                 if not isinstance(anchor_start, datetime):
                     continue
-                delta = abs((event_start - anchor_start).total_seconds())
+                event_utc = _utc_instant(event_start)
+                anchor_utc = _utc_instant(anchor_start)
+                if event_utc is None or anchor_utc is None:
+                    continue
+                delta = abs((event_utc - anchor_utc).total_seconds())
                 if delta <= SCHEDULE_API_MATCH_WINDOW.total_seconds():
-                    ranked.append((delta, anchor_start, anchor))
+                    ranked.append((delta, anchor_utc, anchor))
             if not ranked:
                 output.append(event)
                 continue
@@ -3831,16 +4488,19 @@ def _apply_schedule_api_identity(
         else:
             output.append(event)
             continue
-        if str(match.get("api_status_short") or "").upper() in {"POST", "CANC", "ABD", "SUSP"}:
+
+        if str(match.get("api_status_short") or "").upper() in {"POST", "PST", "CANC", "ABD", "SUSP"}:
             continue
         event["event_identity"] = match["event_identity"]
         event["event_base_key"] = match["event_base_key"]
         event["event_date"] = match["event_date"]
         event["api_event_id"] = match["api_event_id"]
         event["api_source"] = match["api_source"]
+        event["api_dataset"] = match.get("api_dataset", "")
         event["api_canonical_start"] = match["start"]
         event["has_schedule_api_identity"] = True
-        # API-BASEBALL is authoritative for home/away identity.
+        # API-SPORTS is authoritative for home/away identity when a canonical
+        # match exists, regardless of which supported product supplied it.
         event["away_team_id"] = match["away_team_id"]
         event["away_team_name"] = match["away_team_name"]
         event["home_team_id"] = match["home_team_id"]
@@ -3848,7 +4508,6 @@ def _apply_schedule_api_identity(
         event["display_name"] = match["display_name"]
         output.append(event)
     return output
-
 
 def _merge_events(
     events: Iterable[dict],
@@ -3960,10 +4619,31 @@ def _merge_events(
             if not _bucket_has_schedule_anchor(ordered):
                 logical_candidates: list[dict] = []
                 explicit_replays: list[dict] = []
+                # When XMLTV gives us one clearly live, full-game airing for a
+                # matchup, use it as a weak fallback anchor even without the
+                # optional schedule API. This is enough to reject obvious
+                # same-matchup Gameday/betting support and to classify a later
+                # full-length non-live airing as a replay. Multiple <live/>
+                # airings remain separate so unlabeled doubleheaders are not
+                # collapsed.
+                clean_live_candidates = [
+                    item
+                    for item in ordered
+                    if _event_is_live_airing(item)
+                    and not _schedule_api_supporting_content(item)
+                ]
                 for candidate in ordered:
                     if _event_is_replay_airing(candidate):
                         explicit_replays.append(candidate)
                         continue
+
+                    if clean_live_candidates and _schedule_api_supporting_content(candidate):
+                        # Only suppress support content when the same matchup
+                        # also has a clean live airing in this broadcast-day
+                        # bucket. Standalone studio/podcast programming is not
+                        # broadly filtered by this heuristic.
+                        continue
+
                     prior = logical_candidates[-1] if logical_candidates else None
                     if prior is not None and _is_overnight_repeat(
                         prior, candidate, timezone_name
@@ -3971,6 +4651,34 @@ def _merge_events(
                         if include_replays:
                             _append_replay_airing(prior, candidate, inferred=True)
                         continue
+
+                    if clean_live_candidates and not _event_is_live_airing(candidate):
+                        candidate_start = candidate.get("start")
+                        candidate_duration = _schedule_api_candidate_duration(candidate)
+                        prior_live = next(
+                            (
+                                item
+                                for item in reversed(logical_candidates)
+                                if _event_is_live_airing(item)
+                                and isinstance(item.get("start"), datetime)
+                                and isinstance(candidate_start, datetime)
+                                and item["start"] < candidate_start
+                            ),
+                            None,
+                        )
+                        prior_live_end = _primary_event_end(prior_live) if prior_live else None
+                        if (
+                            prior_live is not None
+                            and isinstance(candidate_start, datetime)
+                            and isinstance(prior_live_end, datetime)
+                            and candidate_start >= prior_live_end
+                            and isinstance(candidate_duration, timedelta)
+                            and candidate_duration >= timedelta(minutes=90)
+                        ):
+                            if include_replays:
+                                _append_replay_airing(prior_live, candidate, inferred=True)
+                            continue
+
                     logical_candidates.append(candidate)
 
                 if include_replays and logical_candidates:
@@ -4000,18 +4708,36 @@ def _merge_events(
     return _assign_merged_event_keys(merged, timezone_name)
 
 
-def _conference_matches(event: dict, conference_id: str) -> bool:
+def _conference_team_map(db_path: Path | str) -> dict[str, list[str]]:
+    output: dict[str, list[str]] = {}
+    for item in catalog_payload(db_path, scope_type="conference"):
+        teams = list((item.get("metadata") or {}).get("teams") or [])
+        if teams:
+            output[str(item["id"])] = teams
+    return output
+
+
+def _conference_matches(
+    event: dict,
+    conference_id: str,
+    conference_teams: dict[str, list[str]] | None = None,
+) -> bool:
     if event.get("league_id") != "ncaaf-fbs":
         return False
-    legacy_id = conference_id.replace("ncaaf-fbs:", "ncaaf:")
-    team_names = CONFERENCE_TEAMS.get(legacy_id, [])
+    team_names = list((conference_teams or {}).get(conference_id) or [])
+    if not team_names:
+        legacy_id = conference_id.replace("ncaaf-fbs:", "ncaaf:")
+        team_names = CONFERENCE_TEAMS.get(legacy_id, [])
     participant_text = _normalize(
         f"{event.get('away_team_name', '')} {event.get('home_team_name', '')}"
     )
     return any(_normalize(team) in participant_text for team in team_names)
 
 
-def _build_rule_index(rules: list[dict]) -> dict:
+def _build_rule_index(
+    rules: list[dict],
+    conference_teams: dict[str, list[str]] | None = None,
+) -> dict:
     by_scope: dict[str, dict[str, list[dict]]] = {
         scope: defaultdict(list) for scope in SCOPE_TYPES
     }
@@ -4023,6 +4749,7 @@ def _build_rule_index(rules: list[dict]) -> dict:
     return {
         "by_scope": {scope: dict(values) for scope, values in by_scope.items()},
         "rules": rules,
+        "conference_teams": conference_teams or {},
     }
 
 
@@ -4043,7 +4770,7 @@ def _matching_rules(event: dict, rules: list[dict] | dict) -> list[dict]:
         if team_id:
             add(by_scope["team"].get(str(team_id), []))
     for conference_id, conference_rules in by_scope["conference"].items():
-        if _conference_matches(event, conference_id):
+        if _conference_matches(event, conference_id, rules.get("conference_teams")):
             add(conference_rules)
 
     event_sports = set(event.get("sport_tags", [])) | {event.get("sport_id", "")}
@@ -4143,6 +4870,33 @@ def _feed_label(feed_type: str, event: dict, team_id: str) -> tuple[str, str]:
     if feed_type == "backup":
         return "Backup Feed", "Backup stream"
     return "Event Feed", "Provider event stream"
+
+
+def _preferred_feed_logo(
+    event: dict,
+    feed: dict,
+    channel: dict,
+    team_catalog: dict[str, dict],
+) -> str:
+    """Choose stable artwork for a generated feed.
+
+    Team feeds prefer API-Sports team artwork when canonical API metadata is
+    available. Event/national feeds preserve the provider/network logo. The
+    catalog is a final fallback for team feeds with no API/provider artwork.
+    """
+    feed_team_id = str(feed.get("team_id") or "")
+    logo = ""
+    if feed_team_id and feed_team_id == str(event.get("home_team_id") or ""):
+        logo = str(event.get("api_home_logo") or "")
+    elif feed_team_id and feed_team_id == str(event.get("away_team_id") or ""):
+        logo = str(event.get("api_away_logo") or "")
+    if not logo:
+        logo = str(channel.get("tvg_logo", "") or "")
+    if not logo and feed_team_id:
+        preferred_team = team_catalog.get(feed_team_id)
+        if preferred_team:
+            logo = str(preferred_team.get("logo_url", "") or "")
+    return logo
 
 
 def _build_feeds(
@@ -4701,7 +5455,7 @@ def build_sports_xmltv(
             )
 
             post_start = max(live_end, coverage_start)
-            post_stop = coverage_end
+            post_stop = min(live_end + EVENT_END_GRACE, coverage_end)
             if post_start < post_stop:
                 _add_programme(
                     root,
@@ -5526,7 +6280,7 @@ def scan_channels(
     index_started = perf_counter()
     team_lookup = _build_team_lookup(db_path)
     team_feed_map, team_feed_channel_ids = _team_feed_index(channels)
-    rule_index = _build_rule_index(rules)
+    rule_index = _build_rule_index(rules, _conference_team_map(db_path))
     team_catalog = {item["id"]: item for item in team_lookup.get("teams", [])}
     record_timing("index_build", index_started)
 
@@ -5588,18 +6342,25 @@ def scan_channels(
     record_timing("history_anchors", history_started)
 
     api_started = perf_counter()
+    schedule_api_state = schedule_api_status(db_path)
+    authoritative_api_leagues = _schedule_api_authoritative_leagues(db_path, scan_anchor)
     schedule_rows = schedule_api_events_for_window(db_path, scan_anchor)
     api_anchors = _schedule_api_anchor_events(schedule_rows, settings, team_lookup)
     provider_events = _apply_schedule_api_identity(
         [*previous_anchors, *m3u_events, *epg_events],
         api_anchors,
     )
+    provider_events = _filter_provider_events_by_authoritative_schedule(
+        provider_events,
+        authoritative_api_leagues,
+        include_replays=bool(settings.get("include_replays")),
+    )
     # Cancelled/postponed API events never become generated channels. Active
     # canonical games are included as authoritative timing anchors, even when
     # the provider exposes only static team feeds rather than timed event rows.
     active_api_anchors = [
         event for event in api_anchors
-        if str(event.get("api_status_short") or "").upper() not in {"POST", "CANC", "ABD", "SUSP"}
+        if str(event.get("api_status_short") or "").upper() not in {"POST", "PST", "CANC", "ABD", "SUSP"}
     ]
     record_timing("schedule_mapping", api_started)
 
@@ -5700,11 +6461,10 @@ def scan_channels(
                 channels_per_event=block_size,
                 block_index=classification_blocks[classification_id],
             )
-            logo = str(channel.get("tvg_logo", "") or "")
-            if not logo:
-                preferred_team = team_catalog.get(feed.get("team_id", ""))
-                if preferred_team:
-                    logo = preferred_team.get("logo_url", "")
+            # Team feeds use authoritative API artwork when available;
+            # event/national feeds keep the provider/network logo.
+            feed_team_id = str(feed.get("team_id") or "")
+            logo = _preferred_feed_logo(event, feed, channel, team_catalog)
             source_channel_key = str(channel.get("url", "") or "")
             event_start = event.get("start")
             event_end = _event_end(event)
@@ -5839,6 +6599,11 @@ def scan_channels(
             f" Skipped {untimed_skipped} untimed provider event"
             f"{'s' if untimed_skipped != 1 else ''} without XMLTV schedule confirmation."
         )
+    if schedule_api_state.get("effective") and schedule_api_state.get("plan", {}).get("datasets") and not api_anchors:
+        if authoritative_api_leagues and not settings.get("include_replays"):
+            message += " Schedule API confirmed no current canonical events for the covered league window; legacy historical matches were suppressed."
+        else:
+            message += " Schedule API supplied no canonical events usable for this window; legacy matching was used where API coverage was unavailable."
     print(
         "Sports scan timings: "
         + ", ".join(f"{name}={seconds:.3f}s" for name, seconds in scan_timings.items())
@@ -5879,7 +6644,10 @@ def scan_channels(
             "epg_events": len(epg_events),
             "m3u_events": len(m3u_events),
             "history_anchors": len(previous_anchors),
+            "schedule_api_effective": bool(schedule_api_state.get("effective")),
+            "schedule_api_authoritative_leagues": sorted(authoritative_api_leagues),
             "schedule_api_events": len(api_anchors),
+            "schedule_api_mapped_provider_events": sum(1 for event in provider_events if event.get("api_event_id")),
             "logical_events": len(events),
             "selected_events": len(selected_events),
             "generated_channels": len(generated),
@@ -5906,6 +6674,47 @@ def scan_channels(
             ],
         },
     }
+
+
+def purge_stale_generated(
+    db_path: Path | str,
+    now: datetime | None = None,
+) -> int:
+    """Remove generated channels after their event end plus postgame grace.
+
+    The full provider/API scan remains daily, but expired event channels do not
+    need another expensive scan just to disappear. The lightweight scheduler
+    calls this periodically and republishes the existing M3U/EPG only when rows
+    actually expire.
+    """
+    init_db(db_path)
+    settings = get_settings(db_path)
+    if not settings.get("enabled"):
+        return 0
+    timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
+    current = (now or datetime.now().astimezone()).astimezone(timezone)
+    expired_ids: list[int] = []
+    with closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            "SELECT id, event_end FROM sports_generated WHERE event_end IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            end = _parse_iso_datetime(row["event_end"], timezone)
+            if not isinstance(end, datetime):
+                continue
+            try:
+                if current >= end.astimezone(timezone) + EVENT_END_GRACE:
+                    expired_ids.append(int(row["id"]))
+            except Exception:
+                continue
+        if expired_ids:
+            placeholders = ",".join("?" for _ in expired_ids)
+            conn.execute(
+                f"DELETE FROM sports_generated WHERE id IN ({placeholders})",
+                expired_ids,
+            )
+            conn.commit()
+    return len(expired_ids)
 
 
 def generated_rows(

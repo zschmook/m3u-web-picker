@@ -34,10 +34,10 @@ const els = {
   groupPlaylistUrl: document.getElementById("groupPlaylistUrl")
 };
 
-els.playlistUrl.value = `${location.origin}/playlist/custom.m3u`;
+els.playlistUrl.value = `${location.origin}/playlist/channels.m3u`;
 els.groupPlaylistUrl.value = `${location.origin}/playlist/all.m3u`;
-const combinedEpgUrlInput = document.getElementById("combinedEpgUrl");
-if (combinedEpgUrlInput) combinedEpgUrlInput.value = `${location.origin}/epg/combined.xml`;
+const epgOutputUrlInput = document.getElementById("epgOutputUrl");
+if (epgOutputUrlInput) epgOutputUrlInput.value = `${location.origin}/epg/epg.xml`;
 
 const CHANNEL_MANAGER_COLLAPSE_KEY = "m3u-picker.channel-manager-collapsed";
 let channelManagerCollapsed = localStorage.getItem(CHANNEL_MANAGER_COLLAPSE_KEY) === "true";
@@ -342,7 +342,7 @@ function formatEpgSize(bytes) {
 
 function renderBuiltInEpgStatus() {
   const byId = new Map(epgBuiltins.map(item => [String(item.id || ""), item]));
-  for (const [id, elementId] of [["combined", "combinedEpgStatus"]]) {
+  for (const [id, elementId] of [["epg", "epgOutputStatus"]]) {
     const target = document.getElementById(elementId);
     if (!target) continue;
     const guide = byId.get(id);
@@ -483,14 +483,13 @@ function renderMasterUpdate() {
   const effectiveTrigger = masterUpdateBusy
     ? "manual"
     : String(masterUpdateState.trigger || scanTrigger || "scheduled").trim();
-  const manualScan = scanRunning && scanTrigger === "manual";
-  const cancelling = manualScan && String(sportsState.scan?.stage || "").toLowerCase().includes("cancellation requested");
-
-  if (button && !masterUpdateBusy) {
-    button.disabled = scanRunning && !manualScan;
-    button.textContent = cancelling ? "Cancelling…" : (manualScan ? "Cancel Update" : (scanRunning ? "Updating…" : "Update Now"));
-    button.classList.toggle("btn-danger", manualScan);
-    button.classList.toggle("btn-primary", !manualScan);
+  if (button) {
+    // Never allow a second master update (or a cancel-via-double-click) while
+    // the current update pipeline is active.
+    button.disabled = masterRunning;
+    button.textContent = masterRunning ? "Updating…" : "Update Now";
+    button.classList.remove("btn-danger");
+    button.classList.add("btn-primary");
   }
 
   if (runningPanel && runningText) {
@@ -547,13 +546,7 @@ async function loadMasterUpdate() {
 async function runMasterUpdate() {
   const button = document.getElementById("masterUpdateNowBtn");
   const scanRunning = Boolean(sportsState?.scan?.running);
-  const manualScan = scanRunning && String(sportsState.scan?.trigger || "manual") === "manual";
-  if (manualScan) {
-    await handleSportsScanAction();
-    renderMasterUpdate();
-    return;
-  }
-  if (masterUpdateBusy || scanRunning) return;
+  if (masterUpdateBusy || masterUpdateState.running || scanRunning) return;
   masterUpdateBusy = true;
   masterUpdateLocalStartedAt = Date.now();
   if (button) {
@@ -1097,7 +1090,7 @@ document.getElementById("providerSources")?.addEventListener("click", event => {
 });
 document.getElementById("copyPlaylistBtn").addEventListener("click", () => copyInputValue("playlistUrl", "copyPlaylistBtn"));
 document.getElementById("copyGroupBtn").addEventListener("click", () => copyInputValue("groupPlaylistUrl", "copyGroupBtn"));
-document.getElementById("copyCombinedEpgBtn")?.addEventListener("click", () => copyInputValue("combinedEpgUrl", "copyCombinedEpgBtn"));
+document.getElementById("copyEpgBtn")?.addEventListener("click", () => copyInputValue("epgOutputUrl", "copyEpgBtn"));
 document.getElementById("addEpgBtn")?.addEventListener("click", addEpgSource);
 document.getElementById("epgUrl")?.addEventListener("keydown", event => { if (event.key === "Enter") addEpgSource(); });
 document.getElementById("epgSources")?.addEventListener("click", event => {
@@ -1415,6 +1408,7 @@ function renderSportsScanStatus() {
     details.textContent = [
       `${lastScan.channel_count || 0} channels generated`,
       `${lastScan.event_count || 0} events matched`,
+      lastScan.message || "",
       `Completed ${formatNextUpdate(lastScan.finished_at)}`,
       sportsDuration ? `Sports scan ${sportsDuration}` : "",
       masterDuration ? `Master update ${masterDuration}` : ""
@@ -1463,7 +1457,7 @@ function updateSportsScanPulse() {
 function scheduleApiStatusLabel(api) {
   if (api.effective) return "Active";
   if (api.configured) return "Disabled";
-  return "Incomplete";
+  return "Needs key";
 }
 
 function renderSportsScheduleApiList() {
@@ -1472,23 +1466,38 @@ function renderSportsScheduleApiList() {
   const api = sportsState.schedule_api || {};
   const entries = Array.isArray(api.apis) ? api.apis : [];
   if (!entries.length) {
-    target.innerHTML = `<tr><td colspan="6" class="small-muted">No schedule APIs loaded.</td></tr>`;
+    target.innerHTML = `<tr><td colspan="6" class="small-muted">No API-backed schedule dataset is required by the current sports selections.</td></tr>`;
     return;
   }
   target.innerHTML = entries.map(entry => {
     const status = scheduleApiStatusLabel(entry);
     const updated = entry.last_fetch_at ? formatNextUpdate(entry.last_fetch_at) : "—";
-    const url = entry.url || "—";
+    const cacheCount = Number(entry.cached_event_count || 0);
     return `
       <tr>
-        <td>${escapeHtml(entry.provider || "Schedule API")}</td>
+        <td>${escapeHtml(entry.provider || "API-SPORTS")}</td>
+        <td>${escapeHtml(entry.product || "—")}</td>
         <td>${escapeHtml(entry.scope || "—")}</td>
-        <td class="schedule-api-url-cell" title="${escapeHtml(url)}">${escapeHtml(url)}</td>
         <td>${escapeHtml(status)}</td>
         <td>${escapeHtml(updated)}</td>
-        <td class="text-end"><button class="btn btn-outline-danger btn-sm schedule-api-remove" type="button" data-api-id="${escapeHtml(entry.id || "")}">Remove</button></td>
+        <td>${cacheCount ? `${cacheCount.toLocaleString()} games` : "—"}</td>
       </tr>`;
   }).join("");
+}
+
+function renderSportsScheduleApiPlan(api) {
+  const target = sportsElement("sportsScheduleApiPlan");
+  if (!target) return;
+  const plan = api.plan || {};
+  const datasets = Array.isArray(plan.datasets) ? plan.datasets.map(item => item.label).filter(Boolean) : [];
+  const legacy = Array.isArray(plan.legacy_rules) ? plan.legacy_rules.filter(Boolean) : [];
+  const mixed = Array.isArray(plan.mixed_rules) ? plan.mixed_rules.filter(Boolean) : [];
+  const bits = [];
+  if (datasets.length) bits.push(`API-backed: ${datasets.join(", ")}`);
+  if (legacy.length) bits.push(`Legacy only: ${legacy.join(", ")}`);
+  if (mixed.length) bits.push(`Mixed/API + legacy: ${mixed.join(", ")}`);
+  if (!bits.length) bits.push("No sports selections currently require API-SPORTS; legacy matching remains available.");
+  target.textContent = bits.join(" • ");
 }
 
 function renderSportsScheduleApi() {
@@ -1496,28 +1505,32 @@ function renderSportsScheduleApi() {
   const enabled = Boolean(api.enabled);
   const enabledInput = sportsElement("sportsScheduleApiEnabled");
   const fieldset = sportsElement("sportsScheduleApiFields");
-  const urlInput = sportsElement("sportsScheduleApiUrl");
   const keyInput = sportsElement("sportsScheduleApiKey");
   const status = sportsElement("sportsScheduleApiStatus");
-  if (!enabledInput || !fieldset || !urlInput || !keyInput || !status) return;
+  const refreshButton = sportsElement("sportsScheduleApiRefresh");
+  if (!enabledInput || !fieldset || !keyInput || !status) return;
   enabledInput.checked = enabled;
   fieldset.disabled = !enabled;
-  urlInput.value = api.url || "";
   keyInput.value = "";
-  keyInput.placeholder = api.key_configured ? "API key saved" : "Enter API key";
+  keyInput.placeholder = api.key_configured ? "API-SPORTS key saved" : "Enter API-SPORTS key";
+  if (refreshButton) refreshButton.disabled = !api.effective || !(api.plan?.datasets || []).length;
+
   if (!enabled) {
     status.textContent = api.configured
-      ? "Schedule API disabled • provider-derived matching active."
-      : "Provider-derived matching active.";
+      ? "Schedule API disabled • legacy provider/EPG matching active."
+      : "Legacy provider/EPG matching active.";
   } else if (!api.effective) {
-    status.textContent = "Schedule API enabled but not fully configured • enter the API URL and key, then save.";
+    status.textContent = "Schedule API enabled • enter an API-SPORTS key, then save.";
+  } else if (!(api.plan?.datasets || []).length) {
+    status.textContent = "API-SPORTS configured • no selected sport currently requires an API-backed schedule • legacy matching active.";
   } else {
-    const bits = ["Schedule API active"];
+    const bits = ["API-SPORTS active"];
     if (api.last_fetch_at) bits.push(`Last fetch ${formatNextUpdate(api.last_fetch_at)}`);
     if (Number(api.cached_event_count || 0) > 0) bits.push(`${Number(api.cached_event_count).toLocaleString()} games cached`);
     if (api.remaining_quota !== null && api.remaining_quota !== undefined) bits.push(`${api.remaining_quota} requests remaining`);
     status.textContent = bits.join(" • ");
   }
+  renderSportsScheduleApiPlan(api);
   renderSportsScheduleApiList();
 }
 
@@ -1555,12 +1568,11 @@ async function toggleSportsScheduleApiEnabled() {
 async function saveSportsScheduleApi() {
   const button = sportsElement("sportsScheduleApiSave");
   const enabled = Boolean(sportsElement("sportsScheduleApiEnabled")?.checked);
-  const url = sportsElement("sportsScheduleApiUrl")?.value.trim() || "";
   const apiKey = sportsElement("sportsScheduleApiKey")?.value.trim() || "";
   if (!enabled) return;
   if (button) button.disabled = true;
   try {
-    const payload = {url};
+    const payload = {};
     if (apiKey) payload.api_key = apiKey;
     await patchSportsScheduleApi(payload, "Could not save schedule API settings.");
     sportsElement("sportsScheduleApiKey").value = "";
@@ -1574,19 +1586,39 @@ async function saveSportsScheduleApi() {
 }
 
 async function removeSportsScheduleApi() {
-  const target = sportsElement("sportsScheduleApiList");
-  if (target) {
-    target.querySelectorAll(".schedule-api-remove").forEach(button => { button.disabled = true; });
-  }
+  const button = sportsElement("sportsScheduleApiRemove");
+  if (button) button.disabled = true;
   try {
     await patchSportsScheduleApi(
-      {enabled: false, url: "", clear_key: true},
+      {enabled: false, clear_key: true},
       "Could not remove schedule API."
     );
     setSportsError("");
   } catch (error) {
     setSportsError(`Could not remove schedule API. ${error.message}`);
   } finally {
+    if (button) button.disabled = false;
+    renderSportsScheduleApi();
+  }
+}
+
+async function forceSportsScheduleApiRefresh() {
+  const button = sportsElement("sportsScheduleApiRefresh");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+  }
+  try {
+    const response = await fetch("/api/sports/schedule-api/refresh", {method: "POST"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not refresh schedule API.");
+    sportsState.schedule_api = data.schedule_api || sportsState.schedule_api || {};
+    const warning = data.result?.warning || "";
+    setSportsError(warning ? `Schedule API refresh warning: ${warning}` : "");
+  } catch (error) {
+    setSportsError(`Could not refresh schedule API. ${error.message}`);
+  } finally {
+    if (button) button.textContent = "Force Schedule Refresh";
     renderSportsScheduleApi();
   }
 }
@@ -1621,8 +1653,8 @@ function applySportsState() {
   const numbering = sportsState.numbering || {};
   const capacity = Number(numbering.events_per_primary_block || 0);
   sportsElement("sportsBlockCapacity").textContent = capacity
-    ? `Each league/series gets 1,000 channels: ${capacity} event slots at ${settings.channels_per_event || 10} channels per event. Overflow uses a separate continuation block.`
-    : "Each league/series gets its own 1,000-channel block.";
+    ? `Each league gets 1,000 channels: ${capacity} event slots at ${settings.channels_per_event || 10} channels per event. Overflow uses a separate continuation block.`
+    : "Each league gets its own 1,000-channel block.";
   renderSportsBlockMap();
 
   const conflictCount = Number(sportsState.number_conflicts || 0);
@@ -1793,7 +1825,7 @@ function renderSportsSelectionResults() {
   const placeholder = type === "team"
     ? "Search teams…"
     : type === "league"
-      ? "Search leagues, series, tours…"
+      ? "Search leagues…"
       : type === "conference"
         ? "Search conferences…"
         : "Search sports…";
@@ -2023,9 +2055,8 @@ function bindSports() {
 
   sportsElement("sportsScheduleApiEnabled")?.addEventListener("change", toggleSportsScheduleApiEnabled);
   sportsElement("sportsScheduleApiSave")?.addEventListener("click", saveSportsScheduleApi);
-  sportsElement("sportsScheduleApiList")?.addEventListener("click", event => {
-    if (event.target.closest(".schedule-api-remove")) removeSportsScheduleApi();
-  });
+  sportsElement("sportsScheduleApiRemove")?.addEventListener("click", removeSportsScheduleApi);
+  sportsElement("sportsScheduleApiRefresh")?.addEventListener("click", forceSportsScheduleApiRefresh);
 
   sportsElement("sportsAddSelectionBtn").addEventListener("click", () => {
     pendingSportsSelections.clear();
@@ -2081,6 +2112,21 @@ async function initialize() {
   updateClearSearchButton();
   scheduleSportsStatusPoll();
 }
+
+document.getElementById("tvGuideLink")?.addEventListener("click", event => {
+  event.preventDefault();
+  const href = event.currentTarget.href;
+  // Ask Chrome for a normal browser window instead of the stripped-down
+  // popup chrome used in exp1. This behaves better when moving the guide
+  // between macOS displays while still requesting a useful initial size.
+  const guideWindow = window.open(
+    href,
+    "m3u-web-picker-guide",
+    "width=1280,height=860,resizable=yes,scrollbars=yes,toolbar=yes,location=yes,menubar=yes,status=yes"
+  );
+  if (guideWindow) guideWindow.focus();
+  else window.open(href, "_blank", "noopener");
+});
 
 document.getElementById("masterUpdateEnabled")?.addEventListener("change", event => {
   saveMasterUpdate({enabled: event.target.checked});

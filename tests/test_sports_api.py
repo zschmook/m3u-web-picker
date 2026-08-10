@@ -71,6 +71,30 @@ class SportsApiTests(unittest.TestCase):
         core.CONFIG_PATH = self.original_config_path
         self.temp.cleanup()
 
+    def test_guide_manual_channel_uses_ffmpeg_playback_route_without_exposing_provider_url(self):
+        source_url = "http://provider.test/user/pass/live.ts"
+        core.channels = core.parse_m3u_text(
+            f"""#EXTM3U
+#EXTINF:-1 tvg-id="test.channel" group-title="Test",Test Channel
+{source_url}
+"""
+        )
+        core.selected_ids = {int(core.channels[0]["id"])}
+
+        response = self.client.get("/api/guide/channels")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["count"], 1)
+        item = payload["channels"][0]
+        self.assertTrue(item["play_url"].startswith("/guide/play/manual/"))
+        self.assertNotIn("direct_url", item)
+        self.assertNotIn(source_url, response.get_data(as_text=True))
+
+        with patch("api.routes.shutil.which", return_value=None):
+            playback = self.client.get(item["play_url"])
+        self.assertEqual(playback.status_code, 503)
+        self.assertIn("ffmpeg", playback.get_data(as_text=True).lower())
+
     def test_generated_sports_stream_uses_temporary_redirect(self):
         source_url = "http://provider.test/user/pass/game.ts"
         now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
@@ -280,7 +304,6 @@ http://provider.test/news.ts
             "/api/sports/schedule-api",
             json={
                 "enabled": True,
-                "url": "https://v1.baseball.api-sports.io",
                 "api_key": "secret-key",
             },
         )
@@ -292,6 +315,13 @@ http://provider.test/news.ts
         status = self.client.get("/api/sports/settings").get_json()
         self.assertTrue(status["schedule_api"]["key_configured"])
         self.assertNotIn("api_key", status["schedule_api"])
+
+    def test_force_schedule_api_refresh_route_uses_explicit_force(self):
+        with patch("sports.refresh_schedule_api_if_due", return_value={"enabled": True, "fetched": []}) as refresh:
+            response = self.client.post("/api/sports/schedule-api/refresh")
+        self.assertEqual(response.status_code, 200)
+        refresh.assert_called_once_with(core.DB_PATH, force=True)
+        self.assertIn("schedule_api", response.get_json())
 
     def test_master_switch_rewrites_served_outputs_and_restores_cached_rows(self):
         fixture = """#EXTM3U
@@ -332,6 +362,25 @@ http://provider.test/user/pass/201.ts
         self.assertEqual(enabled.status_code, 200)
         self.assertIn("m3u-picker-sports-", core.PLAYLIST_PATH.read_text(encoding="utf-8"))
 
+
+
+    def test_new_public_routes_work_and_old_routes_remain_compatibility_aliases(self):
+        core.PLAYLIST_PATH.write_text("#EXTM3U\n", encoding="utf-8")
+        core.COMBINED_EPG_PATH.write_text("<?xml version='1.0'?><tv />", encoding="utf-8")
+        core.SPORTS_EPG_PATH.write_text("<?xml version='1.0'?><tv />", encoding="utf-8")
+
+        new_playlist = self.client.get("/playlist/channels.m3u")
+        old_playlist = self.client.get("/playlist/custom.m3u")
+        self.assertEqual(new_playlist.status_code, 200)
+        self.assertEqual(old_playlist.status_code, 200)
+        self.assertIn("/epg/epg.xml", new_playlist.get_data(as_text=True).splitlines()[0])
+        self.assertEqual(new_playlist.get_data(as_text=True), old_playlist.get_data(as_text=True))
+
+        new_epg = self.client.get("/epg/epg.xml")
+        old_epg = self.client.get("/epg/combined.xml")
+        self.assertEqual(new_epg.status_code, 200)
+        self.assertEqual(old_epg.status_code, 200)
+        self.assertEqual(new_epg.data, old_epg.data)
 
 
 if __name__ == "__main__":

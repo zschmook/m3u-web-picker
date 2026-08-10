@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>M3U Web Picker — TV Guide</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/guide.css', v='v30-experiments-exp9') }}">
+</head>
+<body class="guide-body">
+  <main class="guide-shell container-fluid py-3">
+    <header class="guide-header mb-3">
+      <div class="guide-header-copy">
+        <h1 class="h4 mb-1">TV Guide</h1>
+        <div id="guideStatus" class="small-muted" aria-live="polite">Loading curated lineup…</div>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <button id="guideRefreshBtn" class="btn btn-outline-light btn-sm" type="button">Refresh</button>
+        <button id="guideCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
+      </div>
+    </header>
+
+    <section id="guidePlayerPanel" class="guide-player-panel d-none mb-3" aria-live="polite">
+      <div class="guide-player-heading">
+        <div class="guide-player-copy">
+          <div class="guide-player-kicker">
+            <span id="guidePlaybackBadge" class="badge rounded-pill text-bg-secondary">Local</span>
+            <span id="guideNowPlayingLabel" class="small-muted">Now playing</span>
+          </div>
+          <div id="guidePlayerTitle" class="guide-player-title">—</div>
+          <div id="guidePlayerMeta" class="small-muted guide-player-meta"></div>
+        </div>
+        <div class="guide-player-actions">
+          <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Cast</button>
+          <button id="guideStopBtn" class="btn btn-outline-light btn-sm" type="button">Stop</button>
+        </div>
+      </div>
+
+      <video id="guidePlayer" class="guide-player" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
+      <div id="guideCastScreen" class="guide-cast-screen d-none">
+        <div class="guide-cast-icon" aria-hidden="true">▰</div>
+        <div class="guide-cast-screen-title">Casting to <span id="guideCastScreenDevice">Cast device</span></div>
+        <div id="guideCastScreenChannel" class="small-muted"></div>
+      </div>
+
+      <div id="guidePlayerMessage" class="guide-player-message small-muted" aria-live="polite"></div>
+
+      <details class="guide-diagnostics">
+        <summary>Diagnostics</summary>
+        <div class="guide-diagnostics-body">
+          <div class="guide-cast-row">
+            <span class="guide-cast-host-label">Cast relay</span>
+            <code id="guideCastRelay" class="guide-cast-relay">detecting…</code>
+            <button id="guideLanTestBtn" class="btn btn-outline-light btn-sm guide-lan-test" type="button">Test LAN</button>
+          </div>
+          <div id="guideCastStatus" class="small-muted guide-cast-status">Cast SDK loading…</div>
+        </div>
+      </details>
+    </section>
+
+    <section class="guide-controls mb-3">
+      <div class="guide-filter-heading">
+        <label class="form-label mb-1" for="guideSearch">Filter channels</label>
+        <div id="guideVisibleCount" class="small-muted guide-count">0 channels</div>
+      </div>
+      <input id="guideSearch" class="form-control" type="search" placeholder="Channel, group, sports event…" autocomplete="off">
+    </section>
+
+    <section class="guide-list-wrap">
+      <table class="table table-hover align-middle mb-0 guide-table">
+        <thead>
+          <tr>
+            <th scope="col" class="guide-number-col">#</th>
+            <th scope="col">Channel</th>
+            <th scope="col" class="guide-group-col">Group</th>
+            <th scope="col" class="guide-action-col"></th>
+          </tr>
+        </thead>
+        <tbody id="guideRows"></tbody>
+      </table>
+      <div id="guideEmpty" class="guide-empty d-none">No curated channels match this filter.</div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-exp9') }}"></script>
+  <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+</body>
+</html>

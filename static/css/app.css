@@ -82,8 +82,9 @@ thead th {
 }
 
 .playlist-toolbar {
-  min-width: min(560px, 100%);
-  flex: 0 1 560px;
+  width: min(860px, 100%);
+  min-width: min(760px, 100%);
+  flex: 0 1 860px;
 }
 
 .group-pill {
@@ -160,7 +161,7 @@ thead th {
 }
 
 #manageOrderBtn {
-  margin-left: 6px;
+  margin-left: 0;
 }
 
 .search-input-wrap {
@@ -1191,4 +1192,134 @@ thead th {
   height: 1rem;
   border-width: .15em;
   flex: 0 0 auto;
+}
+
+.output-label {
+  min-width: 78px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+
+/* v22.1-rc4: compact sticky top controls and output-row alignment cleanup. */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+  margin: -1rem 0 1rem;
+  padding: 1rem 0 .85rem;
+  background: rgba(17, 24, 39, .96);
+  border-bottom: 1px solid #374151;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.app-brand-block {
+  flex: 1 1 260px;
+}
+
+.app-brand-meta {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  flex-wrap: wrap;
+}
+
+.user-guide-link {
+  color: #93c5fd;
+  font-size: .86rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.user-guide-link:hover,
+.user-guide-link:focus {
+  color: #bfdbfe;
+  text-decoration: underline;
+}
+
+.output-secondary-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: .4rem;
+}
+
+.master-update-status {
+  width: 100%;
+  text-align: right;
+}
+
+/* Force both left-side output labels to exactly the same width. */
+.output-label {
+  width: 86px;
+  min-width: 86px;
+  flex: 0 0 86px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+@media (max-width: 992px) {
+  .app-topbar {
+    align-items: stretch !important;
+  }
+
+  .playlist-toolbar {
+    flex-basis: 100%;
+  }
+
+  .master-update-controls {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Avoid consuming most of a small phone viewport with a multi-row sticky header. */
+  .app-topbar {
+    position: static;
+    margin-top: -1rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+
+/* v22.1-rc6: keep the brand pinned to the top of the sticky header and give the control side enough room to stay on one line. */
+.app-topbar {
+  align-items: flex-start !important;
+}
+
+.app-brand-block {
+  align-self: flex-start;
+  padding-top: .15rem;
+}
+
+.playlist-toolbar {
+  width: min(860px, 100%);
+  min-width: min(760px, 100%);
+  flex: 0 1 860px;
+}
+
+.master-update-controls {
+  flex-wrap: nowrap;
+}
+
+.master-update-status {
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .playlist-toolbar {
+    width: 100%;
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .master-update-controls {
+    flex-wrap: wrap;
+  }
+
+  .master-update-status {
+    white-space: normal;
+  }
 }
