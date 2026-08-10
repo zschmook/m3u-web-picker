@@ -28,6 +28,7 @@ from . import numbering as _numbering  # noqa: E402
 from . import scheduling as _scheduling  # noqa: E402
 from . import scan_state as _scan_state  # noqa: E402
 from . import catalog as _catalog  # noqa: E402
+from . import generated as _generated  # noqa: E402
 
 _install(
     _storage,
@@ -82,7 +83,6 @@ _install(
         "last_scan",
     ),
 )
-
 _install(
     _catalog,
     (
@@ -97,5 +97,18 @@ _install(
         "add_rule",
         "update_rule",
         "delete_rule",
+    ),
+)
+_install(
+    _generated,
+    (
+        "_rewrite_extinf",
+        "generated_stream_path",
+        "_generated_raw",
+        "_generated_tvg_id",
+        "purge_stale_generated",
+        "generated_rows",
+        "generated_stream_target",
+        "generated_channel_payloads",
     ),
 )
