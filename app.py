@@ -26,6 +26,22 @@ def index():
     status.classList.add("mt-4");
     status.style.width = "100%";
     brand.appendChild(status);
+
+    // The header panel reports sports scan/matching progress only. The master
+    // update controls on the right already own the elapsed-time counter.
+    const originalRenderSportsScanStatus = renderSportsScanStatus;
+    renderSportsScanStatus = function() {
+      originalRenderSportsScanStatus();
+      const scan = sportsState.scan || {running: false};
+      const running = Boolean(masterUpdateBusy || masterUpdateState.running || scan.running);
+      if (!running) return;
+      const details = document.getElementById("sportsScanStatusDetails");
+      if (!details) return;
+      details.textContent = details.textContent
+        .split(" • ")
+        .filter(part => !/^Elapsed\b/i.test(part.trim()))
+        .join(" • ");
+    };
   })();
 </script>
 </body>""",
