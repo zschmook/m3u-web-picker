@@ -81,16 +81,36 @@ def _device_xml() -> bytes:
 
 
 def register_hdhr_routes(app):
+    @app.before_request
+    def hdhr_http_trace():
+        if request.path.startswith(_HDHR_HTTP_PREFIXES):
+            # Temporary experimental visibility: if the official app says
+            # fetch() failed we can distinguish browser/WebView policy from a
+            # request that never reached the Docker-hosted facade.
+            print(
+                f"HDHomeRun HTTP {request.method} {request.path} from {request.remote_addr or '?'}",
+                flush=True,
+            )
+
     @app.after_request
     def hdhr_http_headers(response):
         if request.path.startswith(_HDHR_HTTP_PREFIXES):
-            # Real HDHomeRun HTTP endpoints explicitly allow browser/WebView
-            # cross-origin access. The official app probes discover.json with
-            # fetch(), so matching that behavior matters here.
+            # Real HDHomeRun HTTP endpoints allow cross-origin access. Modern
+            # Chromium/WebView also performs local/private-network checks when
+            # a web origin fetches an RFC1918 address, so explicitly allow the
+            # private-network preflight as well.
             response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Range"
-            response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Range, Accept, Origin"
+            )
+            response.headers["Access-Control-Expose-Headers"] = (
+                "Content-Length, Content-Range, Accept-Ranges"
+            )
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+            response.headers["Timing-Allow-Origin"] = "*"
+            response.headers["Vary"] = "Origin, Access-Control-Request-Private-Network"
         return response
 
     @app.get("/discover.json")
