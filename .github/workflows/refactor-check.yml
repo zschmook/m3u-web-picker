@@ -23,6 +23,20 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Compile Python sources
         run: python -m compileall -q .
+      - name: Audit sports function sizes
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for path in [Path('sports.py'), *sorted(Path('sports').glob('*.py'))]:
+              tree = ast.parse(path.read_text(encoding='utf-8'))
+              print(f'=== {path} ===')
+              for node in tree.body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                      end = getattr(node, 'end_lineno', node.lineno)
+                      print(f'{node.name}\t{node.lineno}-{end}\t{end-node.lineno+1}')
+          PY
       - name: Run unit tests
         env:
           M3U_DISABLE_SCHEDULER: 'true'
