@@ -5,7 +5,13 @@ from unittest.mock import patch
 
 from flask import Flask
 
-from api.hdhr import HDHR_DEVICE_ID, HDHR_TUNER_COUNT, register_hdhr_routes
+from api.hdhr import (
+    HDHR_DEVICE_AUTH,
+    HDHR_DEVICE_ID,
+    HDHR_FIRMWARE_NAME,
+    HDHR_TUNER_COUNT,
+    register_hdhr_routes,
+)
 
 
 SAMPLE_CHANNELS = [
@@ -36,13 +42,14 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertEqual(payload["DeviceID"], HDHR_DEVICE_ID)
+        self.assertEqual(payload["DeviceAuth"], HDHR_DEVICE_AUTH)
+        self.assertEqual(payload["FirmwareName"], HDHR_FIRMWARE_NAME)
         self.assertEqual(payload["TunerCount"], HDHR_TUNER_COUNT)
         self.assertEqual(payload["BaseURL"], "http://10.0.0.22:10000")
         self.assertEqual(
             payload["LineupURL"],
             "http://10.0.0.22:10000/lineup.json",
         )
-        self.assertNotIn("DeviceAuth", payload)
 
     def test_discover_matches_hdhomerun_cross_origin_behavior(self):
         response = self.client.get(
@@ -53,7 +60,25 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
         self.assertIn("GET", response.headers.get("Access-Control-Allow-Methods", ""))
+        self.assertIn("POST", response.headers.get("Access-Control-Allow-Methods", ""))
         self.assertIn("Range", response.headers.get("Access-Control-Allow-Headers", ""))
+
+    def test_plex_root_probe_gets_device_xml_without_claiming_root_for_browsers(self):
+        plex = self.client.get(
+            "/",
+            base_url="http://10.0.0.22:10000",
+            headers={"User-Agent": "PlexMediaServer/1.0"},
+        )
+        self.assertEqual(plex.status_code, 200)
+        self.assertIn("application/xml", plex.content_type)
+        self.assertIn(HDHR_DEVICE_ID, plex.get_data(as_text=True))
+
+        browser = self.client.get(
+            "/",
+            base_url="http://10.0.0.22:10000",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        self.assertEqual(browser.status_code, 404)
 
     @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
     def test_lineup_uses_exact_curated_channel_numbers(self, _curated):
@@ -79,18 +104,26 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             ],
         )
 
-    def test_lineup_status_does_not_request_a_scan(self):
+    def test_lineup_status_advertises_plex_scan_handshake(self):
         response = self.client.get("/lineup_status.json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.get_json(),
             {
                 "ScanInProgress": 0,
-                "ScanPossible": 0,
+                "ScanPossible": 1,
                 "Source": "Cable",
                 "SourceList": ["Cable"],
             },
         )
+
+    def test_lineup_scan_start_and_abort_are_safe_noops(self):
+        start = self.client.post("/lineup.post?scan=start")
+        self.assertEqual(start.status_code, 200)
+        abort = self.client.post("/lineup.post?scan=abort")
+        self.assertEqual(abort.status_code, 200)
+        invalid = self.client.post("/lineup.post?scan=explode")
+        self.assertEqual(invalid.status_code, 400)
 
     def test_device_xml_has_hdhomerun_identity(self):
         response = self.client.get(
@@ -116,6 +149,23 @@ class HdHomeRunFacadeTests(unittest.TestCase):
 
         response_for.return_value = Response(b"ts", content_type="video/mp2t")
         response = self.client.get("/hdhr/stream/7")
+        self.assertEqual(response.status_code, 200)
+        manual_stream_target.assert_called_once_with("manual-token")
+        response_for.assert_called_once_with("http://provider/manual")
+
+    @patch("api.hdhr.core.manual_stream_target", return_value="http://provider/manual")
+    @patch("api.hdhr.mpegts.response_for")
+    @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
+    def test_native_auto_stream_alias_resolves_server_side(
+        self,
+        _curated,
+        response_for,
+        manual_stream_target,
+    ):
+        from flask import Response
+
+        response_for.return_value = Response(b"ts", content_type="video/mp2t")
+        response = self.client.get("/auto/v7?duration=7200")
         self.assertEqual(response.status_code, 200)
         manual_stream_target.assert_called_once_with("manual-token")
         response_for.assert_called_once_with("http://provider/manual")
