@@ -32,8 +32,9 @@ services:
     ports:
       # Experimental host port 10000 -> Flask debug port 9998 in the container.
       - "0.0.0.0:10000:9998"
-      # HDHomeRun binary discovery protocol. Clients broadcast UDP 65001 on the LAN.
-      - "0.0.0.0:65001:65001/udp"
+      # Do not publish UDP 65001 on Docker Desktop/macOS. LAN broadcasts reach
+      # the Mac but Docker's UDP forwarding does not pass them to the container.
+      # tools/hdhr_discovery_host.py owns UDP 65001 natively on the Mac instead.
 
     environment:
       FLASK_DEBUG: "1"
