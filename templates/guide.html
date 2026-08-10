@@ -16,29 +16,29 @@
         <div id="guideStatus" class="small-muted" aria-live="polite">Loading curated lineup…</div>
       </div>
       <div class="d-flex gap-2 align-items-center">
+        <button id="guideCastBtn" class="btn btn-outline-light btn-sm d-none" type="button" disabled>Cast</button>
+        <button id="guideRokuBtn" class="btn btn-outline-light btn-sm d-none" type="button" disabled>Roku</button>
         <button id="guideRefreshBtn" class="btn btn-outline-light btn-sm" type="button">Refresh</button>
         <button id="guideCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
       </div>
     </header>
 
-    <section id="guidePlayerPanel" class="guide-player-panel mb-3" aria-live="polite">
+    <section id="guidePlayerPanel" class="guide-player-panel d-none mb-3" aria-live="polite">
       <div class="guide-player-heading">
         <div class="guide-player-copy">
           <div class="guide-player-kicker">
-            <span id="guidePlaybackBadge" class="badge rounded-pill text-bg-secondary">Ready</span>
-            <span id="guideNowPlayingLabel" class="small-muted">Select a channel</span>
+            <span id="guidePlaybackBadge" class="badge rounded-pill text-bg-secondary">Local</span>
+            <span id="guideNowPlayingLabel" class="small-muted">Now playing</span>
           </div>
-          <div id="guidePlayerTitle" class="guide-player-title">Cast / Roku</div>
+          <div id="guidePlayerTitle" class="guide-player-title">—</div>
           <div id="guidePlayerMeta" class="small-muted guide-player-meta"></div>
         </div>
         <div class="guide-player-actions">
-          <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Cast</button>
-          <button id="guideRokuBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Roku</button>
           <button id="guideStopBtn" class="btn btn-outline-light btn-sm" type="button">Stop</button>
         </div>
       </div>
 
-      <video id="guidePlayer" class="guide-player d-none" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
+      <video id="guidePlayer" class="guide-player" controls controlsList="nodownload" disableRemotePlayback autoplay playsinline preload="none"></video>
       <div id="guideCastScreen" class="guide-cast-screen d-none">
         <div class="guide-cast-icon" aria-hidden="true">▰</div>
         <div class="guide-cast-screen-title"><span id="guideRemoteScreenVerb">Casting to</span> <span id="guideCastScreenDevice">Cast device</span></div>
@@ -61,7 +61,7 @@
             <input id="guideRokuHost" class="form-control form-control-sm guide-roku-host" type="text" inputmode="decimal" placeholder="10.0.0.x" autocomplete="off">
             <button id="guideRokuTestBtn" class="btn btn-outline-light btn-sm" type="button">Test Roku</button>
           </div>
-          <div id="guideRokuStatus" class="small-muted guide-cast-status">Enter the Roku TV IP, then sideload the included receiver app.</div>
+          <div id="guideRokuStatus" class="small-muted guide-cast-status">Discovering Roku devices…</div>
         </div>
       </details>
     </section>
@@ -90,32 +90,83 @@
     </section>
   </main>
 
-  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-exp11-roku-bundled') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-auto-discovery') }}"></script>
   <script>
     (() => {
-      const lanButton = document.getElementById("guideLanTestBtn");
-      const rokuButton = document.getElementById("guideRokuTestBtn");
-      const rokuHost = document.getElementById("guideRokuHost");
-      const castRelay = document.getElementById("guideCastRelay");
-      let attempts = 0;
+      const castButton = document.getElementById("guideCastBtn");
+      const rokuButton = document.getElementById("guideRokuBtn");
 
-      const runAutomaticDiagnostics = () => {
-        const relay = String(castRelay?.textContent || "").trim();
-        const relayReady = Boolean(relay)
-          && relay !== "detecting…"
-          && relay !== "LAN relay not configured"
-          && relay !== "LAN relay unavailable";
+      function clearRokuDiscovery(message) {
+        guideState.roku.host = "";
+        guideState.roku.deviceName = "Roku TV";
+        guideEls.rokuHost.value = "";
+        localStorage.removeItem("m3u-guide-roku-host");
+        rokuButton.classList.add("d-none");
+        rokuButton.disabled = true;
+        rokuButton.title = "";
+        guideEls.rokuStatus.textContent = message || "No Roku found on the local subnet.";
+      }
 
-        if (!relayReady && attempts++ < 50) {
-          window.setTimeout(runAutomaticDiagnostics, 100);
+      function useDiscoveredRoku(device) {
+        const host = String(device?.host || "").trim();
+        if (!host) return;
+        guideState.roku.host = host;
+        guideState.roku.deviceName = device?.name || "Roku TV";
+        guideEls.rokuHost.value = host;
+        localStorage.setItem("m3u-guide-roku-host", host);
+        updateRokuControls(`Found ${guideState.roku.deviceName}${device?.model ? ` · ${device.model}` : ""} at ${host}.`);
+        rokuButton.classList.remove("d-none");
+        rokuButton.title = `${guideState.roku.deviceName} · ${host}`;
+      }
+
+      async function discoverRoku() {
+        try {
+          const response = await fetch(`/api/guide/roku/discover?_=${Date.now()}`, {cache: "no-store"});
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || "Roku discovery failed.");
+          const devices = Array.isArray(data.devices) ? data.devices : [];
+          if (!devices.length) {
+            clearRokuDiscovery(data.warning || `No Roku found${data.subnet ? ` on ${data.subnet}` : ""}.`);
+            return;
+          }
+          const savedHost = localStorage.getItem("m3u-guide-roku-host") || "";
+          useDiscoveredRoku(devices.find(device => device.host === savedHost) || devices[0]);
+        } catch (error) {
+          clearRokuDiscovery(`Roku discovery failed: ${error?.message || error}.`);
+          console.error("Automatic Roku discovery failed", error);
+        }
+      }
+
+      function applyCastAvailability(state) {
+        if (!window.cast?.framework || !guideState.cast.context) return false;
+        const castState = state || guideState.cast.context.getCastState?.();
+        const available = Boolean(castState) && castState !== cast.framework.CastState.NO_DEVICES_AVAILABLE;
+        castButton.classList.toggle("d-none", !available);
+        if (available) {
+          castButton.title = "Google Cast receiver available";
+          updateCastStatus();
+        } else {
+          castButton.title = "";
+          guideEls.castStatus.textContent = "No Google Cast receivers found.";
+        }
+        return true;
+      }
+
+      function attachCastDiscovery(attempt) {
+        const count = Number(attempt || 0);
+        if (window.cast?.framework && guideState.cast.context) {
+          applyCastAvailability();
+          guideState.cast.context.addEventListener(
+            cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+            event => applyCastAvailability(event.castState)
+          );
           return;
         }
+        if (count < 100) window.setTimeout(() => attachCastDiscovery(count + 1), 100);
+      }
 
-        if (relayReady && lanButton && !lanButton.disabled) lanButton.click();
-        if (String(rokuHost?.value || "").trim() && rokuButton && !rokuButton.disabled) rokuButton.click();
-      };
-
-      runAutomaticDiagnostics();
+      discoverRoku();
+      attachCastDiscovery(0);
     })();
   </script>
   <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
