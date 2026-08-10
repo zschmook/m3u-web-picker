@@ -129,10 +129,17 @@ _guide_validation = import_module(f"{__name__}.guide_validation")
 _install(_guide_validation, ("_local_xml_name", "_xmltv_index", "_playlist_tvg_ids", "validate_guide_exports"))
 
 _schedule_refresh = import_module(f"{__name__}.schedule_refresh")
-_install(_schedule_refresh, ("refresh_schedule_api_if_due", "refresh_schedule_api_if_due_async"))
+_install(
+    _schedule_refresh,
+    (
+        "refresh_schedule_api_if_due",
+        "refresh_schedule_api_if_due_async",
+        "schedule_api_refresh_health",
+    ),
+)
 
 _scan = import_module(f"{__name__}.scan")
 _install(_scan, ("scan_channels",))
 
 _status = import_module(f"{__name__}.status")
-_install(_status, ("status_payload",))
+_install(_status, ("status_payload", "schedule_api_status_payload"))
