@@ -13,6 +13,7 @@ changing callers.
 """
 
 from pathlib import Path
+from importlib import import_module
 
 _LEGACY_SOURCE = Path(__file__).resolve().parent.parent / "sports.py"
 exec(compile(_LEGACY_SOURCE.read_text(encoding="utf-8"), str(_LEGACY_SOURCE), "exec"), globals(), globals())
@@ -23,14 +24,14 @@ def _install(module, names: tuple[str, ...]) -> None:
         globals()[name] = getattr(module, name)
 
 
-from . import storage as _storage  # noqa: E402
-from . import numbering as _numbering  # noqa: E402
-from . import scheduling as _scheduling  # noqa: E402
-from . import scan_state as _scan_state  # noqa: E402
-from . import catalog as _catalog  # noqa: E402
-from . import generated as _generated  # noqa: E402
-from . import scan as _scan  # noqa: E402
-from . import schedule_refresh as _schedule_refresh  # noqa: E402
+_storage = import_module(f"{__name__}.storage")
+_numbering = import_module(f"{__name__}.numbering")
+_scheduling = import_module(f"{__name__}.scheduling")
+_scan_state = import_module(f"{__name__}.scan_state")
+_catalog = import_module(f"{__name__}.catalog")
+_generated = import_module(f"{__name__}.generated")
+_scan = import_module(f"{__name__}.scan")
+_schedule_refresh = import_module(f"{__name__}.schedule_refresh")
 
 _install(
     _storage,
