@@ -19,13 +19,17 @@ def index():
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=schedule-api-health-1"></script>\n</body>',
+        '<script src="/static/js/experiments_ui.js?v=schedule-api-health-2"></script>\n</body>',
     )
 
 
 @app.get("/guide")
 def guide():
-    return render_template("guide.html")
+    html = render_template("guide.html")
+    return html.replace(
+        "</body>",
+        '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n</body>',
+    )
 
 
 @app.get("/user-guide")
