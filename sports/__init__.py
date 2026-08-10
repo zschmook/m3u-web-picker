@@ -30,6 +30,8 @@ _scheduling = import_module(f"{__name__}.scheduling")
 _scan_state = import_module(f"{__name__}.scan_state")
 _catalog = import_module(f"{__name__}.catalog")
 _generated = import_module(f"{__name__}.generated")
+_rules = import_module(f"{__name__}.rules")
+_feeds = import_module(f"{__name__}.feeds")
 _scan = import_module(f"{__name__}.scan")
 _schedule_refresh = import_module(f"{__name__}.schedule_refresh")
 
@@ -113,6 +115,29 @@ _install(
         "generated_rows",
         "generated_stream_target",
         "generated_channel_payloads",
+    ),
+)
+_install(
+    _rules,
+    (
+        "_conference_team_map",
+        "_conference_matches",
+        "_build_rule_index",
+        "_matching_rules",
+        "_explicit_team_rules",
+        "_select_controlling_rule",
+    ),
+)
+_install(
+    _feeds,
+    (
+        "_provider_priority",
+        "_team_feed_index",
+        "_team_feeds",
+        "_feed_type",
+        "_feed_label",
+        "_preferred_feed_logo",
+        "_build_feeds",
     ),
 )
 _install(_scan, ("scan_channels",))
