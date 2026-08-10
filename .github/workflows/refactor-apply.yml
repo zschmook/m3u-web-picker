@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - experiments-refacor
+  pull_request:
+    branches:
+      - experiments
 
 permissions:
   contents: write
@@ -15,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: experiments-refacor
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
