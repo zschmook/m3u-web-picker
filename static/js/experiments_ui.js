@@ -27,8 +27,11 @@
     if (!entry.enabled && !api.enabled) {
       return {code: "disabled", label: "Disabled"};
     }
-    if (entry.last_fetch_at) {
+    if (entry.cache_current) {
       return {code: "cached", label: "Cached"};
+    }
+    if (entry.last_fetch_at) {
+      return {code: "stale", label: "Stale cache"};
     }
     return {code: "no_cache", label: "No successful cache"};
   }
@@ -56,7 +59,7 @@
     const supplied = api.dataset_summary || {};
     return {
       planned: Number(supplied.planned ?? entries.length),
-      cached: Number(supplied.cached ?? entries.filter(entry => Boolean(entry.last_fetch_at)).length),
+      cached: Number(supplied.cached ?? entries.filter(entry => Boolean(entry.cache_current)).length),
       issues: Number(
         supplied.issues ?? entries.filter(entry => {
           const code = datasetStatus(entry, api).code;
@@ -178,7 +181,7 @@
 
     const bits = [
       "API key saved ✓",
-      `${summary.cached} of ${summary.planned} dataset${summary.planned === 1 ? "" : "s"} cached`
+      `${summary.cached} of ${summary.planned} dataset${summary.planned === 1 ? "" : "s"} current`
     ];
     if (summary.issues) bits.push(`${summary.issues} need attention`);
     if (api.last_fetch_at) bits.push(`Last success ${formatApiTimestamp(api.last_fetch_at)}`);
@@ -196,14 +199,14 @@
     if (issueEntries.length) {
       const labels = issueEntries.map(entry => entry.scope || entry.id).filter(Boolean);
       health.className = "schedule-api-health small mt-1 text-warning";
-      health.textContent = `${labels.join(", ")} ${issueEntries.length === 1 ? "has" : "have"} a refresh problem. Cached data is kept when available; otherwise that sport falls back to provider/EPG matching.`;
+      health.textContent = `${labels.join(", ")} ${issueEntries.length === 1 ? "needs" : "need"} a current schedule refresh. Cached data is kept when usable; otherwise that sport falls back to provider/EPG matching.`;
     } else if (noCacheEntries.length) {
       const labels = noCacheEntries.map(entry => entry.scope || entry.id).filter(Boolean);
       health.className = "schedule-api-health small mt-1 text-warning";
       health.textContent = `${labels.join(", ")} ${noCacheEntries.length === 1 ? "has" : "have"} no successful API cache yet. Provider/EPG matching remains active until a refresh succeeds.`;
     } else {
       health.className = "schedule-api-health small mt-1 text-success";
-      health.textContent = "Every planned API-backed dataset has a successful cache.";
+      health.textContent = "Every planned API-backed dataset has a current cache for the configured event window.";
     }
 
     syncScheduleApiSaveButton();
@@ -219,12 +222,21 @@
       const state = datasetStatus(entry, api);
       const lastUpdated = entry.last_fetch_at ? formatApiTimestamp(entry.last_fetch_at) : "Never";
       const cacheCount = Number(entry.cached_event_count || 0);
-      const cache = entry.last_fetch_at ? `${cacheCount.toLocaleString()} games` : "No cache";
+      let cache = "No cache";
+      if (entry.last_fetch_at) {
+        cache = `${cacheCount.toLocaleString()} games`;
+        if (!entry.cache_current) cache += " · stale";
+      }
       const details = [];
       if (entry.last_error) details.push(entry.last_error);
       if (entry.reference_error) details.push(entry.reference_error);
       if (entry.last_attempt_at && ["error", "stale", "partial"].includes(state.code)) {
         details.push(`Last attempt ${formatApiTimestamp(entry.last_attempt_at)}`);
+      }
+      const requiredCount = Array.isArray(entry.required_cache_dates) ? entry.required_cache_dates.length : 0;
+      const currentCount = Array.isArray(entry.current_cache_dates) ? entry.current_cache_dates.length : 0;
+      if (requiredCount > 1 && currentCount < requiredCount) {
+        details.push(`Current window cache ${currentCount}/${requiredCount} dates`);
       }
       const detailHtml = details.length
         ? `<div class="schedule-api-row-detail">${details.map(value => escapeHtml(value)).join(" · ")}</div>`
