@@ -3,7 +3,7 @@ from __future__ import annotations
 """Sports Automation compatibility facade.
 
 The pre-refactor implementation remains in the repository root as ``sports.py``
-while behavior is moved into focused modules.  Executing that implementation in
+while behavior is moved into focused modules. Executing that implementation in
 this package namespace preserves the long-standing ``sports.<name>`` surface —
 including tests and callers that monkey-patch private helpers — while individual
 concerns below replace the legacy definitions one at a time.
@@ -29,6 +29,7 @@ from . import scheduling as _scheduling  # noqa: E402
 from . import scan_state as _scan_state  # noqa: E402
 from . import catalog as _catalog  # noqa: E402
 from . import generated as _generated  # noqa: E402
+from . import scan as _scan  # noqa: E402
 
 _install(
     _storage,
@@ -112,3 +113,4 @@ _install(
         "generated_channel_payloads",
     ),
 )
+_install(_scan, ("scan_channels",))
