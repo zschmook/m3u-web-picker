@@ -120,7 +120,7 @@ def register_sports_routes(app):
     @app.post("/api/sports/scan")
     def api_sports_scan():
         try:
-            result = core.run_master_update(trigger="manual")
+            result = core.run_sports_scan(trigger="manual")
         except core.SportsScanError as exc:
             return jsonify(error=str(exc), sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH))), 409
         except Exception as exc:
