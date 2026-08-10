@@ -172,3 +172,79 @@ def generated_channel_payloads(db_path: Path | str) -> list[dict]:
             }
         )
     return output
+
+
+def publish_generated(
+    db_path: Path | str,
+    generated: list[dict],
+    prepared_epg: list[tuple[Path, Path]],
+    generated_at: str,
+) -> None:
+    """Atomically replace generated rows and prepared guide exports."""
+    installed_epg: list[tuple[Path, Path | None]] = []
+    with closing(_s._connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("DELETE FROM sports_generated")
+            for item in generated:
+                conn.execute(
+                    """
+                    INSERT INTO sports_generated
+                        (channel_key, source_channel_key, event_key, league_id,
+                         display_name, subtitle, feed_type, assigned_number,
+                         group_title, url, tvg_id, source_tvg_id, tvg_logo, raw_json,
+                         event_title, event_start, event_end, is_replay,
+                         epg_programme_json, generated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item["channel_key"],
+                        item["source_channel_key"],
+                        item["event_key"],
+                        item["league_id"],
+                        item["display_name"],
+                        item["subtitle"],
+                        item["feed_type"],
+                        item["assigned_number"],
+                        item["group_title"],
+                        item["url"],
+                        item["tvg_id"],
+                        item["source_tvg_id"],
+                        item["tvg_logo"],
+                        _s.json.dumps(item["raw"]),
+                        item["event_title"],
+                        item["event_start"],
+                        item["event_end"],
+                        1 if item["is_replay"] else 0,
+                        _s.json.dumps(item.get("epg_programme") or {}),
+                        generated_at,
+                    ),
+                )
+
+            for temp_path, destination in prepared_epg:
+                backup_path = None
+                if destination.exists():
+                    backup_path = destination.with_name(destination.name + ".previous")
+                    backup_path.unlink(missing_ok=True)
+                    destination.replace(backup_path)
+                try:
+                    temp_path.replace(destination)
+                except Exception:
+                    if backup_path and backup_path.exists():
+                        backup_path.replace(destination)
+                    raise
+                installed_epg.append((destination, backup_path))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            for destination, backup_path in reversed(installed_epg):
+                destination.unlink(missing_ok=True)
+                if backup_path and backup_path.exists():
+                    backup_path.replace(destination)
+            raise
+        finally:
+            for temp_path, _destination in prepared_epg:
+                temp_path.unlink(missing_ok=True)
+            for _destination, backup_path in installed_epg:
+                if backup_path:
+                    backup_path.unlink(missing_ok=True)
