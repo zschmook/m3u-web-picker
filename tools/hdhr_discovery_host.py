@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 import socket
 import struct
+import sys
 import threading
 
-from playback.hdhr_protocol import (
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from playback.hdhr_protocol import (  # noqa: E402
     CONTROL_PORT,
     DISCOVER_PORT,
     TAG_GETSET_NAME,
@@ -20,6 +27,7 @@ from playback.hdhr_protocol import (
     getset_reply_error,
     getset_reply_value,
     open_frame,
+    parse_device_id,
 )
 
 
@@ -116,7 +124,6 @@ def _handle_control_connection(conn: socket.socket, *, model: str, tuner_count: 
                 if value is None:
                     conn.sendall(getset_reply_error("unknown variable"))
                     continue
-                # Minimal compatibility for hdhomerun_config: echo supported sets.
                 conn.sendall(getset_reply_value(requested_value if requested_value is not None else value))
 
 
@@ -168,8 +175,6 @@ def main() -> None:
         default=os.environ.get("M3U_HDHR_MODEL_NUMBER", "HDHR5-4US"),
     )
     args = parser.parse_args()
-
-    from playback.hdhr_protocol import parse_device_id
 
     device_id = parse_device_id(args.device_id)
     tuner_count = max(1, min(int(args.tuners), 8))
