@@ -4,6 +4,7 @@ import atexit
 import os
 from flask import Flask, render_template, send_from_directory
 
+import hdhr_config
 from api import register_routes
 from api.hdhr_discovery import start_hdhr_discovery, stop_hdhr_discovery
 from core import DEV_PORT, PORT
@@ -22,7 +23,7 @@ def index():
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=schedule-api-health-2"></script>\n</body>',
+        '<script src="/static/js/experiments_ui.js?v=hdhr-support-toggle-1"></script>\n</body>',
     )
 
 
@@ -67,9 +68,10 @@ if __name__ == "__main__":
 
     # In debug mode Werkzeug starts a reloader parent and then the real serving
     # child. Bind UDP 65001 only in the serving process so discovery has one
-    # authoritative responder instead of two competing threads.
+    # authoritative responder instead of two competing threads. The responder
+    # also follows the persisted HDHomeRun support switch at runtime.
     serving_process = (not args.dev) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
-    if serving_process and start_hdhr_discovery():
+    if serving_process and hdhr_config.is_enabled() and start_hdhr_discovery():
         atexit.register(stop_hdhr_discovery)
 
     app.run(
