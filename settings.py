@@ -35,6 +35,11 @@ class AppSettings:
     cast_hls_dir: Path
     lan_host: str
     external_port: int
+    hdhr_device_id: str
+    hdhr_device_auth: str
+    hdhr_tuner_count: int
+    hdhr_friendly_name: str
+    hdhr_model_number: str
 
 
 def load_settings() -> AppSettings:
@@ -59,6 +64,11 @@ def load_settings() -> AppSettings:
         cast_hls_dir=cast_hls_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
         external_port=_env_int("M3U_EXTERNAL_PORT", 1000),
+        hdhr_device_id=str(os.environ.get("M3U_HDHR_DEVICE_ID", "10500009") or "10500009").strip().upper(),
+        hdhr_device_auth=str(os.environ.get("M3U_HDHR_DEVICE_AUTH", "") or "").strip(),
+        hdhr_tuner_count=max(1, _env_int("M3U_HDHR_TUNER_COUNT", 4)),
+        hdhr_friendly_name=str(os.environ.get("M3U_HDHR_FRIENDLY_NAME", "HDHomeRun CONNECT") or "HDHomeRun CONNECT").strip(),
+        hdhr_model_number=str(os.environ.get("M3U_HDHR_MODEL_NUMBER", "HDHR5-4US") or "HDHR5-4US").strip(),
     )
 
 
