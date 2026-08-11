@@ -8,12 +8,15 @@ UDP 1900 on the Mac host, while advertising the normal Docker-hosted HTTP
 facade.
 
 The actual tuner facade, lineup, guide, and media streams remain in Docker.
+The helper polls the app's persisted HDHR support state so the web switch can
+turn LAN advertisements on and off without restarting this process.
 """
 
 from __future__ import annotations
 
 import argparse
 import ipaddress
+import json
 import os
 import select
 import socket
@@ -21,6 +24,7 @@ import struct
 import subprocess
 import sys
 import time
+import urllib.request
 import zlib
 
 
@@ -29,6 +33,7 @@ SSDP_PORT = 1900
 SSDP_MULTICAST_HOST = "239.255.255.250"
 SSDP_MAX_AGE = 1800
 SSDP_ALIVE_INTERVAL = 300.0
+SUPPORT_STATE_POLL_INTERVAL = 2.0
 MAX_PACKET_SIZE = 1460
 
 TYPE_DISCOVER_REQ = 0x0002
@@ -346,6 +351,23 @@ def _configure_ssdp_socket(lan_host: str) -> socket.socket:
     return sock
 
 
+def _remote_support_enabled(base_url: str, timeout: float = 1.5) -> bool | None:
+    """Read the app's HDHR support switch without making network failure a toggle."""
+    request = urllib.request.Request(
+        f"{base_url}/api/hdhr/status",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read(64 * 1024)
+        payload = json.loads(raw.decode("utf-8-sig", errors="replace"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or "enabled" not in payload:
+        return None
+    return bool(payload["enabled"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Answer HDHomeRun and Plex SSDP discovery on the Mac host"
@@ -427,31 +449,59 @@ def main() -> int:
 
     print(
         f"HDHomeRun host discovery listening on UDP {DISCOVERY_PORT}; "
-        f"advertising {base_url} as {device_id:08X} ({args.tuners} tuners)."
+        f"prepared to advertise {base_url} as {device_id:08X} ({args.tuners} tuners)."
     )
     print(
         f"Plex/UPnP SSDP listening on UDP {SSDP_PORT}; "
         f"LOCATION {base_url}/device.xml"
     )
-    print(f"Lineup URL: {base_url}/lineup.json")
+    print(f"Support switch: {base_url}/api/hdhr/status")
     print("Ctrl-C to stop.")
 
     multicast_target = (SSDP_MULTICAST_HOST, SSDP_PORT)
     alive_packet = _ssdp_notify(base_url, device_id)
     byebye_packet = _ssdp_notify(base_url, device_id, "ssdp:byebye")
-    try:
-        ssdp_sock.sendto(alive_packet, multicast_target)
-    except OSError:
-        pass
+    enabled = False
+    next_state_check = 0.0
     next_alive = time.monotonic() + SSDP_ALIVE_INTERVAL
 
     try:
         while True:
-            timeout = max(0.0, min(1.0, next_alive - time.monotonic()))
+            now = time.monotonic()
+            if now >= next_state_check:
+                current = _remote_support_enabled(base_url)
+                if current is not None and current != enabled:
+                    if current:
+                        enabled = True
+                        try:
+                            ssdp_sock.sendto(alive_packet, multicast_target)
+                        except OSError:
+                            pass
+                        next_alive = now + SSDP_ALIVE_INTERVAL
+                        print("HDHomeRun support enabled; LAN discovery is advertising.", flush=True)
+                    else:
+                        try:
+                            ssdp_sock.sendto(byebye_packet, multicast_target)
+                        except OSError:
+                            pass
+                        enabled = False
+                        print("HDHomeRun support disabled; LAN discovery is quiet.", flush=True)
+                next_state_check = now + SUPPORT_STATE_POLL_INTERVAL
+
+            timeout = max(
+                0.0,
+                min(
+                    1.0,
+                    next_state_check - now,
+                    next_alive - now if enabled else 1.0,
+                ),
+            )
             readable, _, _ = select.select([hdhr_sock, ssdp_sock], [], [], timeout)
             for ready in readable:
                 if ready is hdhr_sock:
                     data, remote = hdhr_sock.recvfrom(MAX_PACKET_SIZE)
+                    if not enabled:
+                        continue
                     remote_host = str(remote[0] or "")
                     try:
                         address = ipaddress.ip_address(remote_host)
@@ -468,6 +518,8 @@ def main() -> int:
                     continue
 
                 data, remote = ssdp_sock.recvfrom(65535)
+                if not enabled:
+                    continue
                 remote_host = str(remote[0] or "")
                 requested_st = _ssdp_search_target(data)
                 if not requested_st:
@@ -487,19 +539,21 @@ def main() -> int:
                     flush=True,
                 )
 
-            if time.monotonic() >= next_alive:
+            now = time.monotonic()
+            if enabled and now >= next_alive:
                 try:
                     ssdp_sock.sendto(alive_packet, multicast_target)
                 except OSError:
                     pass
-                next_alive = time.monotonic() + SSDP_ALIVE_INTERVAL
+                next_alive = now + SSDP_ALIVE_INTERVAL
     except KeyboardInterrupt:
         print("\nHDHomeRun host discovery stopped.")
     finally:
-        try:
-            ssdp_sock.sendto(byebye_packet, multicast_target)
-        except OSError:
-            pass
+        if enabled:
+            try:
+                ssdp_sock.sendto(byebye_packet, multicast_target)
+            except OSError:
+                pass
         ssdp_sock.close()
         hdhr_sock.close()
     return 0
