@@ -369,11 +369,19 @@ def _event_from_text(
         or next((tag for tag in sport_tags if tag != "olympics"), "")
         or (sport_tags[0] if sport_tags else "")
     )
-    cleaned, parsed_start = _extract_event_datetime(
-        _strip_provider_prefix(text),
-        settings,
-        now,
-    )
+    stripped_text = _strip_provider_prefix(text)
+    if forced_start is not None:
+        # XMLTV rows and historical generated anchors already carry an
+        # authoritative timestamp. Do not reinterpret incidental title text as
+        # an embedded provider time; malformed tokens such as "30pm" in an old
+        # generated title must not be able to abort the next scan.
+        cleaned, parsed_start = stripped_text, None
+    else:
+        cleaned, parsed_start = _extract_event_datetime(
+            stripped_text,
+            settings,
+            now,
+        )
     if forced_start:
         timing_source = "xmltv"
     elif parsed_start:
