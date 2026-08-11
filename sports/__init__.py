@@ -75,6 +75,13 @@ _install(
     ),
 )
 
+# API-NFL/API-NCAA use a stricter request envelope than the already-working
+# baseball adapter.  Install the compatibility fetcher last so callers keep the
+# historical sports._fetch_schedule_api_dataset_date surface while American
+# football requests avoid urllib's default User-Agent and a guessed season.
+_schedule_api_requests = import_module(f"{__name__}.schedule_api_requests")
+_install(_schedule_api_requests, ("_fetch_schedule_api_dataset_date",))
+
 _epg_io = import_module(f"{__name__}.epg_io")
 _install(_epg_io, ("derive_xmltv_url", "refresh_epg_cache", "download_xmltv_bytes", "_parse_xmltv_time", "_iterparse_xmltv"))
 
