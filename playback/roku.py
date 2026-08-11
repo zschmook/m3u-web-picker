@@ -123,6 +123,25 @@ def _host_from_location(location: str) -> str:
     return normalize_host(parsed.hostname)
 
 
+def _configure_ssdp_interface(sock: socket.socket, advertised_lan_host: str) -> None:
+    """Prefer the advertised LAN interface when local, otherwise use routing defaults.
+
+    Docker Desktop normally sees a container-side interface rather than the Mac's
+    advertised LAN address. Failing to bind that host must not disable SSDP; the
+    multicast send can still use the container's default route before we fall
+    back to the bounded ECP scan.
+    """
+    try:
+        sock.bind((advertised_lan_host, 0))
+    except OSError:
+        sock.bind(("", 0))
+        return
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(advertised_lan_host))
+    except OSError:
+        pass
+
+
 def _discover_ssdp(lan_host: str, *, timeout: float = 1.25) -> list[dict[str, str]]:
     local = ipaddress.ip_address(str(lan_host or "").strip())
     if local.version != 4 or not (local.is_private or local.is_link_local):
@@ -130,9 +149,8 @@ def _discover_ssdp(lan_host: str, *, timeout: float = 1.25) -> list[dict[str, st
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     try:
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(str(local)))
         sock.settimeout(0.2)
-        sock.bind((str(local), 0))
+        _configure_ssdp_interface(sock, str(local))
         sock.sendto(_SSDP_REQUEST, _SSDP_TARGET)
 
         deadline = time.monotonic() + max(0.2, float(timeout))
