@@ -115,16 +115,16 @@ def _handle_control_connection(conn: socket.socket, *, model: str, tuner_count: 
                 except ValueError:
                     return
                 if frame.packet_type != TYPE_GETSET_REQ:
-                    conn.sendall(getset_reply_error("unsupported request"))
+                    conn.sendall(getset_reply_error("", "unsupported request"))
                     continue
 
                 name = first_text(frame, TAG_GETSET_NAME) or ""
                 requested_value = first_text(frame, TAG_GETSET_VALUE)
                 value = _control_value(name, model=model, tuner_count=tuner_count)
                 if value is None:
-                    conn.sendall(getset_reply_error("unknown variable"))
+                    conn.sendall(getset_reply_error(name, "unknown variable"))
                     continue
-                conn.sendall(getset_reply_value(requested_value if requested_value is not None else value))
+                conn.sendall(getset_reply_value(name, requested_value if requested_value is not None else value))
 
 
 def serve_tcp(*, bind: str, model: str, tuner_count: int) -> None:
