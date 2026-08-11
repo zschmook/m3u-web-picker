@@ -86,14 +86,54 @@ def _stream_channel(guide_number: str, tuner_index: int | None = None) -> Respon
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     response.headers["X-Accel-Buffering"] = "no"
-    response.headers["Connection"] = "close"
     return response
+
+
+def _device_xml() -> str:
+    device = hdhomerun.device_metadata(_base_url())
+    base = str(device["BaseURL"])
+    friendly = html.escape(str(device["FriendlyName"]))
+    model = html.escape(str(device["ModelNumber"]))
+    device_id = html.escape(str(device["DeviceID"]))
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <URLBase>{html.escape(base)}/</URLBase>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+    <friendlyName>{friendly}</friendlyName>
+    <manufacturer>Silicondust</manufacturer>
+    <manufacturerURL>https://www.silicondust.com/</manufacturerURL>
+    <modelDescription>HDHomeRun</modelDescription>
+    <modelName>{model}</modelName>
+    <modelNumber>{model}</modelNumber>
+    <serialNumber>{device_id}</serialNumber>
+    <UDN>uuid:{device_id}</UDN>
+  </device>
+</root>
+"""
 
 
 def register_hdhomerun_routes(app):
     @app.get("/discover.json")
     def hdhr_discover_json():
         return no_cache(jsonify(hdhomerun.device_metadata(_base_url())))
+
+    @app.get("/lineup_status.json")
+    def hdhr_lineup_status():
+        return no_cache(jsonify(
+            ScanInProgress=0,
+            ScanPossible=0,
+            Source="Antenna",
+            SourceList=["Antenna"],
+        ))
+
+    @app.get("/device.xml")
+    @app.get("/capability")
+    def hdhr_device_xml():
+        response = Response(_device_xml(), content_type="application/xml; charset=utf-8")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
     @app.get("/lineup.json")
     def hdhr_lineup_json():
