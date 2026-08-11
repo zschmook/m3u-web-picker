@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 from flask import Response, jsonify, request
 
 import core
+import hdhr_config
 import sports
 from media import mpegts
 from .http import no_cache
@@ -17,6 +18,10 @@ HDHR_DEVICE_AUTH = "m3u-web-picker"
 HDHR_FRIENDLY_NAME = "M3U Web Picker"
 HDHR_MODEL = "HDTC-2US"
 HDHR_TUNER_COUNT = 2
+# Temporary interoperability marker so Jellyfin can distinguish channels
+# imported through the HDHomeRun facade from the same channels imported via M3U.
+# This affects only HDHomeRun GuideName values; source channel names are untouched.
+HDHR_GUIDE_NAME_SUFFIX = " [HDHR]"
 # Telly uses the HDHomeRun EXTEND ATSC personality specifically for Plex
 # compatibility. Keep the same firmware family while retaining our own ID.
 HDHR_FIRMWARE_NAME = "hdhomeruntc_atsc"
@@ -45,6 +50,28 @@ def _is_plex_request() -> bool:
     return any(str(name).lower().startswith("x-plex-") for name in request.headers.keys())
 
 
+def _hdhr_guide_name(name: str) -> str:
+    value = str(name or "").strip()
+    if not value or value.endswith(HDHR_GUIDE_NAME_SUFFIX):
+        return value
+    return f"{value}{HDHR_GUIDE_NAME_SUFFIX}"
+
+
+def _support_payload() -> dict:
+    base = _base_url()
+    return {
+        "enabled": hdhr_config.is_enabled(),
+        "device_id": HDHR_DEVICE_ID,
+        "friendly_name": HDHR_FRIENDLY_NAME,
+        "model": HDHR_MODEL,
+        "tuner_count": HDHR_TUNER_COUNT,
+        "base_url": base,
+        "discover_url": f"{base}/discover.json",
+        "lineup_url": f"{base}/lineup.json",
+        "guide_name_suffix": HDHR_GUIDE_NAME_SUFFIX.strip(),
+    }
+
+
 def _resolve_play_url(play_url: str) -> str:
     value = str(play_url or "").split("?", 1)[0].strip()
     manual = re.fullmatch(r"/guide/play/manual/([^/]+)", value)
@@ -67,7 +94,7 @@ def _lineup_rows() -> list[dict]:
         output.append(
             {
                 "GuideNumber": number,
-                "GuideName": name,
+                "GuideName": _hdhr_guide_name(name),
                 # Native HDHomeRun HTTP live-TV URL shape. Plex-compatible
                 # emulators use this form and may append their own query string.
                 "URL": f"{base}/auto/v{number}",
@@ -102,12 +129,15 @@ def _device_xml_response() -> Response:
 def register_hdhr_routes(app):
     @app.before_request
     def hdhr_http_trace_and_plex_root_probe():
+        hdhr_endpoint = request.path.startswith(_HDHR_HTTP_PREFIXES)
         plex_root_probe = (
             request.path == "/"
             and request.method in {"GET", "HEAD"}
             and _is_plex_request()
         )
-        if request.path.startswith(_HDHR_HTTP_PREFIXES) or plex_root_probe:
+        if (hdhr_endpoint or plex_root_probe) and not hdhr_config.is_enabled():
+            return no_cache(Response(status=404))
+        if hdhr_endpoint or plex_root_probe:
             print(
                 "HDHomeRun HTTP "
                 f"{request.method} {request.path} "
@@ -143,6 +173,28 @@ def register_hdhr_routes(app):
             response.headers["Timing-Allow-Origin"] = "*"
             response.headers["Vary"] = "Origin, Access-Control-Request-Private-Network"
         return response
+
+    @app.get("/api/hdhr/status")
+    def hdhr_support_status():
+        return no_cache(jsonify(_support_payload()))
+
+    @app.patch("/api/hdhr/settings")
+    def hdhr_support_settings():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or type(payload.get("enabled")) is not bool:
+            return jsonify(error="enabled must be true or false"), 400
+
+        enabled = hdhr_config.set_enabled(payload["enabled"])
+        # The in-container responder is useful on host-networked Linux and for
+        # tests. Docker Desktop may still require tools/hdhr_discovery_host.py;
+        # that host helper polls /api/hdhr/status and follows this same switch.
+        from .hdhr_discovery import start_hdhr_discovery, stop_hdhr_discovery
+
+        if enabled:
+            start_hdhr_discovery()
+        else:
+            stop_hdhr_discovery()
+        return no_cache(jsonify(_support_payload()))
 
     @app.get("/discover.json")
     def hdhr_discover():
