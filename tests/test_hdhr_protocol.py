@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import unittest
 
 from playback.hdhr_protocol import (
@@ -12,6 +13,7 @@ from playback.hdhr_protocol import (
     TAG_GETSET_NAME,
     TAG_GETSET_VALUE,
     TAG_LINEUP_URL,
+    TAG_MULTI_TYPE,
     TAG_TUNER_COUNT,
     TYPE_DISCOVER_REQ,
     TYPE_DISCOVER_RPY,
@@ -24,6 +26,7 @@ from playback.hdhr_protocol import (
     open_frame,
     parse_device_id,
     seal_frame,
+    tlv,
     tlv_u32,
     validate_device_id,
 )
@@ -68,6 +71,19 @@ class HdHomeRunProtocolTests(unittest.TestCase):
         self.assertTrue(discovery_request_matches(open_frame(wildcard), device_id))
         self.assertTrue(discovery_request_matches(open_frame(exact), device_id))
         self.assertFalse(discovery_request_matches(open_frame(wrong), device_id))
+
+    def test_modern_multi_type_request_requires_tuner_or_wildcard(self):
+        device_id = 0x10500009
+        tuner_and_storage = seal_frame(
+            TYPE_DISCOVER_REQ,
+            tlv(TAG_MULTI_TYPE, struct.pack(">II", DEVICE_TYPE_TUNER, 0x00000005)),
+        )
+        storage_only = seal_frame(
+            TYPE_DISCOVER_REQ,
+            tlv(TAG_MULTI_TYPE, struct.pack(">I", 0x00000005)),
+        )
+        self.assertTrue(discovery_request_matches(open_frame(tuner_and_storage), device_id))
+        self.assertFalse(discovery_request_matches(open_frame(storage_only), device_id))
 
     def test_discovery_reply_advertises_http_surface(self):
         packet = build_discovery_reply(
