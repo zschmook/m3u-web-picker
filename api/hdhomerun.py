@@ -63,6 +63,13 @@ def _stream_channel(guide_number: str, tuner_index: int | None = None) -> Respon
     if not target:
         return _hdhr_error("Unknown Channel", 404, 801)
 
+    # HTTP clients often probe a live URL with HEAD first. Do not consume a tuner
+    # lease for a request that will never iterate the MPEG-TS response body.
+    if request.method == "HEAD":
+        response = Response(status=200, content_type="video/mp2t")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
     lease = hdhomerun.TUNERS.acquire(tuner_index)
     if lease is None:
         if tuner_index is not None:
