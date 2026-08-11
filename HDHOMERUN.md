@@ -12,15 +12,20 @@ The discovery daemon intentionally runs on the Mac rather than inside Docker Des
 ## What is implemented
 
 - Binary HDHomeRun discovery request parsing and reply framing on UDP 65001.
+- Legacy single-device-type and current multi-device-type discovery request handling.
 - SiliconDust-compatible frame CRC handling and TLV encoding.
 - A device ID that passes the published HDHomeRun device-ID self-check (`10500009` by default).
 - `/discover.json`.
+- `/lineup_status.json`.
+- `/device.xml` and `/capability` compatibility metadata.
 - `/lineup.json`, `/lineup.xml`, and `/lineup.m3u`.
 - `/auto/v<GuideNumber>` automatic tuner allocation.
 - `/tunerN/v<GuideNumber>` explicit tuner allocation.
 - Direct H.264/AAC MPEG-TS output rather than redirecting the app to the IPTV provider.
+- HEAD probing of tuner URLs without consuming a tuner lease.
 - A four-tuner pool by default.
 - Minimal TCP 65001 GET/SET compatibility for basic `hdhomerun_config` queries.
+- Discovery/control request logging in the host helper so a failed phone test tells us which protocol boundary it reached.
 - No fabricated `DeviceAuth`. `M3U_HDHR_DEVICE_AUTH` is blank unless a legitimate value is explicitly supplied.
 
 ## Rebuild the experimental branch
@@ -37,7 +42,7 @@ docker compose ps
 
 ## Start host-side HDHomeRun discovery
 
-Run this in a second Terminal and leave it in the foreground for the first tests so incoming discovery activity is visible:
+Run this in a second Terminal and leave it in the foreground for the first tests so incoming discovery/control activity is visible:
 
 ```bash
 python3 tools/hdhr_discovery_host.py --base-url http://10.0.0.22:1000
@@ -45,7 +50,7 @@ python3 tools/hdhr_discovery_host.py --base-url http://10.0.0.22:1000
 
 If the Mac's LAN IP changes, substitute the current LAN IP and set `M3U_LAN_HOST` to the same address before rebuilding the container.
 
-The helper owns both UDP and TCP port 65001. If startup reports that the address is already in use, find the existing process before retrying rather than starting multiple helpers.
+The helper owns both UDP and TCP port 65001. If startup reports that the address is already in use, find the existing process before retrying rather than starting multiple helpers. If macOS asks whether Python may accept incoming network connections, allow it for this LAN test.
 
 ## Test ladder
 
@@ -61,6 +66,13 @@ Expected basics include:
 - `BaseURL` = `http://10.0.0.22:1000`.
 - `LineupURL` = `http://10.0.0.22:1000/lineup.json`.
 - `TunerCount` = `4` unless overridden.
+
+Also check the compatibility metadata:
+
+```bash
+curl -s http://10.0.0.22:1000/lineup_status.json | python3 -m json.tool
+curl -s http://10.0.0.22:1000/device.xml
+```
 
 ### 2. Lineup
 
@@ -96,7 +108,7 @@ If `hdhomerun_config` is already installed:
 hdhomerun_config discover
 ```
 
-The compatibility device should appear as `10500009` at the Mac's LAN address.
+The compatibility device should appear as `10500009` at the Mac's LAN address. The host helper should simultaneously print the incoming discovery request and the device types requested by the client.
 
 ### 5. SiliconDust control protocol
 
@@ -108,13 +120,13 @@ hdhomerun_config 10500009 get /sys/hwmodel
 hdhomerun_config 10500009 get /sys/version
 ```
 
-This gate is deliberately before the phone app. If the reference client cannot discover/query the device, the mobile app is not a useful debugging target yet.
+The helper logs these GETs too. This gate is deliberately before the phone app. If the reference client cannot discover/query the device, the mobile app is not a useful debugging target yet.
 
 ### 6. Official HDHomeRun phone app
 
 Only after the first five checks work, open the phone app on the same LAN. On iOS, make sure the app has Local Network permission.
 
-If it still refuses the device, capture what happens rather than changing random fields. Useful distinctions are:
+If it still refuses the device, leave the host helper visible and note what it logs. Useful distinctions are:
 
 - no UDP request reaches the host helper;
 - discovery request arrives but the device is not accepted;
