@@ -63,6 +63,9 @@ services:
         source: ./core.py
         target: /app/core.py
       - type: bind
+        source: ./hdhr_config.py
+        target: /app/hdhr_config.py
+      - type: bind
         source: ./sports
         target: /app/sports
       - type: bind
