@@ -83,6 +83,21 @@ class HdHomeRunApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.headers.get("X-HDHomeRun-Error"), "801 Unknown Channel")
 
+    def test_head_probe_does_not_acquire_tuner(self):
+        curated = [{
+            "number": 7,
+            "name": "Test Channel",
+            "play_url": "/guide/play/manual/opaque-token",
+        }]
+        with patch("core.curated_channels_for_guide", return_value=curated), \
+             patch("playback.targets.resolve_play_target", return_value="http://provider.test/live.ts"), \
+             patch("api.hdhomerun.resolve_play_target", return_value="http://provider.test/live.ts"), \
+             patch("api.hdhomerun.hdhomerun.TUNERS.acquire") as acquire:
+            response = self.client.head("/auto/v7")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Content-Type"), "video/mp2t")
+        acquire.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
