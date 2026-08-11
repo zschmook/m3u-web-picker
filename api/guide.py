@@ -78,7 +78,9 @@ def register_guide_routes(app):
     def api_guide_cast_stop():
         data = request.get_json(force=True, silent=True) or {}
         token = str(data.get("token", "") or "")
-        stopped = hls.stop_session(token) if token else bool(hls.stop_all_sessions())
+        # Never use the old stop_all_sessions fallback here: Roku relays share
+        # the same HLS manager and must remain independent from Cast teardown.
+        stopped = hls.stop_session(token) if token else False
         response = jsonify(ok=True, stopped=stopped)
         return no_cache(response)
 
