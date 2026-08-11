@@ -82,6 +82,16 @@ _install(
 _schedule_api_requests = import_module(f"{__name__}.schedule_api_requests")
 _install(_schedule_api_requests, ("_fetch_schedule_api_dataset_date",))
 
+# NCAA conference membership comes from the same API-NFL host and must use the
+# same clean request envelope as games.
+_schedule_api_reference_requests = import_module(
+    f"{__name__}.schedule_api_reference_requests"
+)
+_install(
+    _schedule_api_reference_requests,
+    ("_refresh_ncaa_reference_metadata_if_needed",),
+)
+
 _epg_io = import_module(f"{__name__}.epg_io")
 _install(_epg_io, ("derive_xmltv_url", "refresh_epg_cache", "download_xmltv_bytes", "_parse_xmltv_time", "_iterparse_xmltv"))
 
