@@ -253,7 +253,7 @@ def launch_dev(host: str, media_url: str) -> None:
     value = str(media_url or "").strip()
     if not value.startswith(("http://", "https://")):
         raise ValueError("Roku media URL must be HTTP or HTTPS.")
-    query = urllib.parse.urlencode({"contentID": value, "MediaType": "tvSpecial"})
+    query = urllib.parse.urlencode({"contentId": value, "mediaType": "tvSpecial"})
     _request(host, f"/launch/dev?{query}", method="POST", timeout=5.0)
 
 
