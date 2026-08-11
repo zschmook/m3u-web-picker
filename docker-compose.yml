@@ -9,7 +9,7 @@
 #
 # Open:
 #   http://localhost:1000  (Cast control on this Mac)
-#   http://10.0.0.22:1000  (LAN access / Chromecast/Roku media relay)
+#   http://10.0.0.22:1000  (LAN access / Chromecast/Roku/HDHomeRun media relay)
 #
 # Stop/remove only this experiment:
 #   docker compose down
@@ -37,9 +37,14 @@ services:
       FLASK_DEBUG: "1"
       PYTHONUNBUFFERED: "1"
       M3U_BACKUP_ENABLED: "false"
-      # exp8: the Chromecast/Google TV and Roku fetch HLS from the Mac over the LAN.
+      # Chromecast/Google TV, Roku, and HDHomeRun clients fetch media from the Mac over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
       M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-1000}"
+      M3U_HDHR_DEVICE_ID: "${M3U_HDHR_DEVICE_ID:-10500009}"
+      M3U_HDHR_TUNER_COUNT: "${M3U_HDHR_TUNER_COUNT:-4}"
+      M3U_HDHR_FRIENDLY_NAME: "${M3U_HDHR_FRIENDLY_NAME:-HDHomeRun CONNECT}"
+      M3U_HDHR_MODEL_NUMBER: "${M3U_HDHR_MODEL_NUMBER:-HDHR5-4US}"
+      M3U_HDHR_DEVICE_AUTH: "${M3U_HDHR_DEVICE_AUTH:-}"
       M3U_DATA_DIR: /app/debug-data
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
@@ -60,8 +65,17 @@ services:
         source: ./core.py
         target: /app/core.py
       - type: bind
+        source: ./settings.py
+        target: /app/settings.py
+      - type: bind
         source: ./sports
         target: /app/sports
+      - type: bind
+        source: ./playback
+        target: /app/playback
+      - type: bind
+        source: ./media
+        target: /app/media
       - type: bind
         source: ./backup.py
         target: /app/backup.py
