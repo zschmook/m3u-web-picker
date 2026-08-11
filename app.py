@@ -23,7 +23,8 @@ def index():
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=hdhr-support-toggle-1"></script>\n</body>',
+        '<script src="/static/js/experiments_ui.js?v=hdhr-support-toggle-1"></script>\n'
+        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-1"></script>\n</body>',
     )
 
 
