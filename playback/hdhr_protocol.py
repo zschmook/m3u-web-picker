@@ -22,6 +22,7 @@ TAG_TUNER_COUNT = 0x10
 TAG_LINEUP_URL = 0x27
 TAG_BASE_URL = 0x2A
 TAG_DEVICE_AUTH_STR = 0x2B
+TAG_MULTI_TYPE = 0x2D
 
 DEVICE_TYPE_WILDCARD = 0xFFFFFFFF
 DEVICE_TYPE_TUNER = 0x00000001
@@ -157,6 +158,19 @@ def first_text(frame: Frame, tag: int) -> str | None:
     return None
 
 
+def requested_device_types(frame: Frame) -> tuple[int, ...]:
+    types: list[int] = []
+    for tag, value in frame.tlvs:
+        if tag == TAG_DEVICE_TYPE and len(value) == 4:
+            types.append(struct.unpack(">I", value)[0])
+        elif tag == TAG_MULTI_TYPE and len(value) % 4 == 0:
+            types.extend(
+                struct.unpack(">I", value[offset:offset + 4])[0]
+                for offset in range(0, len(value), 4)
+            )
+    return tuple(types)
+
+
 def build_discovery_reply(*, device_id: int, tuner_count: int, base_url: str, device_auth: str = "") -> bytes:
     device_id = parse_device_id(device_id)
     base = str(base_url or "").rstrip("/")
@@ -174,8 +188,8 @@ def build_discovery_reply(*, device_id: int, tuner_count: int, base_url: str, de
 def discovery_request_matches(frame: Frame, device_id: int) -> bool:
     if frame.packet_type != TYPE_DISCOVER_REQ:
         return False
-    requested_type = first_u32(frame, TAG_DEVICE_TYPE)
-    if requested_type not in {None, DEVICE_TYPE_WILDCARD, DEVICE_TYPE_TUNER}:
+    types = requested_device_types(frame)
+    if types and DEVICE_TYPE_WILDCARD not in types and DEVICE_TYPE_TUNER not in types:
         return False
     requested_id = first_u32(frame, TAG_DEVICE_ID)
     return requested_id in {None, DEVICE_ID_WILDCARD, parse_device_id(device_id)}
