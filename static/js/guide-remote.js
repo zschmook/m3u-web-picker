@@ -20,6 +20,8 @@
     if (button === rokuButton) {
       if (rokuSelect) rokuSelect.disabled = active || remoteTransitionBusy;
       if (rokuRefreshButton) rokuRefreshButton.disabled = active || remoteTransitionBusy;
+      if (guideEls.rokuHost) guideEls.rokuHost.disabled = active || remoteTransitionBusy;
+      if (guideEls.rokuTestBtn) guideEls.rokuTestBtn.disabled = active || remoteTransitionBusy;
     }
   }
 
@@ -161,6 +163,20 @@
 
   rokuRefreshButton?.addEventListener("click", discoverRoku);
 
+  guideEls.rokuHost?.addEventListener("input", () => {
+    if (guideState.roku.active) return;
+    const host = String(guideEls.rokuHost.value || "").trim();
+    if (host) {
+      guideState.roku.host = host;
+      guideState.roku.deviceName = "Roku TV";
+      guideState.roku.deviceKey = host;
+      rokuButton.classList.remove("d-none");
+      rokuButton.title = `Roku · ${host}`;
+    } else if (!discoveredRokus.length) {
+      rokuButton.classList.add("d-none");
+    }
+  });
+
   function applyCastAvailability(state) {
     if (!window.cast?.framework || !guideState.cast.context) return false;
     const castState = state || guideState.cast.context.getCastState?.();
@@ -197,6 +213,8 @@
     }
     if (rokuSelect) rokuSelect.disabled = remoteTransitionBusy || guideState.roku.active;
     if (rokuRefreshButton) rokuRefreshButton.disabled = remoteTransitionBusy || guideState.roku.active;
+    if (guideEls.rokuHost) guideEls.rokuHost.disabled = remoteTransitionBusy || guideState.roku.active;
+    if (guideEls.rokuTestBtn) guideEls.rokuTestBtn.disabled = remoteTransitionBusy || guideState.roku.active;
   }
 
   async function withRemoteTransition(work) {
