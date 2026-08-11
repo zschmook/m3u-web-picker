@@ -9,14 +9,18 @@ from playback.hdhr_protocol import (
     TAG_BASE_URL,
     TAG_DEVICE_ID,
     TAG_DEVICE_TYPE,
+    TAG_GETSET_NAME,
+    TAG_GETSET_VALUE,
     TAG_LINEUP_URL,
     TAG_TUNER_COUNT,
     TYPE_DISCOVER_REQ,
     TYPE_DISCOVER_RPY,
+    TYPE_GETSET_RPY,
     build_discovery_reply,
     discovery_request_matches,
     first_text,
     first_u32,
+    getset_reply_value,
     open_frame,
     parse_device_id,
     seal_frame,
@@ -79,6 +83,12 @@ class HdHomeRunProtocolTests(unittest.TestCase):
         self.assertEqual(first_text(frame, TAG_LINEUP_URL), "http://10.0.0.22:1000/lineup.json")
         tuner_values = [value for tag, value in frame.tlvs if tag == TAG_TUNER_COUNT]
         self.assertEqual(tuner_values, [b"\x04"])
+
+    def test_getset_reply_contains_name_and_value(self):
+        frame = open_frame(getset_reply_value("/sys/model", "hdhomerun5_atsc"))
+        self.assertEqual(frame.packet_type, TYPE_GETSET_RPY)
+        self.assertEqual(first_text(frame, TAG_GETSET_NAME), "/sys/model")
+        self.assertEqual(first_text(frame, TAG_GETSET_VALUE), "hdhomerun5_atsc")
 
 
 if __name__ == "__main__":
