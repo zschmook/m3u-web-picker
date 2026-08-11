@@ -9,6 +9,7 @@ from api.hdhr import (
     HDHR_DEVICE_AUTH,
     HDHR_DEVICE_ID,
     HDHR_FIRMWARE_NAME,
+    HDHR_GUIDE_NAME_SUFFIX,
     HDHR_TUNER_COUNT,
     register_hdhr_routes,
 )
@@ -30,9 +31,14 @@ SAMPLE_CHANNELS = [
 
 class HdHomeRunFacadeTests(unittest.TestCase):
     def setUp(self):
+        self.enabled_patch = patch("api.hdhr.hdhr_config.is_enabled", return_value=True)
+        self.enabled_patch.start()
         self.app = Flask(__name__)
         register_hdhr_routes(self.app)
         self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.enabled_patch.stop()
 
     def test_discover_advertises_manual_http_facade(self):
         response = self.client.get(
@@ -50,6 +56,28 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             payload["LineupURL"],
             "http://10.0.0.22:10000/lineup.json",
         )
+
+    def test_support_status_is_available_to_ui_and_host_helper(self):
+        response = self.client.get(
+            "/api/hdhr/status",
+            base_url="http://10.0.0.22:10000",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["enabled"])
+        self.assertEqual(payload["device_id"], HDHR_DEVICE_ID)
+        self.assertEqual(payload["tuner_count"], HDHR_TUNER_COUNT)
+        self.assertEqual(payload["guide_name_suffix"], HDHR_GUIDE_NAME_SUFFIX.strip())
+
+    def test_disabled_support_hides_hdhr_facade_but_not_status(self):
+        with patch("api.hdhr.hdhr_config.is_enabled", return_value=False):
+            discover = self.client.get("/discover.json")
+            lineup = self.client.get("/lineup.json")
+            status = self.client.get("/api/hdhr/status")
+        self.assertEqual(discover.status_code, 404)
+        self.assertEqual(lineup.status_code, 404)
+        self.assertEqual(status.status_code, 200)
+        self.assertFalse(status.get_json()["enabled"])
 
     def test_discover_matches_hdhomerun_cross_origin_behavior(self):
         response = self.client.get(
@@ -81,7 +109,7 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         self.assertEqual(browser.status_code, 404)
 
     @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
-    def test_lineup_uses_exact_curated_channel_numbers(self, _curated):
+    def test_lineup_uses_exact_curated_channel_numbers_and_marks_hdhr_names(self, _curated):
         response = self.client.get(
             "/lineup.json",
             base_url="http://10.0.0.22:10000",
@@ -93,16 +121,18 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             [
                 {
                     "GuideNumber": "7",
-                    "GuideName": "NBC 10",
+                    "GuideName": "NBC 10 [HDHR]",
                     "URL": "http://10.0.0.22:10000/auto/v7",
                 },
                 {
                     "GuideNumber": "1000",
-                    "GuideName": "Phillies vs Nationals",
+                    "GuideName": "Phillies vs Nationals [HDHR]",
                     "URL": "http://10.0.0.22:10000/auto/v1000",
                 },
             ],
         )
+        self.assertEqual(SAMPLE_CHANNELS[0]["name"], "NBC 10")
+        self.assertEqual(SAMPLE_CHANNELS[1]["name"], "Phillies vs Nationals")
 
     def test_lineup_status_advertises_plex_scan_handshake(self):
         response = self.client.get("/lineup_status.json")
