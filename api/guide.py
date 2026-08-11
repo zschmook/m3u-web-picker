@@ -1,25 +1,12 @@
-import re
-
 from flask import Response, jsonify, redirect, request, send_file
 
 import core
-import sports
 from media import browser, hls
-from settings import load_settings
 from playback import roku
+from playback.sessions import REMOTE_SESSIONS
+from playback.targets import resolve_play_target
+from settings import load_settings
 from .http import json_error, no_cache
-
-
-def _resolve_guide_play_target(play_url: str) -> str:
-    """Resolve a guide-owned opaque play path without trusting arbitrary URLs."""
-    value = str(play_url or "").split("?", 1)[0].strip()
-    manual = re.fullmatch(r"/guide/play/manual/([^/]+)", value)
-    if manual:
-        return core.manual_stream_target(manual.group(1))
-    generated = re.fullmatch(r"/guide/play/sports/(\d+)", value)
-    if generated:
-        return sports.generated_stream_target(core.DB_PATH, int(generated.group(1)))
-    return ""
 
 
 def _guide_media_origin() -> str:
@@ -71,8 +58,7 @@ def register_guide_routes(app):
     @app.post("/api/guide/cast/start")
     def api_guide_cast_start():
         data = request.get_json(force=True, silent=True) or {}
-        play_url = str(data.get("play_url", "") or "")
-        target = _resolve_guide_play_target(play_url)
+        target = resolve_play_target(str(data.get("play_url", "") or ""))
         if not target:
             return json_error("Curated stream not found.", 404)
         try:
@@ -101,14 +87,12 @@ def register_guide_routes(app):
         settings = load_settings()
         lan_host = str(settings.lan_host or "").strip()
         if not lan_host:
-            return no_cache(jsonify(ok=True, devices=[], subnet=""))
+            return no_cache(jsonify(ok=True, devices=[], network=""))
         try:
             devices = roku.discover_devices(lan_host)
         except ValueError as exc:
-            return no_cache(jsonify(ok=True, devices=[], subnet="", warning=str(exc)))
-        parts = lan_host.split(".")
-        subnet = ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else ""
-        return no_cache(jsonify(ok=True, devices=devices, subnet=subnet))
+            return no_cache(jsonify(ok=True, devices=[], network="", warning=str(exc)))
+        return no_cache(jsonify(ok=True, devices=devices, network=lan_host))
 
     @app.post("/api/guide/roku/test")
     def api_guide_roku_test():
@@ -121,34 +105,63 @@ def register_guide_routes(app):
         response = jsonify(ok=True, roku_host=host, device=info)
         return no_cache(response)
 
+    @app.get("/api/guide/roku/sessions")
+    def api_guide_roku_sessions():
+        sessions = [
+            {
+                "device_key": item.get("device_key", ""),
+                "host": item.get("host", ""),
+                "name": item.get("name", "Roku"),
+                "active": True,
+            }
+            for item in REMOTE_SESSIONS.snapshot("roku")
+        ]
+        return no_cache(jsonify(ok=True, sessions=sessions))
+
     @app.post("/api/guide/roku/start")
     def api_guide_roku_start():
         data = request.get_json(force=True, silent=True) or {}
-        play_url = str(data.get("play_url", "") or "")
-        target = _resolve_guide_play_target(play_url)
+        target = resolve_play_target(str(data.get("play_url", "") or ""))
         if not target:
             return json_error("Curated stream not found.", 404)
         media_origin = _guide_media_origin()
         if not media_origin:
             return json_error("LAN media relay is not configured.", 409)
+
+        session = None
         try:
             host = roku.normalize_host(data.get("roku_host", ""))
+            info = roku.device_info(host)
+            device_key = str(info.get("device_key") or host)
             session = hls.start_session(target)
             playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
             media_url = media_origin.rstrip("/") + playlist_path
             roku.launch_dev(host, media_url)
-            try:
-                info = roku.device_info(host)
-            except RuntimeError:
-                info = {"name": "Roku"}
         except (ValueError, RuntimeError) as exc:
-            if "session" in locals():
+            if session is not None:
                 hls.stop_session(session.token)
             return json_error(exc, 502)
+
+        previous = REMOTE_SESSIONS.replace(
+            "roku",
+            device_key,
+            {
+                "host": host,
+                "name": info.get("name", "Roku"),
+                "token": session.token,
+                "media_url": media_url,
+            },
+        )
+        if previous:
+            old_token = str(previous.get("token", "") or "")
+            if old_token and old_token != session.token:
+                hls.stop_session(old_token)
+
         response = jsonify(
             ok=True,
             roku_host=host,
             device=info,
+            device_key=device_key,
             token=session.token,
             playlist_path=playlist_path,
             media_url=media_url,
@@ -159,8 +172,18 @@ def register_guide_routes(app):
     def api_guide_roku_stop():
         data = request.get_json(force=True, silent=True) or {}
         token = str(data.get("token", "") or "")
-        stopped = hls.stop_session(token) if token else False
         host = str(data.get("roku_host", "") or "").strip()
+
+        registered = REMOTE_SESSIONS.find_by_token("roku", token) if token else None
+        if registered is None and host:
+            registered = REMOTE_SESSIONS.find_by_host("roku", host)
+        if registered is not None:
+            device_key, session_info = registered
+            REMOTE_SESSIONS.pop("roku", device_key)
+            token = str(session_info.get("token", "") or token)
+            host = str(session_info.get("host", "") or host)
+
+        stopped = hls.stop_session(token) if token else False
         home_sent = False
         if host:
             try:
@@ -222,14 +245,14 @@ def register_guide_routes(app):
 
     @app.get("/guide/play/manual/<token>")
     def guide_play_manual(token: str):
-        target = core.manual_stream_target(token)
+        target = resolve_play_target(f"/guide/play/manual/{token}")
         if not target:
             return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
         return browser.response_for(target)
 
     @app.get("/guide/play/sports/<int:assigned_number>")
     def guide_play_sports(assigned_number: int):
-        target = sports.generated_stream_target(core.DB_PATH, assigned_number)
+        target = resolve_play_target(f"/guide/play/sports/{assigned_number}")
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
         return browser.response_for(target)
