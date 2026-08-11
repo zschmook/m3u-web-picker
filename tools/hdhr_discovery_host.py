@@ -28,6 +28,7 @@ from playback.hdhr_protocol import (  # noqa: E402
     getset_reply_value,
     open_frame,
     parse_device_id,
+    requested_device_types,
 )
 
 
@@ -89,10 +90,21 @@ def serve_udp(*, bind: str, device_id: int, tuner_count: int, base_url: str, dev
                 continue
         except ValueError:
             continue
+        requested = ",".join(f"0x{value:08X}" for value in requested_device_types(frame)) or "unspecified"
+        print(
+            f"[hdhr] discovery from {remote[0]}:{remote[1]} types={requested} -> {base_url}",
+            flush=True,
+        )
         sock.sendto(reply, remote)
 
 
-def _handle_control_connection(conn: socket.socket, *, model: str, tuner_count: int) -> None:
+def _handle_control_connection(
+    conn: socket.socket,
+    remote: tuple[str, int],
+    *,
+    model: str,
+    tuner_count: int,
+) -> None:
     buffer = b""
     conn.settimeout(5.0)
     with conn:
@@ -115,6 +127,7 @@ def _handle_control_connection(conn: socket.socket, *, model: str, tuner_count: 
                 except ValueError:
                     return
                 if frame.packet_type != TYPE_GETSET_REQ:
+                    print(f"[hdhr] unsupported control frame from {remote[0]}", flush=True)
                     conn.sendall(getset_reply_error("", "unsupported request"))
                     continue
 
@@ -122,9 +135,13 @@ def _handle_control_connection(conn: socket.socket, *, model: str, tuner_count: 
                 requested_value = first_text(frame, TAG_GETSET_VALUE)
                 value = _control_value(name, model=model, tuner_count=tuner_count)
                 if value is None:
+                    print(f"[hdhr] control {remote[0]} GETSET {name or '<missing>'} -> unknown", flush=True)
                     conn.sendall(getset_reply_error(name, "unknown variable"))
                     continue
-                conn.sendall(getset_reply_value(name, requested_value if requested_value is not None else value))
+                result = requested_value if requested_value is not None else value
+                verb = "SET" if requested_value is not None else "GET"
+                print(f"[hdhr] control {remote[0]} {verb} {name} -> {result}", flush=True)
+                conn.sendall(getset_reply_value(name, result))
 
 
 def serve_tcp(*, bind: str, model: str, tuner_count: int) -> None:
@@ -134,10 +151,10 @@ def serve_tcp(*, bind: str, model: str, tuner_count: int) -> None:
     sock.listen(16)
     print(f"[hdhr] TCP control listening on {bind}:{CONTROL_PORT}", flush=True)
     while True:
-        conn, _remote = sock.accept()
+        conn, remote = sock.accept()
         thread = threading.Thread(
             target=_handle_control_connection,
-            args=(conn,),
+            args=(conn, remote),
             kwargs={"model": model, "tuner_count": tuner_count},
             daemon=True,
         )
@@ -185,6 +202,8 @@ def main() -> None:
         f"({tuner_count} tuners) at {base_url}",
         flush=True,
     )
+    if not args.device_auth:
+        print("[hdhr] DeviceAuth is intentionally empty; local protocol test only.", flush=True)
 
     tcp = threading.Thread(
         target=serve_tcp,
