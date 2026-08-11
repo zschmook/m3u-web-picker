@@ -181,9 +181,11 @@ def discovery_request_matches(frame: Frame, device_id: int) -> bool:
     return requested_id in {None, DEVICE_ID_WILDCARD, parse_device_id(device_id)}
 
 
-def getset_reply_value(value: str) -> bytes:
-    return seal_frame(TYPE_GETSET_RPY, tlv_text(TAG_GETSET_VALUE, value, nul=True))
+def getset_reply_value(name: str, value: str) -> bytes:
+    payload = tlv_text(TAG_GETSET_NAME, name, nul=True) + tlv_text(TAG_GETSET_VALUE, value, nul=True)
+    return seal_frame(TYPE_GETSET_RPY, payload)
 
 
-def getset_reply_error(message: str) -> bytes:
-    return seal_frame(TYPE_GETSET_RPY, tlv_text(TAG_ERROR_MESSAGE, message, nul=True))
+def getset_reply_error(name: str, message: str) -> bytes:
+    payload = tlv_text(TAG_GETSET_NAME, name, nul=True) + tlv_text(TAG_ERROR_MESSAGE, message, nul=True)
+    return seal_frame(TYPE_GETSET_RPY, payload)
