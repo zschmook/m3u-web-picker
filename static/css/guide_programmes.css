@@ -10,6 +10,7 @@
 
 .guide-timeline {
   --guide-station-width: 310px;
+  --guide-channel-number-width: 8ch;
   min-width: calc(var(--guide-station-width) + var(--guide-timeline-width));
   background: #111827;
 }
@@ -92,8 +93,8 @@
 }
 
 .guide-station-number {
-  width: 48px;
-  flex: 0 0 48px;
+  width: var(--guide-channel-number-width);
+  flex: 0 0 var(--guide-channel-number-width);
   overflow: hidden;
   color: #e5e7eb;
   text-align: right;
@@ -268,11 +269,6 @@
 @media (max-width: 620px) {
   .guide-timeline {
     --guide-station-width: 250px;
-  }
-
-  .guide-station-number {
-    width: 42px;
-    flex-basis: 42px;
   }
 
   .guide-logo {
