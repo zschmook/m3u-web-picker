@@ -163,6 +163,14 @@ def ui_status_payload() -> dict:
     primary = next((item for item in providers if item.get("role") == "primary"), None)
     generated_count = len(sports.generated_rows(core.DB_PATH))
     saved_roku = roku_devices.list_saved(core.DB_PATH)
+    report = master_update_reports.latest(core.DB_PATH)
+    master = dict(core.master_update_payload())
+    if report:
+        master["last_update"] = report.get("finished_at") or master.get("last_update")
+        master["last_duration_seconds"] = report.get("duration_seconds")
+        master["last_trigger"] = report.get("trigger")
+        master["last_status"] = report.get("status")
+
     provider_label = "Not configured"
     provider_state = "setup"
     if primary:
@@ -192,8 +200,8 @@ def ui_status_payload() -> dict:
             "roku_devices": saved_roku,
             "active_streams": _active_hls_sessions(),
         },
-        "master_update": core.master_update_payload(),
-        "last_update_report": master_update_reports.latest(core.DB_PATH),
+        "master_update": master,
+        "last_update_report": report,
         "update": _update_health(),
         "outputs": {
             "m3u": "/playlist/channels.m3u",
