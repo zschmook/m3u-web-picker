@@ -52,7 +52,7 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-4">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-5">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
