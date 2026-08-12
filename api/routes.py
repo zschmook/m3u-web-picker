@@ -18,6 +18,7 @@ from .images import register_image_routes
 from .outputs import register_output_routes
 from .providers import register_provider_routes
 from .sports_routes import register_sports_routes
+from .ui_status import register_ui_status_routes
 
 
 def register_routes(app):
@@ -29,3 +30,4 @@ def register_routes(app):
     register_hdhr_routes(app)
     register_image_routes(app)
     register_output_routes(app)
+    register_ui_status_routes(app)
