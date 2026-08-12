@@ -4,10 +4,14 @@ from flask import jsonify
 
 import core
 import hdhr_config
+import master_update_reports
 import roku_devices
 import sports
 from media import hls
 from .hdhr import HDHR_TUNER_COUNT
+
+
+master_update_reports.install(core)
 
 
 def _stage(name: str, status: str, detail: str = "", *, kind: str = "system") -> dict:
@@ -118,6 +122,13 @@ def _update_health() -> dict:
         else:
             stages.append(_stage("Combined EPG", "error", "Combined XMLTV output is missing.", kind="output"))
 
+    report = master_update_reports.latest(core.DB_PATH)
+    report_status = str((report or {}).get("status") or "")
+    if report_status == "failed" and not any(item["status"] == "error" for item in stages):
+        stages.append(_stage("Master Update", "error", str(report.get("summary") or "The last master update failed."), kind="master"))
+    elif report_status == "warning" and not any(item["status"] in {"error", "warning"} for item in stages):
+        stages.append(_stage("Master Update", "warning", str(report.get("summary") or "The last master update completed with warnings."), kind="master"))
+
     errors = [item for item in stages if item["status"] == "error"]
     warnings = [item for item in stages if item["status"] == "warning"]
     master = core.master_update_payload()
@@ -182,6 +193,7 @@ def ui_status_payload() -> dict:
             "active_streams": _active_hls_sessions(),
         },
         "master_update": core.master_update_payload(),
+        "last_update_report": master_update_reports.latest(core.DB_PATH),
         "update": _update_health(),
         "outputs": {
             "m3u": "/playlist/channels.m3u",
