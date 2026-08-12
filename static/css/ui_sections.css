@@ -1,0 +1,91 @@
+/* Keep Channel Manager and Sports visually independent. */
+
+.ui-channel-section-shell {
+  margin-bottom: 1.35rem;
+  border: 1px solid var(--ui-border, #374151);
+  border-radius: 0.7rem;
+  background: var(--ui-panel, #1f2937);
+  overflow: hidden;
+}
+
+.ui-channel-section-shell #channelManagerHeader {
+  margin: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--ui-border, #374151) !important;
+  border-radius: 0 !important;
+  background: var(--ui-panel, #1f2937) !important;
+}
+
+.ui-channel-section-shell.is-collapsed #channelManagerHeader {
+  border-bottom: 0 !important;
+}
+
+.ui-channel-section-shell #channelManagerBody {
+  padding: 0.85rem;
+  background: color-mix(in srgb, var(--ui-panel, #1f2937) 88%, var(--ui-page, #111827));
+}
+
+.ui-channel-section-shell #channelManagerBody > .card {
+  margin-bottom: 0.85rem !important;
+  border-color: var(--ui-border, #374151) !important;
+}
+
+.ui-channel-section-shell #channelManagerBody > .table-wrap {
+  margin: 0;
+}
+
+.ui-channel-section-shell #channelManagerCollapseBtn {
+  min-width: 112px;
+}
+
+.ui-channel-section-shell #manageOrderBtn {
+  color: var(--ui-heading, #f8fafc) !important;
+  border-color: var(--ui-border-strong, #64748b) !important;
+  opacity: 1 !important;
+}
+
+.ui-channel-section-shell #manageOrderBtn:hover,
+.ui-channel-section-shell #manageOrderBtn:focus-visible {
+  background: var(--ui-heading, #f8fafc) !important;
+  border-color: var(--ui-heading, #f8fafc) !important;
+  color: var(--ui-page, #111827) !important;
+}
+
+.ui-channel-section-shell #manageOrderBtn:disabled {
+  opacity: 0.45 !important;
+}
+
+.ui-section-separator {
+  display: flex;
+  align-items: center;
+  min-height: 0.7rem;
+  margin: 0.2rem 0 0.85rem;
+}
+
+.ui-section-separator > span {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: color-mix(in srgb, var(--ui-border, #374151) 72%, transparent);
+}
+
+.ui-independent-sports-section {
+  margin-top: 0 !important;
+  border-width: 1px !important;
+  border-color: var(--ui-border, #374151) !important;
+  box-shadow: 0 0.55rem 1.4rem rgba(0, 0, 0, 0.08);
+}
+
+.ui-independent-sports-section .sports-header {
+  min-height: 3.4rem;
+}
+
+@media (max-width: 767.98px) {
+  .ui-channel-section-shell #channelManagerBody {
+    padding: 0.65rem;
+  }
+
+  .ui-channel-section-shell #channelManagerCollapseBtn {
+    min-width: 0;
+  }
+}
