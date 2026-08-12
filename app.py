@@ -31,7 +31,7 @@ def index():
         '<script src="/static/js/ui_refactor.js?v=ui-refactor-5"></script>\n'
         '<script src="/static/js/ui_themes.js?v=ui-refactor-5"></script>\n'
         '<script src="/static/js/ui_sections.js?v=ui-refactor-5"></script>\n'
-        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-2"></script>\n</body>',
+        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n</body>',
     )
 
 
