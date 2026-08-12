@@ -23,13 +23,16 @@ from typing import Iterable, List
 
 import sports
 from backup import create_database_backup
+from database import connect as connect_database
+from settings import SETTINGS
+from runtime_state import RUNTIME_STATE
 
 
 APP_DIR = Path(__file__).resolve().parent
 # Runtime state can live outside the source tree. Docker Compose points this at
 # a persistent volume so rebuilding the container does not erase the database,
 # cached playlist, generated guide, or EPG source configuration.
-DATA_DIR = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR))).expanduser().resolve()
+DATA_DIR = SETTINGS.data_dir
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR = DATA_DIR / "exports"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,19 +48,19 @@ CONFIG_PATH = DATA_DIR / "config.json"
 MASTER_CACHE_PATH = DATA_DIR / "master_playlist_cache.m3u"
 EPG_CACHE_PATH = DATA_DIR / "epg_cache.xml"
 SPORTS_EPG_PATH = EXPORT_DIR / "sports.xml"
-COMBINED_EPG_PATH = EXPORT_DIR / "combined.xml"
+COMBINED_EPG_PATH = EXPORT_DIR / "epg.xml"
 
-PLAYLIST_NAME = "custom.m3u"
+PLAYLIST_NAME = "channels.m3u"
 PLAYLIST_PATH = EXPORT_DIR / PLAYLIST_NAME
-PORT = int(os.environ.get("M3U_PORT", "9999"))
-DEV_PORT = int(os.environ.get("M3U_DEV_PORT", "9998"))
+PORT = SETTINGS.port
+DEV_PORT = SETTINGS.dev_port
 
-SCHEDULE_HOUR = int(os.environ.get("MASTER_REFRESH_HOUR", "3"))
-SCHEDULE_MINUTE = int(os.environ.get("MASTER_REFRESH_MINUTE", "0"))
-MAX_PROVIDER_CHANNELS = int(os.environ.get("M3U_MAX_PROVIDER_CHANNELS", "50000"))
-PROVIDER_CHANNEL_WARNING = int(os.environ.get("M3U_PROVIDER_CHANNEL_WARNING", "20000"))
-MAX_PROVIDER_PLAYLIST_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_PLAYLIST_BYTES", str(96 * 1024 * 1024)))
-MAX_PROVIDER_JSON_BYTES = int(os.environ.get("M3U_MAX_PROVIDER_JSON_BYTES", str(96 * 1024 * 1024)))
+SCHEDULE_HOUR = SETTINGS.schedule_hour
+SCHEDULE_MINUTE = SETTINGS.schedule_minute
+MAX_PROVIDER_CHANNELS = SETTINGS.max_provider_channels
+PROVIDER_CHANNEL_WARNING = SETTINGS.provider_channel_warning
+MAX_PROVIDER_PLAYLIST_BYTES = SETTINGS.max_provider_playlist_bytes
+MAX_PROVIDER_JSON_BYTES = SETTINGS.max_provider_json_bytes
 
 channels: List[dict] = []
 selected_ids: set[int] = set()
@@ -74,7 +77,7 @@ master_refresh_time = "03:00"
 last_master_update: str | None = None
 last_master_duration_seconds: float | None = None
 last_master_trigger: str | None = None
-master_update_runtime = {"running": False, "started_at": None, "trigger": None, "started_monotonic": None}
+master_update_runtime = RUNTIME_STATE.master_update
 
 # IPTV-EPG country feeds are optional system-wide fallback/enrichment sources.
 # They apply to every selected manual channel in Combined XMLTV and are also
@@ -114,23 +117,17 @@ PUBLIC_EPG_REGISTRY = [
 PUBLIC_EPG_CODES = {code for code, _name in PUBLIC_EPG_REGISTRY}
 public_epg_enabled_codes: set[str] = {"US"}
 public_epg_state: dict[str, dict] = {}
-MAX_PUBLIC_EPG_COMPRESSED_BYTES = int(os.environ.get("M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES", str(256 * 1024 * 1024)))
+MAX_PUBLIC_EPG_COMPRESSED_BYTES = SETTINGS.max_public_epg_compressed_bytes
 
 scheduler_started = False
 
-state_lock = threading.RLock()
-scan_lock = threading.Lock()
-scan_cancel_event = threading.Event()
-provider_progress_lock = threading.Lock()
-provider_progress = {
-    "active": False,
-    "stage": "Idle",
-    "detail": "",
-    "channel_count": None,
-    "started_at": None,
-    "updated_at": None,
-    "status": "idle",
-}
+# Compatibility aliases keep the public core module surface stable while the
+# process-local synchronization state lives in one explicit object.
+state_lock = RUNTIME_STATE.state_lock
+scan_lock = RUNTIME_STATE.scan_lock
+scan_cancel_event = RUNTIME_STATE.scan_cancel_event
+provider_progress_lock = RUNTIME_STATE.provider_progress_lock
+provider_progress = RUNTIME_STATE.provider_progress
 
 
 class SportsScanError(RuntimeError):
@@ -205,57 +202,7 @@ class Entry:
 
 
 def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS selections (
-            key TEXT PRIMARY KEY,
-            name TEXT,
-            group_title TEXT,
-            url TEXT NOT NULL,
-            tvg_id TEXT NOT NULL DEFAULT '',
-            sort_order INTEGER
-        )
-        """
-    )
-    for statement in (
-        "ALTER TABLE selections ADD COLUMN sort_order INTEGER",
-        "ALTER TABLE selections ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''",
-    ):
-        try:
-            conn.execute(statement)
-        except sqlite3.OperationalError:
-            pass
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS custom_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            slug TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS group_channels (
-            group_id INTEGER NOT NULL,
-            channel_key TEXT NOT NULL,
-            name TEXT,
-            group_title TEXT,
-            url TEXT NOT NULL,
-            tvg_id TEXT NOT NULL DEFAULT '',
-            PRIMARY KEY (group_id, channel_key),
-            FOREIGN KEY (group_id) REFERENCES custom_groups(id) ON DELETE CASCADE
-        )
-        """
-    )
-    try:
-        conn.execute("ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
-    conn.commit()
+    conn = connect_database(DB_PATH)
     sports.init_db(DB_PATH)
     return conn
 
@@ -1506,6 +1453,56 @@ def combined_channels_for_api() -> list[dict]:
     return [*manual_payload, *sports.generated_channel_payloads(DB_PATH)]
 
 
+def manual_stream_target(token: str) -> str:
+    """Resolve an opaque curated manual-channel token to its current provider URL."""
+    expected_key = f"manual:{str(token or '').strip()}"
+    if expected_key == "manual:":
+        return ""
+    for channel in selected_channels_from_selected_ids_in_order():
+        if channel_key(channel) != expected_key:
+            continue
+        return str(channel.get("url", "") or "").strip()
+    return ""
+
+
+def curated_channels_for_guide() -> list[dict]:
+    """Return the exact currently served curated lineup without exposing provider URLs."""
+    output: list[dict] = []
+
+    for number, channel in enumerate(selected_channels_from_selected_ids_in_order(), start=1):
+        key = channel_key(channel)
+        token = key.split(":", 1)[1] if key.startswith("manual:") else ""
+        if not token:
+            continue
+        output.append({
+            "number": number,
+            "name": str(channel.get("name", "") or ""),
+            "group": str(channel.get("group", "") or ""),
+            "logo": str(channel.get("tvg_logo", "") or ""),
+            "tvg_id": str(channel.get("tvg_id", "") or ""),
+            "subtitle": "",
+            "generated": False,
+            "play_url": f"/guide/play/manual/{token}",
+        })
+
+    for row in sports.generated_rows(DB_PATH):
+        assigned = int(row.get("assigned_number") or 0)
+        if assigned <= 0:
+            continue
+        output.append({
+            "number": assigned,
+            "name": str(row.get("display_name", "") or ""),
+            "group": str(row.get("group_title", "") or ""),
+            "logo": str(row.get("tvg_logo", "") or ""),
+            "tvg_id": str(row.get("tvg_id", "") or ""),
+            "subtitle": str(row.get("subtitle", "") or ""),
+            "generated": True,
+            "play_url": f"/guide/play/sports/{assigned}",
+        })
+
+    return output
+
+
 def selected_ids_payload() -> list[int]:
     generated_ids = [channel["id"] for channel in sports.generated_channel_payloads(DB_PATH)]
     return sorted([*selected_ids, *generated_ids])
@@ -1974,10 +1971,10 @@ def epg_sources_payload() -> list[dict]:
 
 
 def epg_builtin_payload() -> list[dict]:
-    # Combined is the single user-facing XMLTV output. sports.xml remains an
+    # EPG is the single user-facing XMLTV output. sports.xml remains an
     # internal/diagnostic endpoint for troubleshooting generated sports only.
     guides = (
-        ("combined", "Combined", COMBINED_EPG_PATH, "/epg/combined.xml"),
+        ("epg", "EPG", COMBINED_EPG_PATH, "/epg/epg.xml"),
     )
     payload: list[dict] = []
     for guide_id, name, path, url_path in guides:
@@ -2991,6 +2988,23 @@ def scheduler_loop() -> None:
                 )
                 write_current_playlist()
 
+            # Full provider/API refresh remains on the master schedule. This is
+            # only a cheap lifecycle cleanup so completed sports channels do not
+            # sit blank in Jellyfin for the rest of the day.
+            if not sports.scan_state(DB_PATH, now).get("running"):
+                stale_removed = sports.purge_stale_generated(DB_PATH, now)
+                if stale_removed:
+                    base_path = active_base_epg_path()
+                    sports.rebuild_epg_exports(
+                        DB_PATH,
+                        base_epg_path=base_path,
+                        base_channel_ids=selected_xmltv_ids(),
+                        fallback_epg_paths=configured_epg_fallback_paths(base_path),
+                        sports_epg_path=SPORTS_EPG_PATH,
+                        combined_epg_path=COMBINED_EPG_PATH,
+                    )
+                    write_current_playlist()
+
             if _master_update_due(now):
                 local_now = now.astimezone(ZoneInfo(master_timezone_name()))
                 attempt_key = local_now.strftime("%Y-%m-%dT%H:%M")
@@ -3046,6 +3060,10 @@ def load_cached_master_playlist_on_startup() -> None:
     db_connect().close()
     if sports.recover_interrupted_scan(DB_PATH):
         print("Recovered an interrupted sports scan state from the previous app process.")
+    # Do the same cheap lifecycle cleanup used by the scheduler before serving
+    # cached outputs after a restart. Finished games should not reappear as
+    # blank channels for the first scheduler interval.
+    sports.purge_stale_generated(DB_PATH)
     if not MASTER_CACHE_PATH.exists():
         write_current_playlist()
         try:

@@ -8,6 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Experimental browser playback uses ffmpeg to normalize whatever the IPTV
+# provider serves into fragmented MP4 (H.264/AAC) that normal web browsers can
+# decode. Keep it inside the container so the host does not need ffmpeg.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python packages before copying the application so dependency layers
 # can be reused when only source files change.
 COPY requirements.txt ./

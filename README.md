@@ -1,58 +1,61 @@
-# Quick Start
+> **v30-experiments / exp11-roku-bundled — DEBUG ONLY:** Full standalone experiment on `http://localhost:10000`. It uses its own Compose project/container and local `./debug-data`; it does not mount the stable main instance's Docker volume. This build includes the pop-out TV Guide, ffmpeg-backed browser playback, Chromecast playback, and experimental Roku playback.
 
-Requires **Git** and **Docker Desktop / Docker Compose**.
-
-## macOS
-
-```bash
-cd ~/Desktop && git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git && cd m3u-web-picker && docker compose up -d --build
-```
-
-## Linux
-
-```bash
-cd ~/Desktop && git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git && cd m3u-web-picker && docker compose up -d --build
-```
-
-## Windows PowerShell
-
-```powershell
-cd ([Environment]::GetFolderPath("Desktop")); git clone --branch sports --single-branch https://github.com/zschmook/m3u-web-picker.git; cd m3u-web-picker; docker compose up -d --build
-```
-
-Once started, open **http://localhost:9999**.
-
----
 # M3U Web Picker
-### v22.1-rc2
 
-**Release candidate:** see `RELEASE-NOTES-v22.1-rc2.md`.
+### v22.1-rc8
+
+
+- RC8 adds an experimental **TV Guide** pop-out link in the top header. The first pass shows the exact currently curated/served lineup in channel order and provides an in-window browser Play/Stop control without exposing provider stream URLs in the guide payload.
+- The guide is intentionally a small first step: channel list + player now, with time-grid/Now/Next guide work left for the next iteration after playback behavior is tested against real provider streams.
+- RC7 moves **Manage Order** beneath the EPG output row so the sticky header reads more cleanly.
+- Renames the replay option to **Include replays and classic games**.
+- A successful Schedule API window is now authoritative for its supported league when replays/classics are off: provider/XMLTV rows that cannot be mapped to a canonical current game are suppressed instead of inventing historical/offseason games. API errors, plan/date restrictions, auth failures, quota failures, and stale caches remain non-authoritative and continue to fall back to legacy matching.
+- Preseason/spring-football API behavior is intentionally unchanged in RC7 pending live API verification when the dates enter the free-plan window.
+- RC6 tightens the sticky top header: the M3U Web Picker brand stays top-aligned instead of vertically floating beside the taller controls.
+- Expands the right-side Channels/EPG/Master Update control area on desktop so the Next / Last / Took / Timezone status stays on one line when space is available; responsive wrapping remains for narrower windows.
+
+- Expands the optional Schedule API layer from MLB-only into a quota-first **API-SPORTS** request planner. API-SPORTS is the only supported schedule-data provider in RC5; the UI links directly to https://api-sports.io.
+- Removes the user-entered Schedule API base URL. The user supplies only the API-SPORTS key; M3U Web Picker owns the product endpoints internally and derives the needed products from existing Sports Automation selections.
+- Current API-backed schedule adapters: **MLB** through API-SPORTS Baseball, plus **NFL** and **NCAA football** through API-SPORTS American Football. Unsupported or intentionally legacy-only sports (for example golf and track & field) continue through the existing provider/XMLTV matcher without making an API call.
+- Collapses overlapping rules into the minimum unique schedule datasets. Selecting a league, conferences, and multiple teams does not create one request per rule; rules are filtered locally against the already-fetched league/day slate.
+- Caches API schedule results by provider/product/endpoint plus normalized request parameters (including date/season/timezone where applicable) and reuses same-day data across normal Master Update and repeated **Update Now** runs. **Refresh API schedules** is an explicit advanced control that bypasses only the same-day schedule cache.
+- Caches NCAA conference membership as long-lived reference data so Big Ten, ACC, SEC, and explicit team rules can be evaluated locally against one NCAA schedule dataset. Existing seeded conference membership remains a fallback if reference data cannot be refreshed.
+- API failures first preserve/reuse relevant cached canonical schedules when possible; if no usable canonical schedule is available, the affected sport falls back to the existing provider/EPG matcher instead of taking down the lineup.
+- The Schedule API table reports each planned dataset independently. **Cached**, **No successful cache**, **Refresh failed**, **Partial refresh**, and **Using cached fallback** are distinct states; a configured API key no longer makes every dataset misleadingly look active.
+- The most recent per-dataset refresh attempt and generic failure reason are persisted in the local sports database so a failed NFL/NCAA refresh remains visible after polling or page reload. API credentials are never included in this health payload.
+- **Update Now** is disabled for the entire time any update pipeline is running, preventing overlapping refreshes or accidental double-click cancellation.
+- Retains the RC4 sticky top control area, equal-width Channels/EPG labels, right-aligned status rows, and visible User Guide link.
+- No cache/backup storage cleanup changes are included in RC5; that investigation remains separate.
+
+[User Guide (PDF)](M3U-Web-Picker-v22.1-RC5-User-Guide.pdf)
 
 - Makes the schedule API event ID the hard logical-game identity before provider/XMLTV airing grouping. A same-matchup rebroadcast can no longer allocate a second sports channel block when the API identifies it as the same game.
 - API-assisted live-airing selection now evaluates provider rows around the canonical API start and rejects obvious supporting content such as pre/postgame, Gameday/in-game wagering, Squeeze Play, betting/odds, previews, recaps, and studio shows as the primary game stream.
 - Provider rows are clustered with a tight 90-second tolerance in API mode so a 6:00 PM support program is not merged into a 6:05 PM first-pitch candidate.
 - With replays/encores disabled, later same-matchup airings are dropped. With replays enabled, later airings are attached as replay programme windows on the same API event/channel IDs instead of generating new channel blocks.
-- Regression coverage includes the real Aug. 8 Phillies case (6:00 betting Gameday → 6:05 live game → 11:00 rebroadcast) and the Dodgers Squeeze Play false match.
-- The three-file MLB fixture (API schedule + sanitized provider M3U + filtered public U.S. EPG) now resolves 15 API games into 15 logical events and 17 generated feeds for All MLB + explicit Phillies.
+- Regression coverage includes the real Aug. 8 Phillies case (6:00 betting Gameday → 6:05 live game → 11:00 rebroadcast), UTC-vs-Eastern schedule equivalence, and the Dodgers Squeeze Play false match.
+- A provider description such as `Game 2 of 3` no longer creates a fake doubleheader identity. Only explicit Game 1/Game 2 wording in the event title can split a same-day matchup.
+- Finished generated sports channels are pruned by a lightweight lifecycle cleanup after the same 90-minute postgame grace, so a once-daily master scan does not leave blank expired rows in Jellyfin for the rest of the day.
+- Team-specific generated feeds prefer canonical schedule-API team artwork when available; event/national feeds retain provider/network artwork.
 
-- Schedule API enable/disable now persists immediately from the switch. API URL/key controls are disabled while the API is off, and configured schedule APIs appear in a proper Loaded Schedule APIs table with status, URL, last update, and Remove action.
+- Schedule API enable/disable persists immediately from the switch. RC5 uses one API-SPORTS key and derives product URLs internally; the planned-dataset table shows provider, product, scope, cache status, and last update.
 - Fixes dark-mode contrast for the Free Public EPG country section header and country labels.
 - Replaces the separate sports/provider/EPG schedules with one application-wide **Master Update**, enabled by default at **3:00 AM local time** and user-changeable from the top of the page below the M3U URL.
 - **Update Now** runs the same dependency-ordered pipeline without changing the next scheduled daily run.
 - Master Update now shows a spinner and live elapsed timer while a manual or scheduled cycle is running, and the last completed cycle records/displays its total duration.
 - Master pipeline order is schedule API (optional) → provider refresh → guide refresh → sports match → channel build → XMLTV publish → M3U publish → validation.
-- Adds **Free Public EPG — By Country** under EPG Manager. It is collapsed by default, checkbox-only, persists immediately, and starts with **United States enabled only**.
+- Keeps **Free Public EPG — By Country** as the normal guide-configuration section. It is collapsed by default, checkbox-only, persists immediately, and starts with **United States enabled only**.
 - Public country guides use IPTV-EPG's compressed `.xml.gz` feeds, remain compressed on disk, and are stream-decompressed while matching/filtering so giant guides are not expanded into memory or permanent raw XML files.
 - Free public country guides are system-wide lowest-priority fallback/enrichment sources for every selected manual channel, not a sports-only feature. Provider/configured guide data wins on overlapping time windows; public guide programmes can fill uncovered gaps on the same channel. The same filtered public data remains available for sports corroboration.
 - Corrects the API-BASEBALL free-plan fetch shape to the known-good **date + timezone** request and filters MLB (`league.id == 1`) locally.
-- The schedule API remains optional. Disabled, blank, or incompletely configured API settings use the original provider-derived matcher and ignore canonical API cache data.
+- The schedule API remains optional. Disabled or keyless configuration uses the original provider-derived matcher and ignores canonical API cache data. Unsupported sports always retain that legacy matcher even when API-SPORTS is enabled for other selections.
 - Provider Sources keeps separate **Last Updated** and **Status** columns.
 - Narrow filler filtering now also recognizes **No Game Today** alongside No Event(s) Today and Signing Off.
 
-**Version 22.1-rc2**
+**Version 22.1-rc8**
 
 - Builds on v22.1-debug1's optional canonical MLB schedule layer and v22.0's logical-event/feed-selection work.
-- API schedule storage remains source/league keyed so later adapters can support NFL/NCAA, basketball, hockey, soccer, and other sports without redesigning the cache model.
+- API schedule storage remains source/league keyed so RC5 adapters support NFL/NCAA alongside MLB, while additional sports can still be added later without redesigning the cache model.
 - Broad league/conference/sport rules still generate one best feed per game, while explicitly selected teams can expand home/away/national/event feeds without duplicate logical events.
 - Retains 90-minute postgame cleanup, manual/static channel isolation, replay/encore grouping, primary/fallback provider precedence, live-only Xtream imports, and scan-local matching indexes.
 - Fresh debug state remains recommended for RC validation.
@@ -79,19 +82,86 @@ For Xtream logins, enter the server/base URL separately from the username and pa
 Separate credential fields prevent accidental UI/API exposure; they are not an encryption layer. Credentials are stored in the application's local `config.json`, so the runtime data directory and backups should be protected like any other secret-bearing configuration.
 
 
-## EPG Manager and guide recovery
+## EPG output and guide recovery
 
-The EPG Manager appears above Channel Manager in one unified table. The add-source controls, the built-in **Combined** guide, and named external XMLTV sources share fixed columns for Name, Type, Served URL, Status, and Action. Stored provider URLs and credentials remain hidden after saving; only the friendly source label and app-served URL are displayed.
+The normal UI exposes the final **EPG** URL beside the Channels URL at the top of the page. Provider guide discovery remains automatic, while the visible guide configuration is the worldwide public-country fallback selector.
 
-`combined.xml` is the single user-facing Jellyfin/Plex guide. The sports-only XMLTV file is still generated internally for diagnostics and validation, but it is no longer advertised as a normal EPG Manager output. If an empty or stale guide file exists while generated sports rows are present, the application rebuilds it before serving Jellyfin. A manually configured EPG source is used as a fallback when the conventional Xtream `xmltv.php` URL cannot be derived or refreshed.
+`epg.xml` is the single user-facing Jellyfin/Plex guide. The sports-only XMLTV file is still generated internally for diagnostics and validation, but it is not advertised as a normal user-facing output. If an empty or stale guide file exists while generated sports rows are present, the application rebuilds it before serving Jellyfin. A manually configured EPG source is used as a fallback when the conventional Xtream `xmltv.php` URL cannot be derived or refreshed.
+
+The public endpoints are `/playlist/channels.m3u` and `/epg/epg.xml`. The former `/playlist/custom.m3u` and `/epg/combined.xml` routes remain compatibility aliases for existing clients, but the UI and documentation advertise only the new names.
 
 ### Master Update and free public country guides
 
-The only automatic update clock exposed by the UI is **Master Update**, directly below the served M3U URL. It defaults to 03:00 in the configured local sports timezone and can be moved to run before an external Jellyfin/Plex guide refresh. Manual **Update Now** does not alter the next scheduled daily time.
+The only automatic update clock exposed by the UI is **Master Update**, directly below the served Channels and EPG URLs. It defaults to 03:00 in the configured local sports timezone and can be moved to run before an external Jellyfin/Plex guide refresh. Manual **Update Now** does not alter the next scheduled daily time.
 
-**Free Public EPG — By Country** is an expandable checkbox list inside EPG Manager. United States is enabled on a fresh configuration and every other country starts disabled. Enabled countries use the built-in IPTV-EPG registry and compressed `epg-<country>.xml.gz` sources. The application caches those compressed files once per local day, line-streams the large gzip to create a compact filtered gzip containing only relevant manual/provider/sports channel IDs and names, and hands that compact subset to the normal XMLTV matcher. Only useful selected-channel/programme data reaches `combined.xml`; the full public guide is never intentionally expanded to a permanent XML file or parsed into one giant in-memory XML tree.
+**Free Public EPG — By Country** is an expandable checkbox list in its own guide section. United States is enabled on a fresh configuration and every other country starts disabled. Enabled countries use the built-in IPTV-EPG registry and compressed `epg-<country>.xml.gz` sources. The application caches those compressed files once per local day, line-streams the large gzip to create a compact filtered gzip containing only relevant manual/provider/sports channel IDs and names, and hands that compact subset to the normal XMLTV matcher. Only useful selected-channel/programme data reaches `epg.xml`; the full public guide is never intentionally expanded to a permanent XML file or parsed into one giant in-memory XML tree.
 
 Guide precedence is provider/base guide first, then user-configured guide sources, then enabled free public-country guides. Precedence is applied per channel **and time window**: a lower-priority source may fill an uncovered gap on a selected channel, but any programme that overlaps a higher-priority programme is discarded. This lets a public guide repair partial provider-guide holes without replacing good provider metadata.
+
+## Experimental Roku playback
+
+The TV Guide can send the currently playing channel to a Roku TV on the same LAN. This is still an experimental/developer-mode workflow; the normal M3U Web Picker instance is unchanged.
+
+### 1. Enable Roku developer mode
+
+On the Roku home screen, press this sequence on the remote:
+
+```text
+Home
+Home
+Home
+Up
+Up
+Right
+Left
+Right
+Left
+Right
+```
+
+Choose **Enable installer and restart**, accept the developer agreement, and set a developer password when prompted. After the Roku restarts, note its LAN IP address.
+
+If local Roku control is disabled, enable **Control by mobile apps** under the Roku's advanced system/network settings.
+
+### 2. Install the M3U Web Picker Roku receiver
+
+From a computer on the same LAN, open the Roku's IP address in a browser:
+
+```text
+http://ROKU-IP
+```
+
+Log in with:
+
+```text
+Username: rokudev
+Password: <the developer password set on the Roku>
+```
+
+In the Roku **Development Application Installer**, choose **Install with zip** and upload:
+
+```text
+roku-receiver/dist/m3u-web-picker-roku-receiver-exp1.zip
+```
+
+Do not extract that receiver ZIP first. Roku permits only one sideloaded developer application at a time, so installing another development app will replace it.
+
+### 3. Send a channel from the TV Guide
+
+Start the experimental Docker build and open:
+
+```text
+http://localhost:10000/guide
+```
+
+Then:
+
+1. Press **Play** on a channel so it becomes the current guide channel.
+2. The guide automatically discovers verified Roku ECP devices on the current experimental LAN. Diagnostics still shows the selected Roku IP/name and retains **Test Roku** for troubleshooting.
+3. Press **Roku** beside the Cast control to launch the sideloaded receiver and send the current channel to the TV.
+4. Press **Disconnect Roku** to stop Roku playback, return the Roku home screen, and resume the same current channel locally.
+
+The Mac remains the media relay: the provider stream is normalized by ffmpeg into H.264/AAC HLS, and the Roku pulls that HLS stream over the LAN. Provider credentials and raw stream URLs remain server-side. Direct Cast↔Roku switching is serialized so the old remote target is fully torn down before the new one starts. Multiple-Roku selection is a required follow-up: 0 devices hides the control, 1 device is direct, and 2+ devices will use a selector with the last-used Roku preselected.
 
 ## Persistent Docker state
 
@@ -102,13 +172,13 @@ The debug Compose stack stores runtime state in `./debug-data`. The normal stack
 The M3U creates the channels. Jellyfin still needs an XMLTV guide source.
 
 ```text
-http://YOUR-SERVER-IP:10000/playlist/custom.m3u
-http://YOUR-SERVER-IP:10000/epg/combined.xml
+http://YOUR-SERVER-IP:10000/playlist/channels.m3u
+http://YOUR-SERVER-IP:10000/epg/epg.xml
 ```
 
-Use `combined.xml` for everything: selected manual channels use provider/configured guide data first and enabled free public-country guides as fallback, while generated sports channels are merged into the same file. The provider's full XMLTV catalog is never copied into this output.
+Use `epg.xml` for everything: selected manual channels use provider/configured guide data first and enabled free public-country guides as fallback, while generated sports channels are merged into the same file. The provider's full XMLTV catalog is never copied into this output.
 
-The examples use the sports debug port `10000`; the normal Compose instance uses `9999`. The custom M3U advertises `combined.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
+The examples use the experimental/debug port `10000`; the normal Compose instance uses `9999`. The Channels M3U advertises `epg.xml`, but Jellyfin may still require adding the XMLTV URL explicitly under Live TV guide sources.
 
 ## Fresh debug state (recommended)
 
@@ -141,7 +211,7 @@ Open `http://localhost:9999`.
 
 ## Channel numbering
 
-Sports are grouped by a stable 1,000-channel primary block for each league, series, tour, promotion, or division. With the default 10 channels per event, a primary block holds 100 events.
+Sports are grouped by a stable 1,000-channel primary block for each league. With the default 10 channels per event, a primary block holds 100 events.
 
 ```text
 MLB                          1000–1999
@@ -155,7 +225,7 @@ NCAA Football — Division II  8000–8999
 NCAA Football — Division III 9000–9999
 ```
 
-The complete map is visible inside Sports Automation under **View league / series channel blocks**, with a Sport filter. A competition never spills into the next competition’s range. The rare 101st event is moved into a separate high-number continuation block and logged instead of being silently truncated.
+The complete map is visible inside Sports Automation under **View league channel blocks**, with a Sport filter. A competition never spills into the next competition’s range. The rare 101st event is moved into a separate high-number continuation block and logged instead of being silently truncated.
 
 Changing **First league block** shifts the complete map while preserving the 1,000-channel spacing. Changing **Channels per event** changes the number of event slots available inside each range.
 
@@ -165,7 +235,7 @@ The Add Sports Selection dialog supports four levels:
 
 ```text
 Sport
-League / series / tour / promotion / division
+League
 Conference
 Team / competitor
 ```
@@ -209,8 +279,8 @@ At update time the application:
 3. Refreshes provider, configured, and enabled public-country EPG caches.
 4. Parses M3U/XMLTV and matches provider airings against canonical events when available.
 5. Matches events against saved sports rules and builds the selected feed set.
-6. Assigns generated channels inside the event’s league/series range.
-7. Builds filtered Sports and Combined XMLTV output, with provider guides ahead of public fallback guides.
+6. Assigns generated channels inside the event’s league range.
+7. Builds the internal sports guide and final EPG output, with provider guides ahead of public fallback guides.
 8. Replaces generated database rows/XMLTV through the existing guarded publish path, atomically writes the M3U, and validates the cycle order/output.
 
 A failed refresh or scan preserves the previous working sports lineup. A successful scan with zero matches clears stale sports output.
@@ -235,16 +305,16 @@ http://HOST:PORT/api/sports/guide-check
 
 It verifies the actual served playlist and both XMLTV exports without returning provider stream URLs.
 
-## Provider-first matching
+## Provider streams with optional schedule authority
 
-The application uses provider data as its primary source:
+Provider data always supplies the actual streams and remains sufficient when no schedule API is configured:
 
 - M3U channel names and groups
 - `tvg-id`, `tvg-name`, `tvg-logo`, and embedded event dates
 - permanent team feeds for feed association
 - XMLTV programme titles, categories, and start times
 
-No external sports API is required. Provider terminology varies, so the taxonomy includes common aliases while avoiding broad fuzzy matches that would mix unrelated sports.
+When the optional schedule API is enabled and returns a matching game, its event ID and scheduled start become authoritative for logical-game identity. Provider/XMLTV rows are then treated as candidate airings of that game. If the API is configured but supplies no canonical events for the current window, the scan reports that it fell back to legacy provider-derived matching instead of silently looking API-backed.
 
 ## Manual backup
 
@@ -262,3 +332,15 @@ python3 app.py --dev
 ```
 
 Open `http://localhost:9998`.
+
+
+Experimental TV Guide Cast/Roku support lives only on the `experiments` branch until intentionally promoted.
+
+
+### v30 experiments LAN/Cast test
+
+This disposable build publishes port 10000 on all host interfaces. On the test Mac its configured LAN URL is `http://10.0.0.22:10000`. Use `http://localhost:10000/guide` for the Google Cast sender UI; the Chromecast/Roku fetches the selected HLS relay from `http://10.0.0.22:10000`.
+
+### v30 experiments LAN note
+
+This test machine is currently `10.0.0.22` on `en0`, so Chromecast/Roku HLS is advertised as `http://10.0.0.22:10000`. The Cast controller should still be opened at `http://localhost:10000/guide` on the Mac. If the Mac moves to another LAN, run `./scripts/detect-lan-host.sh` to see the new address and override `M3U_LAN_HOST` when starting the experiment rather than assuming a `192.168.*` network.

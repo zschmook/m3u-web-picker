@@ -9,17 +9,33 @@
 </head>
 <body>
   <div class="container-fluid py-3">
-    <div class="d-flex align-items-center justify-content-between mb-3 gap-3 flex-wrap">
-      <div>
-        <h1 class="h3 mb-1">M3U Web Picker</h1>
-        <div class="small-muted">Load, select, auto-save, and serve M3U playlists.</div>
+    <div class="app-topbar d-flex align-items-start justify-content-between gap-3 flex-wrap">
+      <div class="app-brand-block">
+        <h1 class="h3 mb-1">M3U Web Picker <span class="badge text-bg-warning align-middle">v30-experiments</span></h1>
+        <div class="app-brand-meta">
+          <span class="small-muted">Load, select, auto-save, and serve M3U playlists.</span>
+          <a class="user-guide-link" id="tvGuideLink" href="{{ url_for('guide') }}">TV Guide</a>
+          <a class="user-guide-link" href="{{ url_for('user_guide') }}" target="_blank" rel="noopener">User Guide (PDF)</a>
+        </div>
       </div>
 
       <div class="playlist-toolbar">
-        <div class="input-group mb-2">
-          <input id="playlistUrl" class="form-control" readonly>
-          <button class="btn btn-success" id="copyPlaylistBtn" type="button">Copy</button>
-          <button class="btn btn-outline-light" id="manageOrderBtn" type="button">Manage Order</button>
+        <div class="channels-output-block mb-2">
+          <div class="input-group">
+            <span class="input-group-text output-label">Channels</span>
+            <input id="playlistUrl" class="form-control" readonly aria-label="Channels playlist URL">
+            <button class="btn btn-success" id="copyPlaylistBtn" type="button">Copy</button>
+          </div>
+        </div>
+        <div class="epg-output-block mb-2">
+          <div class="input-group">
+            <span class="input-group-text output-label">EPG</span>
+            <input id="epgOutputUrl" class="form-control" readonly aria-label="EPG URL">
+            <button class="btn btn-success" id="copyEpgBtn" type="button">Copy</button>
+          </div>
+          <div class="output-secondary-actions">
+            <button class="btn btn-outline-light btn-sm" id="manageOrderBtn" type="button">Manage Order</button>
+          </div>
         </div>
         <div class="master-update-panel">
           <div class="master-update-controls">
@@ -35,7 +51,7 @@
               <span id="masterUpdateRunningText">Updating • 0:00</span>
             </div>
           </div>
-          <div id="masterUpdateStatus" class="small-muted mt-1">Daily update: loading…</div>
+          <div id="masterUpdateStatus" class="master-update-status small-muted mt-1">Daily update: loading…</div>
         </div>
       </div>
     </div>
@@ -153,66 +169,14 @@
       </div>
     </div>
 
-    <div class="card mb-3" id="epgManagerCard">
+    <div class="card mb-3" id="publicEpgCard">
       <div class="card-body">
-        <div class="epg-manager-heading mb-3">
-          <h2 class="h6 mb-1">EPG Manager</h2>
-          <div class="small-muted">Built-in and external XMLTV guides served by this application. Stored provider URLs and credentials are hidden after saving.</div>
-        </div>
-
-        <div class="epg-table-wrap">
-          <table class="table table-hover table-sm align-middle mb-0 epg-manager-table">
-            <colgroup>
-              <col class="epg-col-name">
-              <col class="epg-col-type">
-              <col class="epg-col-url">
-              <col class="epg-col-status">
-              <col class="epg-col-action">
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Type</th>
-                <th scope="col">Served URL</th>
-                <th scope="col">Status</th>
-                <th scope="col" class="text-end">Action</th>
-              </tr>
-            </thead>
-            <tbody class="epg-fixed-rows">
-              <tr class="epg-add-source-row">
-                <td>
-                  <input id="epgName" class="form-control form-control-sm" placeholder="Provider guide" aria-label="EPG source name">
-                </td>
-                <td><span class="badge rounded-pill epg-type-badge epg-type-external">External</span></td>
-                <td>
-                  <input id="epgUrl" class="form-control form-control-sm" placeholder="https://provider.example/xmltv.php?..." aria-label="XMLTV source URL">
-                </td>
-                <td id="epgAddStatus" class="epg-status-cell small-muted"></td>
-                <td class="text-end"><button id="addEpgBtn" class="btn btn-primary btn-sm epg-action-btn" type="button">Add</button></td>
-              </tr>
-              <tr class="epg-built-in-row">
-                <td class="epg-name-cell"><strong>Combined</strong></td>
-                <td><span class="badge rounded-pill epg-type-badge epg-type-built-in">Built-in</span></td>
-                <td class="epg-served-cell">
-                  <div class="input-group input-group-sm">
-                    <input id="combinedEpgUrl" class="form-control" readonly aria-label="Combined guide URL">
-                    <button id="copyCombinedEpgBtn" class="btn btn-success epg-copy-fixed-btn" type="button">Copy</button>
-                  </div>
-                </td>
-                <td id="combinedEpgStatus" class="epg-status-cell small-muted">Generated by app</td>
-                <td class="text-end"><span class="epg-managed-label">Managed</span></td>
-              </tr>
-            </tbody>
-            <tbody id="epgSources" class="epg-list"></tbody>
-          </table>
-        </div>
-
-        <details id="publicEpgDetails" class="public-epg-details mt-3">
+        <details id="publicEpgDetails" class="public-epg-details">
           <summary>
             <span>Free Public EPG — By Country</span>
             <span id="publicEpgSummary" class="small-muted ms-2">United States</span>
           </summary>
-          <div class="small-muted mt-2 mb-3">Optional system-wide fallback guides for all selected channels. Provider/configured guides stay authoritative; public guides fill uncovered guide windows and can also enrich generated sports matching. Compressed <code>.xml.gz</code> files are cached daily, filtered, and merged only into Combined XMLTV.</div>
+          <div class="small-muted mt-2 mb-3">Optional worldwide fallback guide data for all selected channels. Provider guide data stays authoritative; public guides fill uncovered windows and can also help sports matching. Compressed <code>.xml.gz</code> files are cached daily and only relevant channel/program data is merged into the final EPG.</div>
           <div id="publicEpgCountries" class="public-epg-country-grid" aria-live="polite"></div>
           <div id="publicEpgStatus" class="small-muted mt-2"></div>
         </details>
@@ -396,7 +360,7 @@
             <div id="sportsNumberWarning" class="small text-warning mt-2 d-none"></div>
 
             <details class="sports-block-details mt-3">
-              <summary>View league / series channel blocks</summary>
+              <summary>View league channel blocks</summary>
               <div class="d-flex align-items-end gap-3 flex-wrap mt-3 mb-3">
                 <div>
                   <label class="form-label" for="sportsBlockSportFilter">Sport</label>
@@ -404,7 +368,7 @@
                     <option value="">All sports</option>
                   </select>
                 </div>
-                <div class="small-muted">Each league, series, tour, promotion, or division receives a separate 1,000-channel range.</div>
+                <div class="small-muted">Each league receives a separate 1,000-channel range.</div>
               </div>
               <div id="sportsBlockMap" class="sports-block-map"></div>
             </details>
@@ -414,42 +378,51 @@
             <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-2">
               <div>
                 <h3 class="h6 mb-1">Schedule API</h3>
-                <p class="small-muted mb-0">Optional canonical schedule data. Leave this off to use the existing provider-derived matching.</p>
+                <p class="small-muted mb-0">Optional canonical schedules for supported selections. Sports without a supported API adapter automatically keep the existing provider/EPG matcher.</p>
               </div>
               <div class="form-check form-switch mb-0">
                 <input id="sportsScheduleApiEnabled" class="form-check-input" type="checkbox" role="switch">
                 <label class="form-check-label" for="sportsScheduleApiEnabled">Use schedule API</label>
               </div>
             </div>
+
+            <div class="small mb-2">
+              <strong>Schedule API provider support:</strong>
+              <a href="https://api-sports.io" target="_blank" rel="noopener noreferrer">API-SPORTS</a> only for now.
+            </div>
+
             <fieldset id="sportsScheduleApiFields">
               <div class="row g-2 align-items-end">
-                <div class="col-lg-7">
-                  <label class="form-label" for="sportsScheduleApiUrl">API URL</label>
-                  <input id="sportsScheduleApiUrl" class="form-control" placeholder="https://v1.baseball.api-sports.io">
-                </div>
-                <div class="col-lg-3">
+                <div class="col-lg-8">
                   <label class="form-label" for="sportsScheduleApiKey">API key</label>
-                  <input id="sportsScheduleApiKey" class="form-control" type="password" autocomplete="new-password" placeholder="Enter API key">
+                  <input id="sportsScheduleApiKey" class="form-control" type="password" autocomplete="new-password" placeholder="Enter API-SPORTS key">
                 </div>
                 <div class="col-lg-2 d-grid">
-                  <button id="sportsScheduleApiSave" class="btn btn-outline-primary" type="button">Save API</button>
+                  <button id="sportsScheduleApiSave" class="btn btn-outline-primary" type="button">Save API key</button>
+                </div>
+                <div class="col-lg-2 d-grid">
+                  <button id="sportsScheduleApiRemove" class="btn btn-outline-danger d-none" type="button">Remove API key</button>
                 </div>
               </div>
             </fieldset>
             <div id="sportsScheduleApiStatus" class="small-muted mt-2" aria-live="polite">Provider-derived matching active.</div>
+            <div id="sportsScheduleApiPlan" class="small-muted mt-1"></div>
 
             <div class="schedule-api-list mt-3">
-              <div class="small fw-semibold mb-2">Loaded schedule APIs</div>
+              <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+                <div class="small fw-semibold">Planned API-backed schedule datasets</div>
+                <button id="sportsScheduleApiRefresh" class="btn btn-outline-secondary btn-sm" type="button">Force Schedule Refresh</button>
+              </div>
               <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0 schedule-api-table">
                   <thead>
                     <tr>
-                      <th>API</th>
+                      <th>Provider</th>
+                      <th>Product</th>
                       <th>Scope</th>
-                      <th>URL</th>
                       <th>Status</th>
                       <th>Last Updated</th>
-                      <th class="text-end">Actions</th>
+                      <th>Cache</th>
                     </tr>
                   </thead>
                   <tbody id="sportsScheduleApiList"></tbody>
@@ -457,14 +430,14 @@
               </div>
             </div>
 
-            <div class="small-muted mt-2">The master application update runs in dependency order: schedule cache → provider/channel refresh → guide refresh → sports match/build → M3U/XMLTV publish. API dates are fetched at most once per local day unless the cache is missing.</div>
+            <div class="small-muted mt-2">Normal Master Update and Update Now reuse a valid same-day schedule cache. Force Schedule Refresh deliberately bypasses only the daily schedule cache. Team/conference selections are filtered locally from the minimum unique schedule datasets, while unsupported sports such as golf or track and field use legacy provider/EPG matching without an API call.</div>
           </div>
 
           <div class="sports-subsection">
             <div class="mb-3">
               <h3 class="h6 mb-2">What do you want to watch?</h3>
               <button id="sportsAddSelectionBtn" class="btn btn-success btn-sm mb-2" type="button">+ Add sports selection</button>
-              <p class="small-muted mb-0">Choose broad sports or drill into leagues, series, tours, promotions, conferences, and teams.</p>
+              <p class="small-muted mb-0">Choose broad sports or drill into leagues, conferences, and teams.</p>
               <div id="sportsEverythingModeNotice" class="sports-everything-notice d-none mt-3" role="status"></div>
             </div>
             <div id="sportsRules" class="sports-rules"></div>
@@ -474,7 +447,7 @@
             <div class="sports-options">
               <div class="form-check">
                 <input id="sportsIncludeReplays" class="form-check-input" type="checkbox">
-                <label class="form-check-label" for="sportsIncludeReplays">Include replays and encore broadcasts</label>
+                <label class="form-check-label" for="sportsIncludeReplays">Include replays and classic games</label>
               </div>
               <div class="form-check">
                 <input id="sportsIncludePregame" class="form-check-input" type="checkbox">
@@ -590,7 +563,7 @@
         <div class="modal-header border-secondary">
           <div>
             <h5 class="modal-title">Add sports selection</h5>
-            <div class="small-muted">Choose a broad sport or drill into a league, series, tour, promotion, conference, or team.</div>
+            <div class="small-muted">Choose a broad sport or drill into a league, conference, or team.</div>
             <div class="sports-everything-option mt-3">
               <div class="form-check">
                 <input id="sportsEverythingMode" class="form-check-input" type="checkbox">
@@ -606,7 +579,7 @@
             <div>
               <label class="form-label" for="sportsSelectionType">Type</label>
               <select id="sportsSelectionType" class="form-select">
-                <option value="league">League / series / tour</option>
+                <option value="league">League</option>
                 <option value="sport">Sport</option>
                 <option value="conference">Conference</option>
                 <option value="team">Team</option>
@@ -634,6 +607,36 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='22.1-rc2') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='v30-experiments-exp12-schedule-api-state') }}"></script>
+  <script>
+    (() => {
+      // Keep unsaved credentials untouched by background sports status renders,
+      // and present saved credential state separately from the selected-dataset plan.
+      const originalRenderSportsScheduleApi = renderSportsScheduleApi;
+      renderSportsScheduleApi = function() {
+        const keyInput = document.getElementById("sportsScheduleApiKey");
+        const pendingKey = keyInput?.value || "";
+        originalRenderSportsScheduleApi();
+
+        const api = sportsState.schedule_api || {};
+        const configured = Boolean(api.key_configured || api.configured);
+        if (keyInput && pendingKey) keyInput.value = pendingKey;
+
+        const removeButton = document.getElementById("sportsScheduleApiRemove");
+        if (removeButton) {
+          removeButton.classList.toggle("d-none", !configured);
+          removeButton.disabled = !configured;
+        }
+
+        const status = document.getElementById("sportsScheduleApiStatus");
+        const datasets = api.plan?.datasets || [];
+        if (status && configured && api.enabled && !datasets.length) {
+          status.textContent = "API key saved ✓ • API-SPORTS configured • no supported sports selected yet.";
+        } else if (status && configured && !api.enabled) {
+          status.textContent = "API key saved ✓ • Schedule API disabled • legacy provider/EPG matching active.";
+        }
+      };
+    })();
+  </script>
 </body>
 </html>

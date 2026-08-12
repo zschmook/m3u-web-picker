@@ -1,62 +1,89 @@
-# Normal long-running instance.
+# v30-experiments: disposable/isolated debug stack.
 #
-# Host paths and container paths are different things:
-#   - The LEFT side/source is a folder on the computer running Docker.
-#   - The RIGHT side/target is the path visible inside the Linux container.
+# This intentionally does NOT use the normal m3u-picker container name,
+# normal named volume, normal backup folder, or normal host port.
+# It is safe to run beside the stable main instance.
 #
-# The app always writes nightly DB backups to /backups INSIDE the container.
-# M3U_BACKUP_DIR chooses which HOST folder Docker maps to /backups.
+# Start (also launches the native HDHomeRun discovery helper quietly):
+#   sh scripts/start-experiments.sh
 #
-# Examples for a .env file next to this Compose file:
-#   Linux:   M3U_BACKUP_DIR=/home/me/Documents/m3u_picker/nightly
-#   macOS:   M3U_BACKUP_DIR=/Users/me/Documents/m3u_picker/nightly
-#   Windows: M3U_BACKUP_DIR=C:/Users/me/Documents/m3u_picker/nightly
-#   Portable default: M3U_BACKUP_DIR=./backups
+# Open:
+#   http://localhost:10000  (Cast control on this Mac)
+#   http://10.0.0.22:10000  (LAN access / Chromecast/Roku media relay)
+#   http://10.0.0.22        (HDHomeRun/Jellyfin bare-IP compatibility)
 #
-# Live runtime state is stored in a named Docker volume at /app/data and is
-# also copied safely to the host backup folder each night.
-name: m3u-picker
+# Stop/remove only this experiment (also stops the discovery helper):
+#   sh scripts/stop-experiments.sh
+#
+# Reset ONLY the experimental state:
+#   docker compose down
+#   rm -rf debug-data
+#   mkdir -p debug-data
+
+name: m3u-picker-v30-experiments
 
 services:
-  m3u-picker:
+  m3u-picker-v30-experiments:
     build:
       context: .
       dockerfile: Dockerfile
 
-    container_name: m3u-picker
+    container_name: m3u-picker-v30-experiments
 
     ports:
-      # HOST:CONTAINER. Change M3U_HOST_PORT if 9999 is already occupied.
-      - "${M3U_HOST_PORT:-9999}:9999"
+      # Normal experimental UI/media path.
+      - "0.0.0.0:10000:9998"
+      # Jellyfin HDHomeRun discovery follows the UDP reply with a bare-IP
+      # http://<device-ip>/discover.json request, so expose the same Flask app
+      # directly on host port 80 instead of requiring hdhr_port80_proxy.py.
+      - "0.0.0.0:80:9998"
 
     environment:
-      # Enable the in-app nightly SQLite backup scheduler. No host cron needed.
-      M3U_BACKUP_ENABLED: "true"
-      M3U_DATA_DIR: /app/data
+      FLASK_DEBUG: "1"
+      PYTHONUNBUFFERED: "1"
+      M3U_BACKUP_ENABLED: "false"
+      # exp8: the Chromecast/Google TV and Roku fetch HLS from the host over the LAN.
+      M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
+      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
+      M3U_DATA_DIR: /app/debug-data
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
       M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
       M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
       M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES: "${M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES:-268435456}"
-      M3U_BACKUP_CONTAINER_DIR: /backups
-      BACKUP_TIME: "03:15"
-      BACKUP_TIMEZONE: "America/New_York"
-      BACKUP_RETENTION_DAYS: "30"
 
-      # Master playlist refresh remains at 3:00 AM. Sports has its own time in
-      # the web UI and defaults to 3:00 AM as well.
-      MASTER_REFRESH_HOUR: "3"
-      MASTER_REFRESH_MINUTE: "0"
+    # Debug/reloader mode is deliberate for v30-experiments.
+    command: ["python", "app.py", "--dev"]
 
+    # Bind the source tree for fast experiments while keeping runtime state in
+    # this download's ./debug-data folder only.
     volumes:
       - type: bind
-        source: "${M3U_BACKUP_DIR:-./backups}"
-        target: /backups
-      - type: volume
-        source: m3u-picker-data
-        target: /app/data
+        source: ./app.py
+        target: /app/app.py
+      - type: bind
+        source: ./core.py
+        target: /app/core.py
+      - type: bind
+        source: ./hdhr_config.py
+        target: /app/hdhr_config.py
+      - type: bind
+        source: ./sports
+        target: /app/sports
+      - type: bind
+        source: ./backup.py
+        target: /app/backup.py
+      - type: bind
+        source: ./api
+        target: /app/api
+      - type: bind
+        source: ./static
+        target: /app/static
+      - type: bind
+        source: ./templates
+        target: /app/templates
+      - type: bind
+        source: ./debug-data
+        target: /app/debug-data
 
     restart: unless-stopped
-
-volumes:
-  m3u-picker-data:

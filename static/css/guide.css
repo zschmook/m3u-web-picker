@@ -1,0 +1,289 @@
+.guide-body {
+  min-width: 320px;
+}
+
+.guide-shell {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.guide-header,
+.guide-player-heading,
+.guide-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guide-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: .65rem 0;
+  background: rgba(17, 24, 39, .98);
+  border-bottom: 1px solid #374151;
+}
+
+.guide-header-copy,
+.guide-player-copy {
+  min-width: 0;
+}
+
+.guide-player-panel {
+  padding: .9rem;
+  border: 1px solid #374151;
+  border-radius: .65rem;
+  background: #1f2937;
+}
+
+.guide-player-heading {
+  align-items: flex-start;
+}
+
+.guide-player-kicker {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .2rem;
+}
+
+.guide-player-title {
+  max-width: 100%;
+  font-size: 1.05rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-player-meta {
+  min-height: 1.25rem;
+  margin-top: .12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-player-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 0 0 auto;
+}
+
+.guide-player {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  margin-top: .7rem;
+  background: #000;
+  border-radius: .45rem;
+}
+
+.guide-cast-screen {
+  width: 100%;
+  min-height: 180px;
+  margin-top: .7rem;
+  border: 1px solid #374151;
+  border-radius: .45rem;
+  background: #030712;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: .35rem;
+}
+
+.guide-cast-icon {
+  font-size: 1.45rem;
+  opacity: .75;
+}
+
+.guide-cast-screen-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.guide-player-message {
+  min-height: 1.3rem;
+  margin-top: .45rem;
+}
+
+.guide-diagnostics {
+  margin-top: .25rem;
+  color: #9ca3af;
+  font-size: .82rem;
+}
+
+.guide-diagnostics summary {
+  width: max-content;
+  cursor: pointer;
+  user-select: none;
+}
+
+.guide-diagnostics-body {
+  margin-top: .55rem;
+  padding-top: .55rem;
+  border-top: 1px solid #374151;
+}
+
+.guide-cast-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem .6rem;
+}
+
+.guide-cast-host-label {
+  color: #d1d5db;
+  white-space: nowrap;
+}
+
+.guide-cast-relay {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #93c5fd;
+}
+
+.guide-lan-test {
+  white-space: nowrap;
+}
+
+.guide-cast-status {
+  margin-top: .4rem;
+}
+
+.guide-controls {
+  max-width: 900px;
+}
+
+.guide-filter-heading {
+  margin-bottom: .25rem;
+}
+
+.guide-count {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.guide-list-wrap {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #374151;
+  border-radius: .6rem;
+}
+
+.guide-table thead th {
+  top: 0;
+}
+
+.guide-table tbody tr.guide-current-row > * {
+  background: rgba(37, 99, 235, .12);
+}
+
+.guide-number-col {
+  width: 72px;
+}
+
+.guide-group-col {
+  width: 260px;
+}
+
+.guide-action-col {
+  width: 92px;
+}
+
+.guide-channel-cell {
+  min-width: 0;
+}
+
+.guide-channel-main {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-width: 0;
+}
+
+.guide-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  object-fit: contain;
+  border-radius: .35rem;
+  background: #111827;
+}
+
+.guide-channel-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-channel-subtitle {
+  margin-top: .12rem;
+  color: #9ca3af;
+  font-size: .85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-generated-badge {
+  margin-left: .45rem;
+  font-size: .7rem;
+  vertical-align: .1rem;
+}
+
+.guide-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #9ca3af;
+}
+
+@media (max-width: 760px) {
+  .guide-header,
+  .guide-player-heading {
+    align-items: flex-start;
+  }
+
+  .guide-player-heading {
+    flex-direction: column;
+  }
+
+  .guide-player-actions {
+    width: 100%;
+  }
+
+  .guide-player-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .guide-group-col,
+  .guide-table td:nth-child(3) {
+    display: none;
+  }
+
+  .guide-number-col {
+    width: 58px;
+  }
+
+  .guide-action-col {
+    width: 78px;
+  }
+}
+
+.guide-roku-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem .6rem;
+  margin-top: .7rem;
+}
+
+.guide-roku-host {
+  width: 170px;
+  max-width: 100%;
+}
