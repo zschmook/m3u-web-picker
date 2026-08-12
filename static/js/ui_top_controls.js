@@ -3,12 +3,12 @@
 
   const el = id => document.getElementById(id);
 
-  function shortTime(value) {
+  function displayTime(value) {
     if (!value) return "Never";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
     return date.toLocaleString([], {
-      weekday: "short",
+      weekday: "long",
       hour: "numeric",
       minute: "2-digit"
     });
@@ -105,7 +105,7 @@
     const bits = [
       "Sports API",
       label,
-      latest ? `Last ${shortTime(latest)}` : "No refresh yet",
+      latest ? displayTime(latest) : "No refresh yet",
       api.effective ? `${totalGames.toLocaleString()} game${totalGames === 1 ? "" : "s"}` : ""
     ].filter(Boolean);
 
