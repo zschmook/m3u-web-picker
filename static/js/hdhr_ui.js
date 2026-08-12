@@ -22,6 +22,7 @@
   // toolbar location if the refactor shell is not present.
   if (topStatus?.parentNode) {
     topStatus.insertAdjacentElement("afterend", panel);
+    document.querySelector(".ui-hdhr-mirror")?.classList.add("d-none");
   } else if (brand) {
     brand.appendChild(panel);
   } else {
@@ -39,8 +40,8 @@
     toggle.disabled = busy;
     status.className = enabled ? "small text-success" : "small-muted";
     status.textContent = enabled
-      ? `Enabled · ${data?.tuner_count || 0} tuners`
-      : "Disabled";
+      ? `Enabled · ${data?.tuner_count || 0} tuners · lineup tagged ${data?.guide_name_suffix || "[HDHR]"}`
+      : "Disabled · HDHomeRun HTTP and discovery are suppressed";
   }
 
   async function load() {
