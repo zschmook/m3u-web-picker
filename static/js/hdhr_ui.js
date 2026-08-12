@@ -40,7 +40,7 @@
     toggle.disabled = busy;
     status.className = enabled ? "small text-success" : "small-muted";
     status.textContent = enabled
-      ? `Enabled · ${data?.tuner_count || 0} tuners · lineup tagged ${data?.guide_name_suffix || "[HDHR]"}`
+      ? `Enabled · ${data?.tuner_count || 0} tuners`
       : "Disabled · HDHomeRun HTTP and discovery are suppressed";
   }
 
