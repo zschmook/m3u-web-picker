@@ -82,6 +82,23 @@ def _write_state(pid: int, lan_host: str, external_port: int) -> None:
 def _process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+
+    if os.name == "nt":
+        # os.kill(pid, 0) is not a harmless existence probe on Windows; use a
+        # query-only process handle instead so status checks never terminate it.
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            pid,
+        )
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+
     try:
         os.kill(pid, 0)
     except OSError:
@@ -92,6 +109,13 @@ def _process_alive(pid: int) -> bool:
 def _state_pid(state: dict) -> int:
     try:
         return int(state.get("pid", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _state_port(state: dict) -> int:
+    try:
+        return int(state.get("external_port", 0) or 0)
     except (TypeError, ValueError):
         return 0
 
@@ -131,7 +155,7 @@ def _start_helper(lan_host: str, external_port: int) -> None:
     pid = _state_pid(state)
     same_config = (
         str(state.get("lan_host", "")) == lan_host
-        and int(state.get("external_port", 0) or 0) == external_port
+        and _state_port(state) == external_port
     )
     if pid and _process_alive(pid) and same_config:
         return
