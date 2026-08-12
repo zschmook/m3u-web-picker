@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const GUIDE_VISIBLE_UPCOMING = 4;
+  const GUIDE_VISIBLE_UPCOMING = 3;
 
   function formatGuideClock(value) {
     if (!value) return "";
@@ -73,9 +73,9 @@
         ${start ? `<span class="guide-upcoming-time">${escapeHtml(start)}</span>` : ""}
         <span class="guide-upcoming-title">${escapeHtml(programme.title || "Untitled")}</span>
       </span>`;
-    }).join("");
+    }).join('<span class="guide-upcoming-separator" aria-hidden="true">·</span>');
     return `<div class="guide-upcoming">
-      <span class="guide-upcoming-label">Coming up</span>
+      <span class="guide-upcoming-label">Next</span>
       <div class="guide-upcoming-list">${items}</div>
     </div>`;
   }
@@ -210,9 +210,6 @@
     guideEls.castScreenChannel.textContent = remoteProgrammeCopy(guideState.currentChannel);
   };
 
-  // The original guide click handler reconstructs a minimal channel object from
-  // button data attributes. Intercept it so playback keeps the programme metadata
-  // attached to the canonical channel object.
   guideEls.rows.addEventListener("click", event => {
     const button = event.target.closest(".guide-play-btn");
     if (!button) return;
@@ -222,7 +219,6 @@
     if (channel) playChannel(channel);
   }, true);
 
-  // Search the actual programmes too, not merely channel identity.
   guideEls.search.addEventListener("input", event => {
     event.stopImmediatePropagation();
     renderGuide();
@@ -237,11 +233,6 @@
     loadGuide();
   }, true);
 
-  // Programme transitions happen even when epg.xml itself has not changed.
-  // Re-select current/upcoming shows once per minute while preserving playback.
   window.setInterval(() => loadGuide({silent: true}), 60_000);
-
-  // guide.js starts its initial request before this overlay loads. Run one
-  // enriched request now so the first paint settles on programme-aware rows.
   loadGuide();
 })();
