@@ -55,7 +55,7 @@ def _update_health() -> dict:
         warning = str(source.get("warning") or "").strip()
         name = str(source.get("name") or "Fallback Provider")
         if error:
-            stages.append(_stage(name, "warning", error, kind="provider"))
+            stages.append(_stage(name, "error", error, kind="provider"))
         elif warning:
             stages.append(_stage(name, "warning", warning, kind="provider"))
         elif not source.get("deferred"):
@@ -71,12 +71,16 @@ def _update_health() -> dict:
         if not country.get("enabled"):
             continue
         error = str(country.get("last_error") or "").strip()
-        detail = error or (
-            f"{int(country.get('filtered_channels') or 0):,} filtered channels"
-            if country.get("cached")
-            else "Enabled; awaiting first successful refresh."
-        )
-        stages.append(_stage(f"Public EPG — {country.get('name') or country.get('code')}", "error" if error else "success", detail, kind="epg"))
+        if error:
+            status = "error"
+            detail = error
+        elif country.get("cached"):
+            status = "success"
+            detail = f"{int(country.get('filtered_channels') or 0):,} filtered channels"
+        else:
+            status = "setup"
+            detail = "Enabled; awaiting first successful refresh."
+        stages.append(_stage(f"Public EPG — {country.get('name') or country.get('code')}", status, detail, kind="epg"))
 
     sports_status = core.enrich_sports_status(sports.status_payload(core.DB_PATH))
     settings = sports_status.get("settings") or {}
