@@ -61,4 +61,22 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS roku_devices (
+            device_key TEXT PRIMARY KEY,
+            device_id TEXT NOT NULL DEFAULT '',
+            serial_number TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT 'Roku TV',
+            model TEXT NOT NULL DEFAULT '',
+            model_number TEXT NOT NULL DEFAULT '',
+            software_version TEXT NOT NULL DEFAULT '',
+            host TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_roku_devices_host ON roku_devices(host)")
     conn.commit()
