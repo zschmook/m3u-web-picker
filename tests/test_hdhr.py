@@ -19,11 +19,15 @@ SAMPLE_CHANNELS = [
     {
         "number": 7,
         "name": "NBC 10",
+        "tvg_id": "nbc10.example",
+        "generated": False,
         "play_url": "/guide/play/manual/manual-token",
     },
     {
         "number": 1000,
         "name": "Phillies vs Nationals",
+        "tvg_id": "m3u-picker-sports-1000",
+        "generated": True,
         "play_url": "/guide/play/sports/1000",
     },
 ]
@@ -108,8 +112,15 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         )
         self.assertEqual(browser.status_code, 404)
 
+    @patch("api.hdhr._manual_tvg_names_by_number", return_value={})
+    @patch("api.hdhr._xmltv_display_names", return_value={})
     @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
-    def test_lineup_uses_exact_curated_channel_numbers_and_names(self, _curated):
+    def test_lineup_uses_exact_curated_channel_numbers_and_names(
+        self,
+        _curated,
+        _xmltv_names,
+        _tvg_names,
+    ):
         response = self.client.get(
             "/lineup.json",
             base_url="http://10.0.0.22:10000",
@@ -133,6 +144,69 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         )
         self.assertEqual(SAMPLE_CHANNELS[0]["name"], "NBC 10")
         self.assertEqual(SAMPLE_CHANNELS[1]["name"], "Phillies vs Nationals")
+
+    @patch("api.hdhr._manual_tvg_names_by_number", return_value={"7": "US: MSNBC HD"})
+    @patch("api.hdhr._xmltv_display_names", return_value={"msnbc.us": "MSNBC"})
+    @patch(
+        "api.hdhr.core.curated_channels_for_guide",
+        return_value=[
+            {
+                "number": 7,
+                "name": "US: MSNBC HD",
+                "tvg_id": "MSNBC.US",
+                "generated": False,
+                "play_url": "/guide/play/manual/manual-token",
+            },
+            {
+                "number": 1000,
+                "name": "Phillies vs Nationals",
+                "tvg_id": "m3u-picker-sports-1000",
+                "generated": True,
+                "play_url": "/guide/play/sports/1000",
+            },
+        ],
+    )
+    def test_manual_lineup_prefers_xmltv_display_name_but_keeps_sports_name(
+        self,
+        _curated,
+        _xmltv_names,
+        _tvg_names,
+    ):
+        response = self.client.get(
+            "/lineup.json",
+            base_url="http://10.0.0.22:10000",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload[0]["GuideName"], "MSNBC")
+        self.assertEqual(payload[1]["GuideName"], "Phillies vs Nationals")
+
+    @patch("api.hdhr._manual_tvg_names_by_number", return_value={"7": "NBC News NOW"})
+    @patch("api.hdhr._xmltv_display_names", return_value={})
+    @patch(
+        "api.hdhr.core.curated_channels_for_guide",
+        return_value=[
+            {
+                "number": 7,
+                "name": "US: NBC News NOW",
+                "tvg_id": "missing-id",
+                "generated": False,
+                "play_url": "/guide/play/manual/manual-token",
+            }
+        ],
+    )
+    def test_manual_lineup_falls_back_to_provider_tvg_name(
+        self,
+        _curated,
+        _xmltv_names,
+        _tvg_names,
+    ):
+        response = self.client.get(
+            "/lineup.json",
+            base_url="http://10.0.0.22:10000",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()[0]["GuideName"], "NBC News NOW")
 
     def test_lineup_status_advertises_plex_scan_handshake(self):
         response = self.client.get("/lineup_status.json")
