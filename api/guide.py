@@ -3,6 +3,7 @@ import re
 from flask import Response, jsonify, redirect, request, send_file
 
 import core
+import roku_devices
 import sports
 from guide_epg import enrich_guide_channels
 from media import browser, hls
@@ -41,6 +42,16 @@ def _cast_cors(response: Response) -> Response:
     response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Accept-Encoding, Content-Type, Range"
     response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Accept-Ranges, Content-Type"
     return response
+
+
+def _resolve_roku_host(data: dict) -> tuple[str, str]:
+    key = str(data.get("roku_device_key", "") or "").strip()
+    if key:
+        saved = roku_devices.get_saved(core.DB_PATH, key)
+        if saved is None:
+            raise ValueError("Saved Roku device was not found.")
+        return roku.normalize_host(saved["host"]), key
+    return roku.normalize_host(data.get("roku_host", "")), ""
 
 
 def register_guide_routes(app):
@@ -103,29 +114,69 @@ def register_guide_routes(app):
         response = jsonify(ok=True, stopped=stopped)
         return no_cache(response)
 
+    @app.get("/api/guide/roku/devices")
+    def api_guide_roku_devices():
+        return no_cache(jsonify(ok=True, devices=roku_devices.list_saved(core.DB_PATH)))
+
+    @app.post("/api/guide/roku/devices")
+    def api_guide_roku_save_device():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            host = roku.normalize_host(data.get("roku_host", ""))
+            info = roku.device_info(host)
+            saved = roku_devices.save_device(core.DB_PATH, host, info)
+        except (ValueError, RuntimeError) as exc:
+            return json_error(exc, 502)
+        return no_cache(jsonify(ok=True, device=saved))
+
+    @app.post("/api/guide/roku/devices/remove")
+    def api_guide_roku_remove_device():
+        data = request.get_json(force=True, silent=True) or {}
+        key = str(data.get("roku_device_key", "") or "").strip()
+        if not key:
+            return json_error("Choose a saved Roku device first.", 400)
+        removed = roku_devices.remove_device(core.DB_PATH, key)
+        return no_cache(jsonify(ok=True, removed=removed))
+
     @app.get("/api/guide/roku/discover")
     def api_guide_roku_discover():
         settings = load_settings()
         lan_host = str(settings.lan_host or "").strip()
         if not lan_host:
-            return no_cache(jsonify(ok=True, devices=[], subnet=""))
+            return no_cache(jsonify(ok=True, devices=[], saved_devices=roku_devices.list_saved(core.DB_PATH), subnet=""))
         try:
             devices = roku.discover_devices(lan_host)
+            devices = roku_devices.reconcile_discovered(core.DB_PATH, devices)
         except ValueError as exc:
-            return no_cache(jsonify(ok=True, devices=[], subnet="", warning=str(exc)))
+            return no_cache(jsonify(ok=True, devices=[], saved_devices=roku_devices.list_saved(core.DB_PATH), subnet="", warning=str(exc)))
         parts = lan_host.split(".")
         subnet = ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else ""
-        return no_cache(jsonify(ok=True, devices=devices, subnet=subnet))
+        return no_cache(jsonify(
+            ok=True,
+            devices=devices,
+            saved_devices=roku_devices.list_saved(core.DB_PATH),
+            subnet=subnet,
+        ))
 
     @app.post("/api/guide/roku/test")
     def api_guide_roku_test():
         data = request.get_json(force=True, silent=True) or {}
         try:
-            host = roku.normalize_host(data.get("roku_host", ""))
+            host, requested_key = _resolve_roku_host(data)
             info = roku.device_info(host)
+            key = roku_devices.device_key(info)
+            saved = roku_devices.get_saved(core.DB_PATH, key) if key else None
+            if saved:
+                saved = roku_devices.save_device(core.DB_PATH, host, info)
         except (ValueError, RuntimeError) as exc:
             return json_error(exc, 502)
-        response = jsonify(ok=True, roku_host=host, device=info)
+        response = jsonify(
+            ok=True,
+            roku_host=host,
+            roku_device_key=key or requested_key,
+            saved=bool(saved),
+            device={**info, "device_key": key, "saved": bool(saved)},
+        )
         return no_cache(response)
 
     @app.post("/api/guide/roku/start")
@@ -139,7 +190,7 @@ def register_guide_routes(app):
         if not media_origin:
             return json_error("LAN media relay is not configured.", 409)
         try:
-            host = roku.normalize_host(data.get("roku_host", ""))
+            host, requested_key = _resolve_roku_host(data)
             session = hls.start_session(target)
             playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
             media_url = media_origin.rstrip("/") + playlist_path
@@ -148,6 +199,10 @@ def register_guide_routes(app):
                 info = roku.device_info(host)
             except RuntimeError:
                 info = {"name": "Roku"}
+            key = roku_devices.device_key(info) or requested_key
+            saved = roku_devices.get_saved(core.DB_PATH, key) if key else None
+            if saved and info.get("device_id") or saved and info.get("serial_number"):
+                saved = roku_devices.save_device(core.DB_PATH, host, info)
         except (ValueError, RuntimeError) as exc:
             if "session" in locals():
                 hls.stop_session(session.token)
@@ -155,7 +210,9 @@ def register_guide_routes(app):
         response = jsonify(
             ok=True,
             roku_host=host,
-            device=info,
+            roku_device_key=key,
+            saved=bool(saved),
+            device={**info, "device_key": key, "saved": bool(saved)},
             token=session.token,
             playlist_path=playlist_path,
             media_url=media_url,
@@ -167,7 +224,12 @@ def register_guide_routes(app):
         data = request.get_json(force=True, silent=True) or {}
         token = str(data.get("token", "") or "")
         stopped = hls.stop_session(token) if token else False
-        host = str(data.get("roku_host", "") or "").strip()
+        host = ""
+        try:
+            if data.get("roku_device_key") or data.get("roku_host"):
+                host, _key = _resolve_roku_host(data)
+        except ValueError:
+            host = ""
         home_sent = False
         if host:
             try:
