@@ -48,7 +48,7 @@ class GuideEpgTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def test_exact_tvg_id_gets_now_and_next(self):
+    def test_exact_tvg_id_gets_now_next_and_upcoming_schedule(self):
         self._write_epg()
         channels = [
             {
@@ -69,6 +69,10 @@ class GuideEpgTests(unittest.TestCase):
         self.assertEqual(enriched[0]["now"]["title"], "Dateline NBC")
         self.assertEqual(enriched[0]["now"]["subtitle"], "The Mystery")
         self.assertEqual(enriched[0]["next"]["title"], "NBC News")
+        self.assertEqual(
+            [programme["title"] for programme in enriched[0]["upcoming"]],
+            ["NBC News"],
+        )
         self.assertEqual(status["channel_count"], 1)
         self.assertEqual(status["matched_channels"], 1)
         self.assertEqual(status["current_channels"], 1)
@@ -94,10 +98,11 @@ class GuideEpgTests(unittest.TestCase):
 
         self.assertIsNone(enriched[0]["now"])
         self.assertIsNone(enriched[0]["next"])
+        self.assertEqual(enriched[0]["upcoming"], [])
         self.assertEqual(status["matched_channels"], 0)
         self.assertEqual(status["current_channels"], 0)
 
-    def test_future_programme_is_reported_as_next_without_current(self):
+    def test_future_programme_is_reported_as_next_and_upcoming_without_current(self):
         self._write_epg()
         channels = [
             {
@@ -117,6 +122,7 @@ class GuideEpgTests(unittest.TestCase):
 
         self.assertIsNone(enriched[0]["now"])
         self.assertEqual(enriched[0]["next"]["title"], "Later Show")
+        self.assertEqual(enriched[0]["upcoming"][0]["title"], "Later Show")
         self.assertEqual(status["matched_channels"], 1)
         self.assertEqual(status["current_channels"], 0)
 
@@ -139,6 +145,7 @@ class GuideEpgTests(unittest.TestCase):
 
         self.assertEqual(len(enriched), 1)
         self.assertIsNone(enriched[0]["now"])
+        self.assertEqual(enriched[0]["upcoming"], [])
         self.assertFalse(status["available"])
         self.assertIn("not available", status["error"])
 

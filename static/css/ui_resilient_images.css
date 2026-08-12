@@ -1,0 +1,13 @@
+.ui-guide-logo-fallback {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #93c5fd;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.ui-logo-fallback {
+  user-select: none;
+}

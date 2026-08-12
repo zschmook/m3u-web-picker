@@ -1,105 +1,285 @@
-.guide-channel-main {
-  align-items: flex-start;
+.guide-controls {
+  max-width: 1000px;
 }
 
-.guide-channel-copy {
-  min-width: 0;
-  width: 100%;
+.guide-timeline-wrap {
+  max-height: 72vh;
+  overflow: auto;
+  background: #0f172a;
 }
 
-.guide-channel-identity {
+.guide-timeline {
+  --guide-station-width: 310px;
+  min-width: calc(var(--guide-station-width) + var(--guide-timeline-width));
+  background: #111827;
+}
+
+.guide-timeline-head,
+.guide-grid-row {
+  display: grid;
+  grid-template-columns: var(--guide-station-width) var(--guide-timeline-width);
+}
+
+.guide-timeline-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 46px;
+  border-bottom: 1px solid #475569;
+}
+
+.guide-station-head {
+  position: sticky;
+  left: 0;
+  z-index: 32;
   display: flex;
   align-items: center;
-  gap: .35rem;
-  min-width: 0;
-  color: #9ca3af;
-  font-size: .78rem;
-  font-weight: 600;
-}
-
-.guide-channel-identity-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.guide-programme-now {
-  display: flex;
-  align-items: baseline;
-  gap: .45rem;
-  min-width: 0;
-  margin-top: .15rem;
-}
-
-.guide-programme-now-badge {
-  flex: 0 0 auto;
-  color: #86efac;
-  font-size: .68rem;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.guide-programme-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #f9fafb;
-  font-size: 1rem;
-  font-weight: 750;
-}
-
-.guide-programme-time {
-  flex: 0 0 auto;
-  color: #d1d5db;
-  font-size: .78rem;
-  white-space: nowrap;
-}
-
-.guide-programme-subtitle {
-  margin-top: .05rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #cbd5e1;
-  font-size: .8rem;
-}
-
-.guide-programme-next,
-.guide-programme-empty {
-  margin-top: .12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #9ca3af;
-  font-size: .78rem;
-}
-
-.guide-programme-next-label {
-  color: #93c5fd;
+  padding: 0 .8rem;
+  background: #1f2937;
+  border-right: 1px solid #475569;
+  color: #e5e7eb;
   font-weight: 700;
 }
 
-.guide-programme-empty {
+.guide-time-head {
+  position: relative;
+  height: 46px;
+  background: #1f2937;
+}
+
+.guide-time-slot {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: .5rem;
+  border-left: 1px solid #475569;
+  color: #cbd5e1;
+  font-size: .76rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.guide-timeline-body {
+  position: relative;
+}
+
+.guide-grid-row {
+  min-height: 78px;
+  border-bottom: 1px solid #334155;
+}
+
+.guide-grid-row:last-child {
+  border-bottom: 0;
+}
+
+.guide-station-cell {
+  position: sticky;
+  left: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 0;
+  padding: .5rem .55rem;
+  background: #111827;
+  border-right: 1px solid #475569;
+}
+
+.guide-grid-row.guide-current-row .guide-station-cell {
+  background: #172554;
+}
+
+.guide-station-number {
+  width: 28px;
+  flex: 0 0 28px;
+  color: #e5e7eb;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  margin: 0;
+  object-fit: contain;
+  border-radius: .35rem;
+  background: #0b1220;
+}
+
+.guide-station-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.guide-station-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f8fafc;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.guide-station-group {
+  margin-top: .1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #94a3b8;
+  font-size: .68rem;
+}
+
+.guide-generated-badge {
+  margin-left: .35rem;
+  font-size: .62rem;
+  vertical-align: .08rem;
+}
+
+.guide-station-play {
+  flex: 0 0 auto;
+  padding: .22rem .45rem;
+  font-size: .72rem;
+}
+
+.guide-programme-track {
+  position: relative;
+  height: 78px;
+  overflow: hidden;
+  background-color: #0f172a;
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(var(--guide-slot-width) - 1px),
+    rgba(100, 116, 139, .28) calc(var(--guide-slot-width) - 1px),
+    rgba(100, 116, 139, .28) var(--guide-slot-width)
+  );
+}
+
+.guide-programme-block {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 10px;
+  overflow: hidden;
+  padding: .32rem .45rem;
+  border: 1px solid #475569;
+  border-radius: .38rem;
+  background: #1e293b;
+  color: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.guide-programme-block:hover,
+.guide-programme-block:focus-visible {
+  z-index: 4;
+  border-color: #93c5fd;
+  background: #27364d;
+  outline: none;
+}
+
+.guide-programme-block.is-current {
+  border-color: #22c55e;
+  background: #123525;
+}
+
+.guide-programme-block-title,
+.guide-programme-block-time,
+.guide-programme-block-subtitle {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-programme-block-title {
+  font-size: .78rem;
+  font-weight: 750;
+}
+
+.guide-programme-block-time {
+  margin-top: .08rem;
+  color: #cbd5e1;
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-programme-block-subtitle {
+  margin-top: .04rem;
+  color: #94a3b8;
+  font-size: .64rem;
+}
+
+.guide-track-empty {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding-left: .7rem;
+  color: #64748b;
+  font-size: .72rem;
   font-style: italic;
+}
+
+.guide-now-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 8;
+  width: 2px;
+  background: #fb7185;
+  pointer-events: none;
+}
+
+.guide-time-head .guide-now-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -1px) rotate(45deg);
+  background: #fb7185;
 }
 
 .guide-epg-warning {
   color: #fbbf24;
 }
 
-.guide-logo {
-  margin-top: .15rem;
-}
-
-@media (max-width: 760px) {
-  .guide-programme-now {
-    display: block;
+@media (max-width: 900px) {
+  .guide-timeline {
+    --guide-station-width: 270px;
   }
 
-  .guide-programme-time {
-    display: block;
-    margin-top: .05rem;
+  .guide-station-group {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .guide-timeline {
+    --guide-station-width: 235px;
+  }
+
+  .guide-station-number {
+    width: 22px;
+    flex-basis: 22px;
+  }
+
+  .guide-logo {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+  }
+
+  .guide-station-play {
+    display: none;
   }
 }

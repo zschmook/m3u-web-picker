@@ -19,12 +19,26 @@ def index():
     html = render_template("index.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=schedule-api-health-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_sections.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_provider_cleanup.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_top_controls.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n</head>',
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=hdhr-support-toggle-1"></script>\n'
-        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-1"></script>\n</body>',
+        '<script src="/static/js/experiments_ui.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_refactor.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_themes.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_sections.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
+        '<script src="/static/js/ui_top_controls.js?v=ui-top-controls-10"></script>\n'
+        '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n</body>',
     )
 
 
@@ -33,12 +47,15 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=now-next-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-4">\n'
+        '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
         '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=now-next-1"></script>\n</body>',
+        '<script src="/static/js/guide_programmes.js?v=tv-grid-4"></script>\n'
+        '<script src="/static/js/guide_roku_button.js?v=roku-button-1"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
 
@@ -67,10 +84,6 @@ if __name__ == "__main__":
 
     run_port = DEV_PORT if args.dev else PORT
 
-    # In debug mode Werkzeug starts a reloader parent and then the real serving
-    # child. Bind UDP 65001 only in the serving process so discovery has one
-    # authoritative responder instead of two competing threads. The responder
-    # also follows the persisted HDHomeRun support switch at runtime.
     serving_process = (not args.dev) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     if serving_process and hdhr_config.is_enabled() and start_hdhr_discovery():
         atexit.register(stop_hdhr_discovery)
