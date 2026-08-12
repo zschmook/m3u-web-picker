@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const GUIDE_VISIBLE_UPCOMING = 4;
+
   function formatGuideClock(value) {
     if (!value) return "";
     const parsed = new Date(value);
@@ -19,19 +21,21 @@
   function programmeSearchText(channel) {
     const now = channel.now || {};
     const next = channel.next || {};
+    const upcoming = Array.isArray(channel.upcoming) ? channel.upcoming : [];
+    const programmeBits = programme => [
+      programme?.title,
+      programme?.subtitle,
+      programme?.description,
+      ...(Array.isArray(programme?.categories) ? programme.categories : []),
+    ];
     return [
       channel.number,
       channel.name,
       channel.group,
       channel.subtitle,
-      now.title,
-      now.subtitle,
-      now.description,
-      ...(Array.isArray(now.categories) ? now.categories : []),
-      next.title,
-      next.subtitle,
-      next.description,
-      ...(Array.isArray(next.categories) ? next.categories : []),
+      ...programmeBits(now),
+      ...programmeBits(next),
+      ...upcoming.flatMap(programmeBits),
     ].filter(Boolean).join(" ").toLowerCase();
   }
 
@@ -59,6 +63,23 @@
     return `${title} · ${channel.name || "Live TV"}`;
   }
 
+  function renderUpcoming(channel) {
+    const upcoming = Array.isArray(channel.upcoming) ? channel.upcoming : [];
+    if (!upcoming.length) return "";
+    const visible = upcoming.slice(0, GUIDE_VISIBLE_UPCOMING);
+    const items = visible.map(programme => {
+      const start = formatGuideClock(programme.start);
+      return `<span class="guide-upcoming-item">
+        ${start ? `<span class="guide-upcoming-time">${escapeHtml(start)}</span>` : ""}
+        <span class="guide-upcoming-title">${escapeHtml(programme.title || "Untitled")}</span>
+      </span>`;
+    }).join("");
+    return `<div class="guide-upcoming">
+      <span class="guide-upcoming-label">Coming up</span>
+      <div class="guide-upcoming-list">${items}</div>
+    </div>`;
+  }
+
   filteredGuideChannels = function() {
     const query = guideEls.search.value.trim().toLowerCase();
     if (!query) return guideState.channels;
@@ -77,7 +98,6 @@
       const now = channel.now || null;
       const next = channel.next || null;
       const nowRange = formatProgrammeRange(now);
-      const nextStart = formatGuideClock(next?.start);
       const programme = now
         ? `
           <div class="guide-programme-now">
@@ -89,9 +109,7 @@
         : next
           ? `<div class="guide-programme-empty">No programme airing now.</div>`
           : `<div class="guide-programme-empty">No guide data for this channel.</div>`;
-      const nextLine = next
-        ? `<div class="guide-programme-next"><span class="guide-programme-next-label">Next:</span> ${escapeHtml(next.title || "Untitled")}${nextStart ? ` · ${escapeHtml(nextStart)}` : ""}</div>`
-        : "";
+      const schedule = renderUpcoming(channel);
       const subtitle = channel.subtitle
         ? `<div class="guide-channel-subtitle">${escapeHtml(channel.subtitle)}</div>`
         : "";
@@ -107,7 +125,7 @@
                   <span class="guide-channel-identity-name">${escapeHtml(channel.name)}</span>${generated}
                 </div>
                 ${programme}
-                ${nextLine}
+                ${schedule}
                 ${subtitle}
               </div>
             </div>
@@ -137,7 +155,8 @@
 
     const matched = Number(epg.matched_channels || 0);
     const current = Number(epg.current_channels || 0);
-    guideEls.status.textContent = `${count.toLocaleString()} served • ${matched.toLocaleString()} with guide data • ${current.toLocaleString()} on now`;
+    const programmes = Number(epg.programme_count || 0);
+    guideEls.status.textContent = `${count.toLocaleString()} served • ${matched.toLocaleString()} with guide data • ${current.toLocaleString()} on now • ${programmes.toLocaleString()} shows loaded`;
   }
 
   loadGuide = async function(options = {}) {
@@ -192,7 +211,7 @@
   };
 
   // The original guide click handler reconstructs a minimal channel object from
-  // button data attributes. Intercept it so playback keeps the Now/Next metadata
+  // button data attributes. Intercept it so playback keeps the programme metadata
   // attached to the canonical channel object.
   guideEls.rows.addEventListener("click", event => {
     const button = event.target.closest(".guide-play-btn");
@@ -203,12 +222,14 @@
     if (channel) playChannel(channel);
   }, true);
 
-  // Replace the old search/render and manual refresh listeners without changing
-  // guide.js, which still owns the proven Cast/Roku playback state machines.
+  // Search the actual programmes too, not merely channel identity.
   guideEls.search.addEventListener("input", event => {
     event.stopImmediatePropagation();
     renderGuide();
   }, true);
+  const searchLabel = document.querySelector('label[for="guideSearch"]');
+  if (searchLabel) searchLabel.textContent = "Search guide";
+  guideEls.search.placeholder = "Channel, show, group, sports event…";
 
   document.getElementById("guideRefreshBtn")?.addEventListener("click", event => {
     event.preventDefault();
@@ -217,7 +238,7 @@
   }, true);
 
   // Programme transitions happen even when epg.xml itself has not changed.
-  // Re-select Now/Next once per minute while preserving active playback.
+  // Re-select current/upcoming shows once per minute while preserving playback.
   window.setInterval(() => loadGuide({silent: true}), 60_000);
 
   // guide.js starts its initial request before this overlay loads. Run one
