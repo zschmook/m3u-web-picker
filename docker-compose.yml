@@ -10,6 +10,7 @@
 # Open:
 #   http://localhost:10000  (Cast control on this Mac)
 #   http://10.0.0.22:10000  (LAN access / Chromecast/Roku media relay)
+#   http://10.0.0.22        (HDHomeRun/Jellyfin bare-IP compatibility)
 #
 # Stop/remove only this experiment:
 #   docker compose down
@@ -30,8 +31,12 @@ services:
     container_name: m3u-picker-v30-experiments
 
     ports:
-      # Experimental host port 10000 -> Flask debug port 9998 in the container.
+      # Normal experimental UI/media path.
       - "0.0.0.0:10000:9998"
+      # Jellyfin HDHomeRun discovery follows the UDP reply with a bare-IP
+      # http://<device-ip>/discover.json request, so expose the same Flask app
+      # directly on host port 80 instead of requiring hdhr_port80_proxy.py.
+      - "0.0.0.0:80:9998"
       # Do not publish UDP 65001 on Docker Desktop/macOS. LAN broadcasts reach
       # the Mac but Docker's UDP forwarding does not pass them to the container.
       # tools/hdhr_discovery_host.py owns UDP 65001 natively on the Mac instead.
