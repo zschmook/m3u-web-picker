@@ -19,13 +19,15 @@ def index():
     html = render_template("index.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-2">\n'
+        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-2">\n'
+        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-2">\n</head>',
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=ui-refactor-1"></script>\n'
-        '<script src="/static/js/ui_refactor.js?v=ui-refactor-1"></script>\n'
+        '<script src="/static/js/experiments_ui.js?v=ui-refactor-2"></script>\n'
+        '<script src="/static/js/ui_refactor.js?v=ui-refactor-2"></script>\n'
+        '<script src="/static/js/ui_themes.js?v=ui-refactor-2"></script>\n'
         '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-1"></script>\n</body>',
     )
 
