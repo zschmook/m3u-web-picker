@@ -27,7 +27,8 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_top_controls.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
+        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-1">\n</head>',
     )
     return html.replace(
         "</body>",
