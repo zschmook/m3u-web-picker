@@ -83,6 +83,7 @@ def _parse_device_info(payload: bytes) -> dict[str, str]:
         "model": model,
         "model_number": text("model-number"),
         "serial_number": serial,
+        "device_id": device_id,
         "software_version": text("software-version"),
     }
 
@@ -207,14 +208,11 @@ def discover_devices(
             return None
         return {"host": host, **info}
 
-    # Roku's documented discovery path. Multiple Rokus produce multiple replies.
     for host in sorted(_discover_ssdp_hosts(), key=ipaddress.ip_address):
         result = verify(host)
         if result:
             devices_by_host[host] = result
 
-    # Keep the proven subnet scan as a safety net. This also catches extra Rokus
-    # if an SSDP exchange returns only a subset of the devices on the LAN.
     hosts = [
         str(candidate)
         for candidate in network.hosts()
