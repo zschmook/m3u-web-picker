@@ -1,0 +1,18 @@
+/* Small visual corrections discovered during the ui-modernization QA pass. */
+
+.ui-overview-master-panel {
+  text-align: left !important;
+}
+
+.ui-overview-master-panel .master-update-controls {
+  justify-content: flex-start !important;
+  align-items: center !important;
+  text-align: left !important;
+}
+
+.ui-overview-master-panel .master-update-status {
+  width: 100%;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  text-align: left !important;
+}
