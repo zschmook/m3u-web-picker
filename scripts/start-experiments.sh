@@ -9,6 +9,8 @@ if [ -z "$LAN_HOST" ]; then
   LAN_HOST="$(sh "$ROOT_DIR/scripts/detect-lan-host.sh")"
 fi
 EXTERNAL_PORT="${M3U_EXTERNAL_PORT:-10000}"
+export M3U_LAN_HOST="$LAN_HOST"
+export M3U_EXTERNAL_PORT="$EXTERNAL_PORT"
 
 RUNTIME_DIR="${TMPDIR:-/tmp}"
 PID_FILE="$RUNTIME_DIR/m3u-web-picker-hdhr-discovery.pid"
