@@ -1,0 +1,5 @@
+.ui-current-zero-games {
+  background: var(--bs-success) !important;
+  color: #fff !important;
+  border-color: var(--bs-success) !important;
+}
