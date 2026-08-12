@@ -28,7 +28,7 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-2">\n</head>',
+        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-3">\n</head>',
     )
     return html.replace(
         "</body>",
@@ -42,7 +42,8 @@ def index():
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
-        '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n</body>',
+        '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
+        '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n</body>',
     )
 
 
