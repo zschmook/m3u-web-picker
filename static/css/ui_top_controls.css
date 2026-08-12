@@ -1,0 +1,93 @@
+/* experients-ui: top-level system controls and sports API status. */
+
+.ui-top-hdhr-panel {
+  margin-top: 0.45rem;
+}
+
+.ui-top-hdhr-panel .ui-system-controls-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 0.65rem 0.9rem !important;
+  flex-wrap: wrap;
+}
+
+.ui-top-hdhr-panel .ui-system-update-btn {
+  margin-left: 0 !important;
+  white-space: nowrap;
+}
+
+.ui-status-strip .master-update-running {
+  margin-left: 0 !important;
+}
+
+.ui-sports-api-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  padding: 0.34rem 0.62rem;
+  border: 1px solid var(--ui-border, rgba(255,255,255,.12));
+  border-radius: 999px;
+  background: var(--ui-panel-soft, rgba(255,255,255,.025));
+  color: var(--ui-muted, #9ca3af);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.2;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.ui-sports-api-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ui-muted, #9ca3af);
+}
+
+.ui-sports-api-status.is-success {
+  color: var(--ui-heading, #f8fafc);
+}
+
+.ui-sports-api-status.is-success .ui-sports-api-dot {
+  background: var(--ui-success, #22c55e);
+  box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--ui-success, #22c55e) 20%, transparent);
+}
+
+.ui-sports-api-status.is-warning {
+  color: var(--bs-warning, #ffc107);
+}
+
+.ui-sports-api-status.is-warning .ui-sports-api-dot {
+  background: var(--bs-warning, #ffc107);
+}
+
+.ui-sports-api-status.is-error {
+  color: var(--bs-danger, #dc3545);
+}
+
+.ui-sports-api-status.is-error .ui-sports-api-dot {
+  background: var(--bs-danger, #dc3545);
+}
+
+body[data-ui-theme="light"] .ui-sports-api-status {
+  background: #f8fafc;
+}
+
+body[data-ui-theme="ketchup-mustard"] .ui-sports-api-status {
+  border-color: #facc15 !important;
+  background: rgba(69, 10, 10, .42) !important;
+  color: #fef08a;
+}
+
+@media (max-width: 767.98px) {
+  .ui-top-hdhr-panel .ui-system-controls-row {
+    align-items: flex-start !important;
+  }
+
+  .ui-sports-api-status {
+    width: 100%;
+    border-radius: 0.55rem;
+  }
+}
