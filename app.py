@@ -19,22 +19,24 @@ def index():
     html = render_template("index.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-8">\n'
-        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-8">\n'
-        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-8">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sections.css?v=ui-refactor-8">\n'
-        '<link rel="stylesheet" href="/static/css/ui_provider_cleanup.css?v=ui-refactor-8">\n'
-        '<link rel="stylesheet" href="/static/css/ui_top_controls.css?v=ui-refactor-8">\n</head>',
+        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_sections.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_provider_cleanup.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_top_controls.css?v=ui-refactor-9">\n'
+        '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
-        '<script src="/static/js/experiments_ui.js?v=ui-refactor-8"></script>\n'
-        '<script src="/static/js/ui_refactor.js?v=ui-refactor-8"></script>\n'
-        '<script src="/static/js/ui_themes.js?v=ui-refactor-8"></script>\n'
-        '<script src="/static/js/ui_sections.js?v=ui-refactor-8"></script>\n'
+        '<script src="/static/js/experiments_ui.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_refactor.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_themes.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_sections.js?v=ui-refactor-9"></script>\n'
         '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
-        '<script src="/static/js/ui_top_controls.js?v=ui-refactor-8"></script>\n'
-        '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-8"></script>\n</body>',
+        '<script src="/static/js/ui_top_controls.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
 
@@ -43,12 +45,14 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=now-next-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=now-next-1">\n'
+        '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
         '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=now-next-1"></script>\n</body>',
+        '<script src="/static/js/guide_programmes.js?v=now-next-1"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
 
