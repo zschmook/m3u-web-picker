@@ -105,8 +105,8 @@ services:
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
       M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
       # With Docker Desktop host networking enabled, localhost reaches services
-      # published by the Mac host. Use that path only for polling the HDHR toggle;
-      # discovery replies still advertise the real LAN address above.
+      # published on the Docker host. Use that path only for polling the HDHR
+      # toggle; discovery replies still advertise the configured LAN address.
       M3U_HDHR_STATUS_BASE_URL: "http://127.0.0.1:${M3U_EXTERNAL_PORT:-10000}"
 
     command: ["python", "tools/hdhr_discovery_container.py"]
