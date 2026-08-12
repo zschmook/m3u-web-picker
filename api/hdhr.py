@@ -19,8 +19,7 @@ HDHR_FRIENDLY_NAME = "M3U Web Picker"
 HDHR_MODEL = "HDTC-2US"
 HDHR_TUNER_COUNT = 2
 # Kept for compatibility with the status payload used by the host helper/UI.
-# HDHomeRun GuideName values now preserve the source channel name exactly so
-# Jellyfin can fall back to normalized-name XMLTV matching for manual channels.
+# HDHomeRun GuideName values no longer carry a diagnostic suffix.
 HDHR_GUIDE_NAME_SUFFIX = ""
 # Telly uses the HDHomeRun EXTEND ATSC personality specifically for Plex
 # compatibility. Keep the same firmware family while retaining our own ID.
@@ -38,6 +37,9 @@ _HDHR_HTTP_PREFIXES = (
     "/auto/v",
 )
 
+_xmltv_name_cache_key: tuple[str, int, int] | None = None
+_xmltv_name_cache: dict[str, str] = {}
+
 
 def _base_url() -> str:
     return request.host_url.rstrip("/")
@@ -50,8 +52,88 @@ def _is_plex_request() -> bool:
     return any(str(name).lower().startswith("x-plex-") for name in request.headers.keys())
 
 
-def _hdhr_guide_name(name: str) -> str:
-    return str(name or "").strip()
+def _local_xml_tag(tag: str) -> str:
+    return str(tag or "").rsplit("}", 1)[-1]
+
+
+def _xmltv_display_names() -> dict[str, str]:
+    """Return XMLTV channel display names keyed case-insensitively by channel id.
+
+    The Combined guide is already filtered to the curated manual lineup plus
+    generated sports channels, so it is both the smallest and most authoritative
+    guide for HDHomeRun/Jellyfin name matching. Cache by file identity/mtime so
+    repeated lineup probes do not repeatedly parse XML.
+    """
+    global _xmltv_name_cache_key, _xmltv_name_cache
+
+    path = core.COMBINED_EPG_PATH
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+
+    cache_key = (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+    if cache_key == _xmltv_name_cache_key:
+        return _xmltv_name_cache
+
+    names: dict[str, str] = {}
+    try:
+        for _event, element in ElementTree.iterparse(path, events=("end",)):
+            if _local_xml_tag(element.tag) != "channel":
+                continue
+            channel_id = str(element.attrib.get("id", "") or "").strip()
+            if channel_id:
+                for child in element:
+                    if _local_xml_tag(child.tag) != "display-name":
+                        continue
+                    display_name = str(child.text or "").strip()
+                    if display_name:
+                        names.setdefault(channel_id.casefold(), display_name)
+                        break
+            element.clear()
+    except (OSError, ElementTree.ParseError, ValueError):
+        # The guide is written atomically, but if a probe happens while the file
+        # is unavailable or malformed, preserve normal HDHR names and retry on
+        # the next request rather than breaking the tuner lineup.
+        return {}
+
+    _xmltv_name_cache_key = cache_key
+    _xmltv_name_cache = names
+    return names
+
+
+def _manual_tvg_names_by_number() -> dict[str, str]:
+    """Return provider tvg-name values as a secondary HDHR matching fallback."""
+    try:
+        selected = core.selected_channels_from_selected_ids_in_order()
+    except Exception:
+        return {}
+    return {
+        str(number): str(channel.get("tvg_name", "") or "").strip()
+        for number, channel in enumerate(selected, start=1)
+        if str(channel.get("tvg_name", "") or "").strip()
+    }
+
+
+def _hdhr_guide_name(
+    channel: dict,
+    *,
+    xmltv_names: dict[str, str],
+    manual_tvg_names: dict[str, str],
+) -> str:
+    normal_name = str(channel.get("name", "") or "").strip()
+    if bool(channel.get("generated")):
+        return normal_name
+
+    tvg_id = str(channel.get("tvg_id", "") or "").strip()
+    if tvg_id:
+        canonical_name = str(xmltv_names.get(tvg_id.casefold(), "") or "").strip()
+        if canonical_name:
+            return canonical_name
+
+    number = str(channel.get("number", "") or "").strip()
+    tvg_name = str(manual_tvg_names.get(number, "") or "").strip()
+    return tvg_name or normal_name
 
 
 def _support_payload() -> dict:
@@ -82,6 +164,8 @@ def _resolve_play_url(play_url: str) -> str:
 
 def _lineup_rows() -> list[dict]:
     base = _base_url()
+    xmltv_names = _xmltv_display_names()
+    manual_tvg_names = _manual_tvg_names_by_number()
     output = []
     for channel in core.curated_channels_for_guide():
         number = str(channel.get("number", "") or "").strip()
@@ -91,7 +175,11 @@ def _lineup_rows() -> list[dict]:
         output.append(
             {
                 "GuideNumber": number,
-                "GuideName": _hdhr_guide_name(name),
+                "GuideName": _hdhr_guide_name(
+                    channel,
+                    xmltv_names=xmltv_names,
+                    manual_tvg_names=manual_tvg_names,
+                ),
                 # Native HDHomeRun HTTP live-TV URL shape. Plex-compatible
                 # emulators use this form and may append their own query string.
                 "URL": f"{base}/auto/v{number}",
