@@ -13,6 +13,7 @@ _cache_signature: tuple | None = None
 _cache_index: dict[str, list[dict]] = {}
 _cache_programme_count = 0
 _cache_updated_at: str | None = None
+GUIDE_UPCOMING_PROGRAMME_LIMIT = 6
 
 
 def _local_tag(element) -> str:
@@ -173,6 +174,28 @@ def _now_and_next(records: list[dict], now: datetime) -> tuple[dict | None, dict
     return current, upcoming
 
 
+def _upcoming_programmes(
+    records: list[dict],
+    now: datetime,
+    current: dict | None,
+    *,
+    limit: int = GUIDE_UPCOMING_PROGRAMME_LIMIT,
+) -> list[dict]:
+    """Return the next handful of scheduled shows after the current programme."""
+    threshold = current.get("_stop") if current else now
+    upcoming = []
+    for record in records:
+        if record is current:
+            continue
+        start = record.get("_start")
+        if start is None or start < threshold:
+            continue
+        upcoming.append(record)
+        if len(upcoming) >= limit:
+            break
+    return upcoming
+
+
 def enrich_guide_channels(
     channels: list[dict],
     epg_path: Path,
@@ -180,11 +203,11 @@ def enrich_guide_channels(
     timezone_name: str,
     now: datetime | None = None,
 ) -> tuple[list[dict], dict]:
-    """Attach current/next programme data from the exact served XMLTV file.
+    """Attach current and upcoming programme data from the served XMLTV file.
 
     Parsing is cached by EPG path, mtime, size, and sports timezone. Selection of
-    current/next programmes is intentionally performed per request so programme
-    transitions do not require reparsing the XMLTV file.
+    current/upcoming programmes is intentionally performed per request so
+    programme transitions do not require reparsing the XMLTV file.
     """
     timezone_value = str(timezone_name or "America/New_York")
     local_tz = ZoneInfo(timezone_value)
@@ -201,9 +224,15 @@ def enrich_guide_channels(
         tvg_id = str(channel.get("tvg_id", "") or "").strip()
         records = index.get(tvg_id, []) if tvg_id else []
         current, upcoming = _now_and_next(records, anchor)
+        schedule = _upcoming_programmes(records, anchor, current)
         channel["now"] = _serialize_programme(current)
         channel["next"] = _serialize_programme(upcoming)
-        if current or upcoming:
+        channel["upcoming"] = [
+            serialized
+            for record in schedule
+            if (serialized := _serialize_programme(record)) is not None
+        ]
+        if current or schedule:
             matched_channels += 1
         if current:
             current_channels += 1
