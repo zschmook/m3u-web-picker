@@ -78,44 +78,45 @@
 
 .guide-upcoming {
   display: flex;
-  align-items: flex-start;
-  gap: .55rem;
+  align-items: baseline;
+  gap: .5rem;
   min-width: 0;
-  margin-top: .28rem;
+  margin-top: .22rem;
+  overflow: hidden;
 }
 
 .guide-upcoming-label {
   flex: 0 0 auto;
-  padding-top: .08rem;
   color: #93c5fd;
   font-size: .68rem;
   font-weight: 800;
-  letter-spacing: .03em;
+  letter-spacing: .04em;
   text-transform: uppercase;
 }
 
 .guide-upcoming-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .12rem .8rem;
+  display: flex;
+  align-items: baseline;
+  gap: .45rem;
   min-width: 0;
-  width: 100%;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: .76rem;
+  white-space: nowrap;
 }
 
 .guide-upcoming-item {
-  display: flex;
+  display: inline-flex;
   align-items: baseline;
-  gap: .35rem;
+  gap: .3rem;
   min-width: 0;
-  color: #cbd5e1;
-  font-size: .76rem;
+  max-width: 320px;
 }
 
 .guide-upcoming-time {
   flex: 0 0 auto;
   color: #9ca3af;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .guide-upcoming-title {
@@ -123,6 +124,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.guide-upcoming-separator {
+  flex: 0 0 auto;
+  color: #64748b;
 }
 
 .guide-epg-warning {
@@ -134,8 +140,8 @@
 }
 
 @media (max-width: 900px) {
-  .guide-upcoming-list {
-    grid-template-columns: 1fr;
+  .guide-upcoming-item {
+    max-width: 220px;
   }
 }
 
@@ -150,11 +156,21 @@
   }
 
   .guide-upcoming {
-    display: block;
+    align-items: flex-start;
   }
 
-  .guide-upcoming-label {
+  .guide-upcoming-list {
     display: block;
+    white-space: normal;
+  }
+
+  .guide-upcoming-item {
+    display: flex;
+    max-width: none;
     margin-bottom: .08rem;
+  }
+
+  .guide-upcoming-separator {
+    display: none;
   }
 }
