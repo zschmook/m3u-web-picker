@@ -48,12 +48,27 @@
     return true;
   }
 
+  function getSportsState() {
+    try {
+      return typeof sportsState === "undefined" ? null : sportsState;
+    } catch {
+      return null;
+    }
+  }
+
   function renderSportsApiStatus() {
     if (!ensureLayout()) return;
     const target = el("uiSportsApiStatus");
     if (!target) return;
 
-    const api = sportsState?.schedule_api || {};
+    const state = getSportsState();
+    if (!state) {
+      target.className = "ui-sports-api-status d-none";
+      target.textContent = "";
+      return;
+    }
+
+    const api = state.schedule_api || {};
     if (!api.enabled) {
       target.className = "ui-sports-api-status d-none";
       target.textContent = "";
@@ -71,19 +86,19 @@
     const currentEntries = entries.filter(entry => entry.cache_current);
     const allCurrent = entries.length > 0 && currentEntries.length === entries.length;
 
-    let state = "neutral";
+    let stateClass = "neutral";
     let label = "Enabled";
     if (!api.effective) {
-      state = "warning";
+      stateClass = "warning";
       label = api.key_configured ? "Enabled · inactive" : "Enabled · needs API key";
     } else if (hasError) {
-      state = "error";
+      stateClass = "error";
       label = "Last refresh failed";
     } else if (hasWarning) {
-      state = "warning";
+      stateClass = "warning";
       label = "Last refresh needs attention";
     } else if (allCurrent || api.cache_current) {
-      state = "success";
+      stateClass = "success";
       label = "Current";
     }
 
@@ -94,7 +109,7 @@
       api.effective ? `${totalGames.toLocaleString()} game${totalGames === 1 ? "" : "s"}` : ""
     ].filter(Boolean);
 
-    target.className = `ui-sports-api-status is-${state}`;
+    target.className = `ui-sports-api-status is-${stateClass}`;
     target.innerHTML = `<span class="ui-sports-api-dot" aria-hidden="true"></span><span>${bits.join(" · ")}</span>`;
   }
 
