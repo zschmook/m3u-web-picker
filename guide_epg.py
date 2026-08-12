@@ -13,7 +13,7 @@ _cache_signature: tuple | None = None
 _cache_index: dict[str, list[dict]] = {}
 _cache_programme_count = 0
 _cache_updated_at: str | None = None
-GUIDE_UPCOMING_PROGRAMME_LIMIT = 6
+GUIDE_UPCOMING_PROGRAMME_LIMIT = 16
 
 
 def _local_tag(element) -> str:
@@ -62,8 +62,6 @@ def _parse_programme_index(path: Path, timezone_name: str) -> tuple[dict[str, li
             element.clear()
             continue
         if tag != "programme":
-            # Do not clear programme children on their own end event. Their
-            # text is still needed when the parent <programme> closes.
             continue
 
         channel_id = str(element.attrib.get("channel", "") or "").strip()
@@ -181,7 +179,6 @@ def _upcoming_programmes(
     *,
     limit: int = GUIDE_UPCOMING_PROGRAMME_LIMIT,
 ) -> list[dict]:
-    """Return the next handful of scheduled shows after the current programme."""
     threshold = current.get("_stop") if current else now
     upcoming = []
     for record in records:
@@ -203,12 +200,6 @@ def enrich_guide_channels(
     timezone_name: str,
     now: datetime | None = None,
 ) -> tuple[list[dict], dict]:
-    """Attach current and upcoming programme data from the served XMLTV file.
-
-    Parsing is cached by EPG path, mtime, size, and sports timezone. Selection of
-    current/upcoming programmes is intentionally performed per request so
-    programme transitions do not require reparsing the XMLTV file.
-    """
     timezone_value = str(timezone_name or "America/New_York")
     local_tz = ZoneInfo(timezone_value)
     anchor = now or datetime.now().astimezone()
