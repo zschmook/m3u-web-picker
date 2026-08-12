@@ -54,6 +54,7 @@ def guide():
         "</body>",
         '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
         '<script src="/static/js/guide_programmes.js?v=tv-grid-3"></script>\n'
+        '<script src="/static/js/guide_roku_button.js?v=roku-button-1"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
