@@ -109,7 +109,7 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         self.assertEqual(browser.status_code, 404)
 
     @patch("api.hdhr.core.curated_channels_for_guide", return_value=SAMPLE_CHANNELS)
-    def test_lineup_uses_exact_curated_channel_numbers_and_marks_hdhr_names(self, _curated):
+    def test_lineup_uses_exact_curated_channel_numbers_and_names(self, _curated):
         response = self.client.get(
             "/lineup.json",
             base_url="http://10.0.0.22:10000",
@@ -121,12 +121,12 @@ class HdHomeRunFacadeTests(unittest.TestCase):
             [
                 {
                     "GuideNumber": "7",
-                    "GuideName": "NBC 10 [HDHR]",
+                    "GuideName": "NBC 10",
                     "URL": "http://10.0.0.22:10000/auto/v7",
                 },
                 {
                     "GuideNumber": "1000",
-                    "GuideName": "Phillies vs Nationals [HDHR]",
+                    "GuideName": "Phillies vs Nationals",
                     "URL": "http://10.0.0.22:10000/auto/v1000",
                 },
             ],
