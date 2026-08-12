@@ -1,9 +1,9 @@
 (() => {
   "use strict";
 
-  const GUIDE_WINDOW_HOURS = 6;
+  const GUIDE_WINDOW_HOURS = 8;
   const GUIDE_SLOT_MINUTES = 30;
-  const GUIDE_PX_PER_MINUTE = 3;
+  const GUIDE_PX_PER_MINUTE = 5;
   let timelineRoot = null;
 
   function formatGuideClock(value) {
