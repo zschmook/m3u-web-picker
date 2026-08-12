@@ -8,6 +8,7 @@
     savedByKey: new Map(),
     savedByHost: new Map(),
     sessions: new Map(),
+    sessionKeyByHost: new Map(),
   };
 
   guideState.roku.sessions = multiRoku.sessions;
@@ -35,7 +36,8 @@
   }
 
   function selectedSession() {
-    const key = selectedDeviceKey();
+    const host = selectedHost();
+    const key = multiRoku.sessionKeyByHost.get(host) || selectedDeviceKey();
     return key ? multiRoku.sessions.get(key) || null : null;
   }
 
@@ -106,10 +108,14 @@
   function migrateSession(oldKey, newKey) {
     if (!oldKey || !newKey || oldKey === newKey) return;
     const existing = multiRoku.sessions.get(oldKey);
-    if (!existing) return;
-    multiRoku.sessions.delete(oldKey);
-    existing.deviceKey = newKey;
-    multiRoku.sessions.set(newKey, existing);
+    if (existing) {
+      multiRoku.sessions.delete(oldKey);
+      existing.deviceKey = newKey;
+      multiRoku.sessions.set(newKey, existing);
+    }
+    for (const [host, key] of multiRoku.sessionKeyByHost.entries()) {
+      if (key === oldKey) multiRoku.sessionKeyByHost.set(host, newKey);
+    }
   }
 
   async function addSelectedDevice() {
@@ -128,9 +134,10 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not save Roku device.");
       const device = data.device || {};
-      const oldKey = `host:${host}`;
+      const oldKey = multiRoku.sessionKeyByHost.get(host) || `host:${host}`;
       const newKey = String(device.device_key || oldKey);
       migrateSession(oldKey, newKey);
+      multiRoku.sessionKeyByHost.set(host, newKey);
       localStorage.setItem("m3u-guide-roku-device-key", newKey);
       localStorage.setItem("m3u-guide-roku-host", host);
       await refreshSavedDevices();
@@ -202,8 +209,8 @@
       guideState.cast.context.endCurrentSession(true);
     }
 
-    const selectedKeyBefore = selectedDeviceKey();
-    const previousSession = multiRoku.sessions.get(selectedKeyBefore) || null;
+    const selectedKeyBefore = multiRoku.sessionKeyByHost.get(host) || selectedDeviceKey();
+    const previousSession = selectedSession();
     const saved = selectedSavedDevice();
 
     setCurrentChannel(channel);
@@ -229,24 +236,26 @@
       throw new Error(data.error || "Could not start Roku playback.");
     }
 
-    const deviceKey = String(data.roku_device_key || selectedKeyBefore);
+    const stableKey = String(data.roku_device_key || "");
+    const sessionKey = data.saved && stableKey ? stableKey : selectedKeyBefore;
     const deviceName = data.device?.name || saved?.name || "Roku TV";
-    migrateSession(selectedKeyBefore, deviceKey);
-    multiRoku.sessions.set(deviceKey, {
-      deviceKey,
+    if (data.saved && stableKey) migrateSession(selectedKeyBefore, stableKey);
+    multiRoku.sessions.set(sessionKey, {
+      deviceKey: sessionKey,
       host: data.roku_host || host,
       deviceName,
       token: data.token || "",
       channel,
       mediaUrl: data.media_url || "",
     });
+    multiRoku.sessionKeyByHost.set(data.roku_host || host, sessionKey);
 
     guideState.roku.host = data.roku_host || host;
     guideState.roku.deviceName = deviceName;
     guideState.roku.relayToken = data.token || "";
     guideState.roku.active = true;
     localStorage.setItem("m3u-guide-roku-host", guideState.roku.host);
-    if (data.saved && deviceKey) localStorage.setItem("m3u-guide-roku-device-key", deviceKey);
+    if (data.saved && stableKey) localStorage.setItem("m3u-guide-roku-device-key", stableKey);
     guideEls.rokuHost.value = guideState.roku.host;
     showRokuPlayer();
     guideEls.playerMessage.textContent = `Playing on ${deviceName}.`;
@@ -258,11 +267,12 @@
   };
 
   window.stopRokuPlayback = async function({sendHome = true, deviceKey = ""} = {}) {
-    const key = String(deviceKey || selectedDeviceKey() || "");
-    const session = multiRoku.sessions.get(key) || null;
-    const host = session?.host || selectedHost();
+    const selected = selectedSession();
+    const host = selected?.host || selectedHost();
+    const key = String(deviceKey || multiRoku.sessionKeyByHost.get(host) || selected?.deviceKey || selectedDeviceKey() || "");
+    const session = multiRoku.sessions.get(key) || selected || null;
     const token = session?.token || "";
-    const saved = multiRoku.savedByKey.get(key) || selectedSavedDevice();
+    const saved = multiRoku.savedByKey.get(key) || multiRoku.savedByHost.get(host) || null;
 
     if (token || (sendHome && host)) {
       try {
@@ -282,6 +292,9 @@
     }
 
     if (key) multiRoku.sessions.delete(key);
+    if (host && multiRoku.sessionKeyByHost.get(host) === key) {
+      multiRoku.sessionKeyByHost.delete(host);
+    }
     syncSelectedSession();
   };
 
