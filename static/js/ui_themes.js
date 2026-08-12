@@ -33,9 +33,12 @@
     label.setAttribute("for", "uiThemeSelect");
     label.innerHTML = `
       <span>Theme</span>
-      <select id="uiThemeSelect" class="form-select form-select-sm" aria-label="Theme">
-        ${THEMES.map(([value, name]) => `<option value="${value}">${name}</option>`).join("")}
-      </select>`;
+      <span class="ui-theme-select-wrap">
+        <select id="uiThemeSelect" class="form-select form-select-sm" aria-label="Theme">
+          ${THEMES.map(([value, name]) => `<option value="${value}">${name}</option>`).join("")}
+        </select>
+        <span class="ui-theme-chevron" aria-hidden="true">▾</span>
+      </span>`;
     host.appendChild(label);
 
     const select = document.getElementById("uiThemeSelect");
