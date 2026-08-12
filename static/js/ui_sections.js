@@ -4,8 +4,7 @@
   function installChannelSectionShell() {
     const header = document.getElementById("channelManagerHeader");
     const body = document.getElementById("channelManagerBody");
-    const button = document.getElementById("channelManagerCollapseBtn");
-    if (!header || !body || !button || document.getElementById("uiChannelSectionShell")) return;
+    if (!header || !body || document.getElementById("uiChannelSectionShell")) return;
 
     const shell = document.createElement("section");
     shell.id = "uiChannelSectionShell";
@@ -15,26 +14,18 @@
 
     header.classList.add("ui-channel-section-header");
     body.classList.add("ui-channel-section-body");
-    button.setAttribute("aria-controls", "channelManagerBody");
+
+    // Channels is now a dedicated sidebar destination, so collapsing the whole
+    // manager only creates a dead-looking page. Always show it and remove the
+    // legacy Show/Hide Channels control while keeping Manage Order available.
+    body.classList.remove("d-none");
+    document.getElementById("channelManagerCollapseBtn")?.remove();
 
     const manage = document.getElementById("manageOrderBtn");
     if (manage) {
       manage.classList.remove("btn-outline-secondary");
       manage.classList.add("btn-outline-light");
     }
-
-    const sync = () => {
-      const collapsed = body.classList.contains("d-none");
-      shell.classList.toggle("is-collapsed", collapsed);
-      button.textContent = collapsed ? "Show channels" : "Hide channels";
-      button.setAttribute("aria-expanded", String(!collapsed));
-    };
-
-    new MutationObserver(sync).observe(body, {
-      attributes: true,
-      attributeFilter: ["class"]
-    });
-    sync();
   }
 
   function installSportsSectionBoundary() {
