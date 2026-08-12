@@ -77,12 +77,38 @@
   white-space: nowrap;
 }
 
+.ui-theme-select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
 .ui-theme-control select {
   width: auto;
-  min-width: 132px;
+  min-width: 156px;
   padding-top: 0.22rem;
   padding-bottom: 0.22rem;
+  padding-right: 2.25rem !important;
   font-size: 0.78rem;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.ui-theme-chevron {
+  position: absolute;
+  top: 50%;
+  right: 0.72rem;
+  transform: translateY(-52%);
+  pointer-events: none;
+  color: currentColor;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.ui-theme-select-wrap:hover .ui-theme-chevron {
+  transform: translateY(-45%);
 }
 
 /* Theme variables. app.css predates themes and uses literal colors, so the
