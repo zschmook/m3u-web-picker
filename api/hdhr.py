@@ -18,10 +18,10 @@ HDHR_DEVICE_AUTH = "m3u-web-picker"
 HDHR_FRIENDLY_NAME = "M3U Web Picker"
 HDHR_MODEL = "HDTC-2US"
 HDHR_TUNER_COUNT = 2
-# Temporary interoperability marker so Jellyfin can distinguish channels
-# imported through the HDHomeRun facade from the same channels imported via M3U.
-# This affects only HDHomeRun GuideName values; source channel names are untouched.
-HDHR_GUIDE_NAME_SUFFIX = " [HDHR]"
+# Kept for compatibility with the status payload used by the host helper/UI.
+# HDHomeRun GuideName values now preserve the source channel name exactly so
+# Jellyfin can fall back to normalized-name XMLTV matching for manual channels.
+HDHR_GUIDE_NAME_SUFFIX = ""
 # Telly uses the HDHomeRun EXTEND ATSC personality specifically for Plex
 # compatibility. Keep the same firmware family while retaining our own ID.
 HDHR_FIRMWARE_NAME = "hdhomeruntc_atsc"
@@ -51,10 +51,7 @@ def _is_plex_request() -> bool:
 
 
 def _hdhr_guide_name(name: str) -> str:
-    value = str(name or "").strip()
-    if not value or value.endswith(HDHR_GUIDE_NAME_SUFFIX):
-        return value
-    return f"{value}{HDHR_GUIDE_NAME_SUFFIX}"
+    return str(name or "").strip()
 
 
 def _support_payload() -> dict:
