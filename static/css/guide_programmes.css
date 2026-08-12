@@ -66,7 +66,6 @@
   font-size: .8rem;
 }
 
-.guide-programme-next,
 .guide-programme-empty {
   margin-top: .12rem;
   overflow: hidden;
@@ -74,15 +73,56 @@
   white-space: nowrap;
   color: #9ca3af;
   font-size: .78rem;
-}
-
-.guide-programme-next-label {
-  color: #93c5fd;
-  font-weight: 700;
-}
-
-.guide-programme-empty {
   font-style: italic;
+}
+
+.guide-upcoming {
+  display: flex;
+  align-items: flex-start;
+  gap: .55rem;
+  min-width: 0;
+  margin-top: .28rem;
+}
+
+.guide-upcoming-label {
+  flex: 0 0 auto;
+  padding-top: .08rem;
+  color: #93c5fd;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.guide-upcoming-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .12rem .8rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.guide-upcoming-item {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+  min-width: 0;
+  color: #cbd5e1;
+  font-size: .76rem;
+}
+
+.guide-upcoming-time {
+  flex: 0 0 auto;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.guide-upcoming-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guide-epg-warning {
@@ -93,6 +133,12 @@
   margin-top: .15rem;
 }
 
+@media (max-width: 900px) {
+  .guide-upcoming-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
   .guide-programme-now {
     display: block;
@@ -101,5 +147,14 @@
   .guide-programme-time {
     display: block;
     margin-top: .05rem;
+  }
+
+  .guide-upcoming {
+    display: block;
+  }
+
+  .guide-upcoming-label {
+    display: block;
+    margin-bottom: .08rem;
   }
 }
