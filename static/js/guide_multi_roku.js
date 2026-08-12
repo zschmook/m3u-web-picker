@@ -2,7 +2,7 @@
   const select = document.getElementById("guideRokuDevice");
   const discoverButton = document.getElementById("guideRokuDiscoverBtn");
   const testButton = document.getElementById("guideRokuTestBtn");
-  if (!select || !testButton || !window.guideState || !window.guideEls) return;
+  if (!select || !testButton || typeof guideState === "undefined" || typeof guideEls === "undefined") return;
 
   const multiRoku = {
     savedByKey: new Map(),
@@ -30,7 +30,8 @@
   function selectedDeviceKey() {
     const saved = selectedSavedDevice();
     if (saved?.device_key) return saved.device_key;
-    return `host:${selectedHost()}`;
+    const host = selectedHost();
+    return host ? `host:${host}` : "";
   }
 
   function selectedSession() {
