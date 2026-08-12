@@ -2,8 +2,8 @@
 set -eu
 
 # macOS helper for v30-experiments. It reports the IPv4 address on the
-# interface carrying the default route. This is the address a Chromecast
-# on the same LAN must use to reach port 1000 on this Mac.
+# interface carrying the default route. This is the address LAN clients use
+# to reach the experimental service on port 10000.
 iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
 if [ -z "${iface:-}" ]; then
   iface="en0"
