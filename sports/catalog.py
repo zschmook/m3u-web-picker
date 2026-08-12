@@ -9,6 +9,21 @@ from typing import Iterable
 import sports as _s
 
 
+_BROADCAST_EVENT_TEAM_PATTERNS = (
+    re.compile(r"^\s*(?:alt|event|game|feed)\s*\d+\b", re.I),
+    re.compile(r"\s+(?:vs\.?|versus|at)\s+", re.I),
+    re.compile(r"\s+@\s+"),
+    re.compile(
+        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+        r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
+        r"dec(?:ember)?)\s+\d{1,2}\b",
+        re.I,
+    ),
+    re.compile(r"\b\d{1,2}:\d{2}\s*(?:am|pm)\b", re.I),
+    re.compile(r"\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\b"),
+)
+
+
 def _catalog_rows(db_path: Path | str, scope_type: str = "") -> list[dict]:
     _s.init_db(db_path)
     sql = """
@@ -107,6 +122,35 @@ def _upsert_catalog_item(
     )
 
 
+def _looks_like_broadcast_event_name(value: str) -> bool:
+    name = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not name:
+        return True
+    return any(pattern.search(name) for pattern in _BROADCAST_EVENT_TEAM_PATTERNS)
+
+
+def _prune_provider_event_rows(conn) -> int:
+    rows = conn.execute(
+        """
+        SELECT scope_id, display_name
+        FROM sports_catalog
+        WHERE scope_type = 'team' AND source = 'provider'
+        """
+    ).fetchall()
+    bad_ids = [
+        str(row["scope_id"])
+        for row in rows
+        if _looks_like_broadcast_event_name(str(row["display_name"] or ""))
+    ]
+    if not bad_ids:
+        return 0
+    conn.executemany(
+        "DELETE FROM sports_catalog WHERE scope_type = 'team' AND source = 'provider' AND scope_id = ?",
+        [(scope_id,) for scope_id in bad_ids],
+    )
+    return len(bad_ids)
+
+
 def _team_feed_identity(channel: dict) -> tuple[str, str, str] | None:
     name = str(channel.get("name", "")).strip()
     for league_id, pattern in _s.TEAM_FEED_PATTERNS:
@@ -118,6 +162,8 @@ def _team_feed_identity(channel: dict) -> tuple[str, str, str] | None:
         if not normalized or any(word in normalized for word in _s.NETWORK_WORDS):
             continue
         if re.fullmatch(r"\d+|\d+\s*(am|pm)?", normalized):
+            continue
+        if _looks_like_broadcast_event_name(team):
             continue
         return league_id, f"{league_id}:{_s._slug(team)}", team
     return None
@@ -146,6 +192,11 @@ def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]
         discovered[(league_id, team_id)] = (team_name, aliases, logo)
 
     with closing(_s._connect(db_path)) as conn:
+        # Provider catalogs change over time and older builds could mistake
+        # event feeds such as "MLB ALT 17 | Astros vs Giants ..." for teams.
+        # Remove only those provider-derived event-looking rows; API/static
+        # taxonomy rows and legitimate provider team feeds remain untouched.
+        _prune_provider_event_rows(conn)
         for (league_id, team_id), (name, aliases, logo) in discovered.items():
             _upsert_catalog_item(
                 conn,
