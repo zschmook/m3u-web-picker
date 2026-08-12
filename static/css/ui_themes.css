@@ -1,0 +1,325 @@
+/* experients-ui: layout cleanup + optional appearance themes. */
+
+/* Finish the top-section cleanup: outputs read top-to-bottom, not side-to-side. */
+.ui-refactor .ui-output-details .playlist-toolbar {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.65rem;
+  width: min(980px, 100%);
+  max-width: 980px;
+  margin: 0;
+}
+
+.ui-refactor .ui-output-details .channels-output-block,
+.ui-refactor .ui-output-details .epg-output-block,
+.ui-refactor .ui-output-details .master-update-panel,
+.ui-refactor .ui-output-details .hdhr-support-panel {
+  width: 100%;
+  max-width: 980px;
+  align-self: flex-start;
+}
+
+.ui-refactor .ui-output-details .channels-output-block .input-group,
+.ui-refactor .ui-output-details .epg-output-block .input-group {
+  width: 100%;
+}
+
+.ui-refactor .ui-output-details .hdhr-support-panel > div,
+.ui-refactor .ui-output-details .master-update-controls {
+  justify-content: flex-start !important;
+}
+
+.ui-refactor .ui-output-details .master-update-status,
+.ui-refactor .ui-output-details #masterUpdateStatus,
+.ui-refactor .ui-output-details #hdhrSupportStatus {
+  text-align: left !important;
+  margin-left: 0 !important;
+}
+
+.ui-refactor .ui-output-details .hdhr-support-panel .ms-auto {
+  margin-left: 0 !important;
+}
+
+/* Generated-sports filter buttons should look like controls, not disabled text. */
+.ui-refactor .ui-sports-preview-filters .btn,
+.ui-refactor .ui-sports-preview-filters .btn.btn-outline-secondary,
+.ui-refactor .ui-sports-preview-filters .btn.btn-secondary {
+  background: #ffffff !important;
+  border-color: #ffffff !important;
+  color: #111827 !important;
+  font-weight: 700;
+}
+
+.ui-refactor .ui-sports-preview-filters .btn:hover,
+.ui-refactor .ui-sports-preview-filters .btn:focus-visible {
+  background: #f3f4f6 !important;
+  border-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.ui-refactor .ui-sports-preview-filters .btn.btn-secondary {
+  background: #e5e7eb !important;
+  box-shadow: inset 0 0 0 2px #93c5fd;
+}
+
+/* Theme picker lives in the section jump bar so the header remains calm. */
+.ui-theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+  padding-left: 0.65rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ui-theme-control select {
+  width: auto;
+  min-width: 132px;
+  padding-top: 0.22rem;
+  padding-bottom: 0.22rem;
+  font-size: 0.78rem;
+}
+
+/* Theme variables. app.css predates themes and uses literal colors, so the
+   theme layer intentionally overrides the major surfaces after app.css. */
+body[data-ui-theme="midnight"] {
+  --ui-page: #111827;
+  --ui-panel: #1f2937;
+  --ui-panel-soft: #172033;
+  --ui-field: #111827;
+  --ui-border: #374151;
+  --ui-border-strong: #4b5563;
+  --ui-text: #e5e7eb;
+  --ui-muted: #9ca3af;
+  --ui-heading: #f8fafc;
+  --ui-link: #93c5fd;
+  --ui-accent: #3b82f6;
+  --ui-accent-text: #ffffff;
+  --ui-success: #22c55e;
+  color-scheme: dark;
+}
+
+body[data-ui-theme="slate"] {
+  --ui-page: #0f172a;
+  --ui-panel: #1e293b;
+  --ui-panel-soft: #263449;
+  --ui-field: #0b1220;
+  --ui-border: #475569;
+  --ui-border-strong: #64748b;
+  --ui-text: #e2e8f0;
+  --ui-muted: #94a3b8;
+  --ui-heading: #f8fafc;
+  --ui-link: #7dd3fc;
+  --ui-accent: #0ea5e9;
+  --ui-accent-text: #ffffff;
+  --ui-success: #34d399;
+  color-scheme: dark;
+}
+
+body[data-ui-theme="light"] {
+  --ui-page: #eef2f7;
+  --ui-panel: #ffffff;
+  --ui-panel-soft: #f8fafc;
+  --ui-field: #ffffff;
+  --ui-border: #cbd5e1;
+  --ui-border-strong: #94a3b8;
+  --ui-text: #1f2937;
+  --ui-muted: #64748b;
+  --ui-heading: #0f172a;
+  --ui-link: #0369a1;
+  --ui-accent: #2563eb;
+  --ui-accent-text: #ffffff;
+  --ui-success: #15803d;
+  color-scheme: light;
+}
+
+/* Because threatened deletion apparently improves product requirements. */
+body[data-ui-theme="ketchup-mustard"] {
+  --ui-page: #3b0909;
+  --ui-panel: #7f1d1d;
+  --ui-panel-soft: #991b1b;
+  --ui-field: #450a0a;
+  --ui-border: #facc15;
+  --ui-border-strong: #fde047;
+  --ui-text: #fff7cc;
+  --ui-muted: #fde68a;
+  --ui-heading: #fef08a;
+  --ui-link: #fde047;
+  --ui-accent: #eab308;
+  --ui-accent-text: #3b0909;
+  --ui-success: #facc15;
+  color-scheme: dark;
+}
+
+body[data-ui-theme] {
+  background: var(--ui-page) !important;
+  color: var(--ui-text) !important;
+}
+
+body[data-ui-theme] .card,
+body[data-ui-theme] .section-collapse-bar,
+body[data-ui-theme] .provider-entry-panel,
+body[data-ui-theme] .provider-fallback-panel,
+body[data-ui-theme] .sports-block-item,
+body[data-ui-theme] .sports-selection-result:hover,
+body[data-ui-theme] .ui-output-details,
+body[data-ui-theme] .ui-provider-compact-summary {
+  background: var(--ui-panel) !important;
+  border-color: var(--ui-border) !important;
+  color: var(--ui-text) !important;
+}
+
+body[data-ui-theme] .sports-block-details,
+body[data-ui-theme] .sports-selection-results,
+body[data-ui-theme] .epg-table-wrap,
+body[data-ui-theme] .table-wrap,
+body[data-ui-theme] .order-list-wrap,
+body[data-ui-theme] .sports-preview,
+body[data-ui-theme] .status-line {
+  background: var(--ui-panel-soft) !important;
+  border-color: var(--ui-border) !important;
+  color: var(--ui-text) !important;
+}
+
+body[data-ui-theme] .form-control,
+body[data-ui-theme] .form-select,
+body[data-ui-theme] .input-group-text {
+  background: var(--ui-field) !important;
+  color: var(--ui-text) !important;
+  border-color: var(--ui-border-strong) !important;
+}
+
+body[data-ui-theme] .form-control:focus,
+body[data-ui-theme] .form-select:focus {
+  background: var(--ui-field) !important;
+  color: var(--ui-text) !important;
+  border-color: var(--ui-accent) !important;
+}
+
+body[data-ui-theme] .form-control:disabled,
+body[data-ui-theme] .form-select:disabled {
+  background: var(--ui-panel-soft) !important;
+  color: var(--ui-muted) !important;
+}
+
+body[data-ui-theme] .table {
+  --bs-table-bg: var(--ui-field);
+  --bs-table-color: var(--ui-text);
+  --bs-table-border-color: var(--ui-border);
+  --bs-table-hover-bg: var(--ui-panel-soft);
+  --bs-table-hover-color: var(--ui-heading);
+}
+
+body[data-ui-theme] thead th,
+body[data-ui-theme] .epg-manager-table thead th,
+body[data-ui-theme] .epg-add-source-row td {
+  background: var(--ui-panel-soft) !important;
+  color: var(--ui-muted) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body[data-ui-theme] .small-muted,
+body[data-ui-theme] .ui-status-item,
+body[data-ui-theme] .ui-theme-control,
+body[data-ui-theme] .sports-card .small-muted {
+  color: var(--ui-muted) !important;
+}
+
+body[data-ui-theme] h1,
+body[data-ui-theme] h2,
+body[data-ui-theme] h3,
+body[data-ui-theme] h4,
+body[data-ui-theme] h5,
+body[data-ui-theme] strong,
+body[data-ui-theme] .form-label,
+body[data-ui-theme] .form-check-label,
+body[data-ui-theme] .sports-card h2,
+body[data-ui-theme] .sports-card h3,
+body[data-ui-theme] .sports-card strong,
+body[data-ui-theme] .sports-card .form-label,
+body[data-ui-theme] .sports-card .form-check-label,
+body[data-ui-theme] .provider-field-heading,
+body[data-ui-theme] .provider-source-table thead th {
+  color: var(--ui-heading) !important;
+}
+
+body[data-ui-theme] a,
+body[data-ui-theme] .user-guide-link,
+body[data-ui-theme] .ui-jump-nav a:hover,
+body[data-ui-theme] .ui-jump-nav a:focus-visible {
+  color: var(--ui-link) !important;
+}
+
+body[data-ui-theme] .app-topbar,
+body[data-ui-theme] .ui-jump-nav {
+  background: color-mix(in srgb, var(--ui-page) 94%, transparent) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body[data-ui-theme] .ui-jump-nav a {
+  color: var(--ui-muted) !important;
+}
+
+body[data-ui-theme] .btn-primary {
+  background: var(--ui-accent) !important;
+  border-color: var(--ui-accent) !important;
+  color: var(--ui-accent-text) !important;
+}
+
+body[data-ui-theme] .btn-success {
+  background: var(--ui-success) !important;
+  border-color: var(--ui-success) !important;
+  color: var(--ui-page) !important;
+}
+
+body[data-ui-theme] .ui-health-pill {
+  border-color: var(--ui-border) !important;
+  color: var(--ui-heading) !important;
+}
+
+body[data-ui-theme] .ui-status-label {
+  color: var(--ui-muted) !important;
+}
+
+body[data-ui-theme="light"] .btn-outline-light,
+body[data-ui-theme="light"] .btn-outline-secondary {
+  color: #334155;
+  border-color: #94a3b8;
+}
+
+body[data-ui-theme="light"] .btn-close-white {
+  filter: none;
+}
+
+body[data-ui-theme="ketchup-mustard"] .badge.text-bg-info,
+body[data-ui-theme="ketchup-mustard"] .badge.text-bg-primary,
+body[data-ui-theme="ketchup-mustard"] .badge.text-bg-success {
+  background: #facc15 !important;
+  color: #450a0a !important;
+}
+
+body[data-ui-theme="ketchup-mustard"] .form-check-input:checked {
+  background-color: #facc15;
+  border-color: #fde047;
+}
+
+body[data-ui-theme="ketchup-mustard"] .user-guide-link,
+body[data-ui-theme="ketchup-mustard"] a {
+  color: #fde047 !important;
+}
+
+@media (max-width: 767.98px) {
+  .ui-theme-control {
+    margin-left: 0;
+    padding-left: 0.25rem;
+  }
+
+  .ui-refactor .ui-output-details .playlist-toolbar {
+    width: 100%;
+  }
+}
