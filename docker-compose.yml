@@ -4,16 +4,16 @@
 # normal named volume, normal backup folder, or normal host port.
 # It is safe to run beside the stable main instance.
 #
-# Start:
-#   docker compose up -d --build
+# Start (also launches the native HDHomeRun discovery helper quietly):
+#   sh scripts/start-experiments.sh
 #
 # Open:
 #   http://localhost:10000  (Cast control on this Mac)
 #   http://10.0.0.22:10000  (LAN access / Chromecast/Roku media relay)
 #   http://10.0.0.22        (HDHomeRun/Jellyfin bare-IP compatibility)
 #
-# Stop/remove only this experiment:
-#   docker compose down
+# Stop/remove only this experiment (also stops the discovery helper):
+#   sh scripts/stop-experiments.sh
 #
 # Reset ONLY the experimental state:
 #   docker compose down
@@ -42,7 +42,7 @@ services:
       FLASK_DEBUG: "1"
       PYTHONUNBUFFERED: "1"
       M3U_BACKUP_ENABLED: "false"
-      # exp8: the Chromecast/Google TV and Roku fetch HLS from the Mac over the LAN.
+      # exp8: the Chromecast/Google TV and Roku fetch HLS from the host over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
       M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
       M3U_DATA_DIR: /app/debug-data
@@ -85,33 +85,5 @@ services:
       - type: bind
         source: ./debug-data
         target: /app/debug-data
-
-    restart: unless-stopped
-
-  # Keep HDHomeRun UDP discovery under Compose too. Docker Desktop's normal
-  # published-port path did not pass Jellyfin's LAN broadcast into a bridged
-  # container, so this tiny responder uses Docker Desktop host networking.
-  # The actual Flask app, streams, lineup and EPG stay in the normal container.
-  m3u-picker-v30-hdhr-discovery:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    container_name: m3u-picker-v30-hdhr-discovery
-    network_mode: host
-
-    environment:
-      PYTHONUNBUFFERED: "1"
-      M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
-      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
-      # With Docker Desktop host networking enabled, localhost reaches services
-      # published on the Docker host. Use that path only for polling the HDHR
-      # toggle; discovery replies still advertise the configured LAN address.
-      M3U_HDHR_STATUS_BASE_URL: "http://127.0.0.1:${M3U_EXTERNAL_PORT:-10000}"
-
-    command: ["python", "tools/hdhr_discovery_container.py"]
-
-    depends_on:
-      - m3u-picker-v30-experiments
 
     restart: unless-stopped
