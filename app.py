@@ -47,13 +47,13 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=programme-list-2">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-3">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
         '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=programme-list-2"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=tv-grid-3"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
@@ -83,10 +83,6 @@ if __name__ == "__main__":
 
     run_port = DEV_PORT if args.dev else PORT
 
-    # In debug mode Werkzeug starts a reloader parent and then the real serving
-    # child. Bind UDP 65001 only in the serving process so discovery has one
-    # authoritative responder instead of two competing threads. The responder
-    # also follows the persisted HDHomeRun support switch at runtime.
     serving_process = (not args.dev) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
     if serving_process and hdhr_config.is_enabled() and start_hdhr_discovery():
         atexit.register(stop_hdhr_discovery)
