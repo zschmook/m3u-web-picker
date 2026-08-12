@@ -45,13 +45,13 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=now-next-1">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=programme-list-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
         '<script src="/static/js/guide_experiments_ui.js?v=port-10000"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=now-next-1"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=programme-list-2"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n</body>',
     )
 
