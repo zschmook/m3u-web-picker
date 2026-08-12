@@ -92,10 +92,12 @@
 }
 
 .guide-station-number {
-  width: 28px;
-  flex: 0 0 28px;
+  width: 48px;
+  flex: 0 0 48px;
+  overflow: hidden;
   color: #e5e7eb;
-  text-align: center;
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -255,7 +257,7 @@
 
 @media (max-width: 900px) {
   .guide-timeline {
-    --guide-station-width: 270px;
+    --guide-station-width: 285px;
   }
 
   .guide-station-group {
@@ -265,12 +267,12 @@
 
 @media (max-width: 620px) {
   .guide-timeline {
-    --guide-station-width: 235px;
+    --guide-station-width: 250px;
   }
 
   .guide-station-number {
-    width: 22px;
-    flex-basis: 22px;
+    width: 42px;
+    flex-basis: 42px;
   }
 
   .guide-logo {
