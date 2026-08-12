@@ -1,0 +1,115 @@
+/* experients-ui: Provider Sources cleanup. UI only. */
+
+/* Once a primary exists, the table is the summary. Do not repeat the same
+   provider/type/channel/status metadata in a second row above it. */
+.ui-refactor .ui-provider-compact-summary:not(.is-empty) {
+  display: none !important;
+}
+
+.ui-refactor .ui-provider-compact-summary.is-empty {
+  margin: .75rem 0 1rem;
+  padding: .8rem .9rem;
+  color: var(--ui-text, #e5e7eb);
+  background: var(--ui-panel-soft, rgba(255,255,255,.025));
+  border-color: var(--ui-border, rgba(255,255,255,.12));
+}
+
+/* Let the provider table be the primary visual object. */
+.ui-refactor .ui-provider-table {
+  margin-top: .65rem;
+  margin-bottom: 0;
+  border-radius: .5rem;
+  overflow: hidden;
+}
+
+.ui-refactor .provider-source-table {
+  margin-bottom: 0 !important;
+}
+
+.ui-refactor .provider-source-table thead th {
+  padding-top: .58rem;
+  padding-bottom: .58rem;
+}
+
+.ui-refactor .provider-source-table tbody td {
+  padding-top: .68rem;
+  padding-bottom: .68rem;
+}
+
+/* The add/settings controls are actions, not faint separators. */
+.ui-refactor .ui-provider-add-details {
+  margin: .55rem 0 0;
+  border: 1px solid var(--ui-border, rgba(255,255,255,.12));
+  border-radius: .5rem;
+  background: var(--ui-panel-soft, rgba(255,255,255,.025));
+  overflow: hidden;
+}
+
+.ui-refactor .ui-provider-add-details + .ui-provider-add-details {
+  margin-top: .45rem;
+}
+
+.ui-refactor .ui-provider-add-details > .ui-details-summary {
+  min-height: 2.8rem;
+  padding: .68rem .8rem !important;
+  color: var(--ui-heading, #f8fafc) !important;
+  background: transparent;
+  font-size: .86rem;
+  font-weight: 750;
+  border: 0;
+}
+
+.ui-refactor .ui-provider-add-details > .ui-details-summary:hover,
+.ui-refactor .ui-provider-add-details > .ui-details-summary:focus-visible {
+  background: color-mix(in srgb, var(--ui-heading, #fff) 6%, transparent);
+  color: var(--ui-heading, #fff) !important;
+  outline: none;
+}
+
+.ui-refactor .ui-provider-add-details > .ui-details-summary .ui-details-chevron {
+  margin-left: auto;
+  color: var(--ui-muted, #9ca3af) !important;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.ui-refactor .ui-provider-add-details[open] > .ui-details-summary {
+  border-bottom: 1px solid var(--ui-border, rgba(255,255,255,.12));
+  background: color-mix(in srgb, var(--ui-heading, #fff) 4%, transparent);
+}
+
+.ui-refactor .ui-provider-add-details > fieldset,
+.ui-refactor .ui-provider-add-details > .provider-fallback-panel,
+.ui-refactor .ui-provider-add-details > #filePrimaryActions {
+  padding: .9rem !important;
+}
+
+/* The old nested panels added another box inside the disclosure box. */
+.ui-refactor .ui-provider-add-details .provider-entry-panel,
+.ui-refactor .ui-provider-add-details .provider-fallback-panel {
+  margin-bottom: 0 !important;
+}
+
+/* Keep the provider card from ending in a sea of dead space. */
+.ui-refactor #providersSection .card-body {
+  padding-bottom: 1rem;
+}
+
+/* Ketchup & Mustard remains a visual felony, but it should still be legible. */
+body[data-ui-theme="ketchup-mustard"] .ui-provider-add-details {
+  border-color: #facc15 !important;
+  background: rgba(69, 10, 10, .42) !important;
+}
+
+body[data-ui-theme="ketchup-mustard"] .ui-provider-add-details > .ui-details-summary,
+body[data-ui-theme="ketchup-mustard"] .ui-provider-add-details > .ui-details-summary .ui-details-chevron {
+  color: #fef08a !important;
+}
+
+body[data-ui-theme="light"] .ui-provider-add-details > .ui-details-summary {
+  color: #0f172a !important;
+}
+
+body[data-ui-theme="light"] .ui-provider-add-details > .ui-details-summary .ui-details-chevron {
+  color: #64748b !important;
+}
