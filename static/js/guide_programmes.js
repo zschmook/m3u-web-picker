@@ -1,11 +1,14 @@
 (() => {
   "use strict";
 
-  const GUIDE_VISIBLE_UPCOMING = 3;
+  const GUIDE_WINDOW_HOURS = 6;
+  const GUIDE_SLOT_MINUTES = 30;
+  const GUIDE_PX_PER_MINUTE = 3;
+  let timelineRoot = null;
 
   function formatGuideClock(value) {
     if (!value) return "";
-    const parsed = new Date(value);
+    const parsed = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(parsed.getTime())) return "";
     return parsed.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   }
@@ -63,20 +66,175 @@
     return `${title} · ${channel.name || "Live TV"}`;
   }
 
-  function renderUpcoming(channel) {
-    const upcoming = Array.isArray(channel.upcoming) ? channel.upcoming : [];
-    if (!upcoming.length) return "";
-    const visible = upcoming.slice(0, GUIDE_VISIBLE_UPCOMING);
-    const items = visible.map(programme => {
-      const start = formatGuideClock(programme.start);
-      return `<span class="guide-upcoming-item">
-        ${start ? `<span class="guide-upcoming-time">${escapeHtml(start)}</span>` : ""}
-        <span class="guide-upcoming-title">${escapeHtml(programme.title || "Untitled")}</span>
-      </span>`;
-    }).join('<span class="guide-upcoming-separator" aria-hidden="true">·</span>');
-    return `<div class="guide-upcoming">
-      <span class="guide-upcoming-label">Next</span>
-      <div class="guide-upcoming-list">${items}</div>
+  function floorToGuideSlot(date) {
+    const value = new Date(date);
+    value.setSeconds(0, 0);
+    value.setMinutes(
+      Math.floor(value.getMinutes() / GUIDE_SLOT_MINUTES) * GUIDE_SLOT_MINUTES
+    );
+    return value;
+  }
+
+  function timelineBounds() {
+    const now = new Date();
+    const start = floorToGuideSlot(now);
+    const end = new Date(start.getTime() + GUIDE_WINDOW_HOURS * 60 * 60 * 1000);
+    const totalMinutes = (end.getTime() - start.getTime()) / 60000;
+    return {
+      now,
+      start,
+      end,
+      totalMinutes,
+      width: totalMinutes * GUIDE_PX_PER_MINUTE,
+      slotWidth: GUIDE_SLOT_MINUTES * GUIDE_PX_PER_MINUTE,
+    };
+  }
+
+  function ensureTimelineShell() {
+    if (timelineRoot?.isConnected) return timelineRoot;
+    const wrap = document.querySelector(".guide-list-wrap");
+    const table = wrap?.querySelector(".guide-table");
+    if (!wrap || !table) return null;
+
+    table.classList.add("d-none");
+    wrap.classList.add("guide-timeline-wrap");
+    timelineRoot = document.createElement("div");
+    timelineRoot.id = "guideTimeline";
+    timelineRoot.className = "guide-timeline";
+    wrap.insertBefore(timelineRoot, guideEls.empty);
+
+    timelineRoot.addEventListener("click", event => {
+      const target = event.target.closest("[data-guide-play-url]");
+      if (!target) return;
+      event.preventDefault();
+      const channel = actualGuideChannel(target.dataset.guidePlayUrl);
+      if (channel) playChannel(channel);
+    });
+    return timelineRoot;
+  }
+
+  function channelProgrammes(channel) {
+    const source = [
+      channel.now,
+      ...(Array.isArray(channel.upcoming) ? channel.upcoming : []),
+    ].filter(Boolean);
+    const seen = new Set();
+    return source
+      .filter(programme => {
+        const key = `${programme.start || ""}|${programme.stop || ""}|${programme.title || ""}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((left, right) => new Date(left.start || 0) - new Date(right.start || 0));
+  }
+
+  function programmeGeometry(programme, bounds, index, programmes) {
+    const rawStart = new Date(programme.start || "");
+    let rawStop = new Date(programme.stop || "");
+    if (Number.isNaN(rawStart.getTime())) return null;
+    if (Number.isNaN(rawStop.getTime()) || rawStop <= rawStart) {
+      const nextStart = new Date(programmes[index + 1]?.start || "");
+      rawStop = !Number.isNaN(nextStart.getTime()) && nextStart > rawStart
+        ? nextStart
+        : new Date(rawStart.getTime() + GUIDE_SLOT_MINUTES * 60 * 1000);
+    }
+    if (rawStop <= bounds.start || rawStart >= bounds.end) return null;
+
+    const clippedStart = rawStart < bounds.start ? bounds.start : rawStart;
+    const clippedStop = rawStop > bounds.end ? bounds.end : rawStop;
+    const leftMinutes = (clippedStart.getTime() - bounds.start.getTime()) / 60000;
+    const durationMinutes = Math.max(
+      5,
+      (clippedStop.getTime() - clippedStart.getTime()) / 60000
+    );
+    return {
+      left: leftMinutes * GUIDE_PX_PER_MINUTE,
+      width: durationMinutes * GUIDE_PX_PER_MINUTE,
+      current: bounds.now >= rawStart && bounds.now < rawStop,
+      rawStart,
+      rawStop,
+    };
+  }
+
+  function renderProgrammeBlocks(channel, bounds) {
+    const programmes = channelProgrammes(channel);
+    const blocks = programmes.map((programme, index) => {
+      const geometry = programmeGeometry(programme, bounds, index, programmes);
+      if (!geometry) return "";
+      const time = formatProgrammeRange(programme);
+      const subtitle = String(programme.subtitle || "").trim();
+      const description = String(programme.description || "").trim();
+      const tooltip = [programme.title, time, subtitle, description]
+        .filter(Boolean)
+        .join(" — ");
+      return `<button type="button"
+        class="guide-programme-block${geometry.current ? " is-current" : ""}"
+        style="left:${geometry.left}px;width:${geometry.width}px"
+        data-guide-play-url="${escapeHtml(channel.play_url)}"
+        title="${escapeHtml(tooltip)}">
+          <span class="guide-programme-block-title">${escapeHtml(programme.title || "Untitled")}</span>
+          ${time ? `<span class="guide-programme-block-time">${escapeHtml(time)}</span>` : ""}
+          ${subtitle ? `<span class="guide-programme-block-subtitle">${escapeHtml(subtitle)}</span>` : ""}
+      </button>`;
+    }).join("");
+
+    if (blocks) return blocks;
+    return '<div class="guide-track-empty">No guide data</div>';
+  }
+
+  function renderTimeHeader(bounds) {
+    const slots = [];
+    for (
+      let slot = new Date(bounds.start), index = 0;
+      slot < bounds.end;
+      slot = new Date(slot.getTime() + GUIDE_SLOT_MINUTES * 60 * 1000), index += 1
+    ) {
+      slots.push(
+        `<div class="guide-time-slot" style="left:${index * bounds.slotWidth}px;width:${bounds.slotWidth}px">${escapeHtml(formatGuideClock(slot))}</div>`
+      );
+    }
+    const nowLeft = (bounds.now.getTime() - bounds.start.getTime()) / 60000 * GUIDE_PX_PER_MINUTE;
+    const nowMarker = nowLeft >= 0 && nowLeft <= bounds.width
+      ? `<div class="guide-now-marker" style="left:${nowLeft}px" aria-hidden="true"></div>`
+      : "";
+    return `<div class="guide-timeline-head">
+      <div class="guide-station-head">Channel</div>
+      <div class="guide-time-head" style="width:${bounds.width}px">
+        ${slots.join("")}
+        ${nowMarker}
+      </div>
+    </div>`;
+  }
+
+  function renderChannelRow(channel, bounds) {
+    const logo = channel.logo
+      ? `<img class="guide-logo" src="${escapeHtml(channel.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : "";
+    const generated = channel.generated
+      ? '<span class="badge text-bg-primary guide-generated-badge">Auto</span>'
+      : "";
+    const isPlaying = guideState.currentChannel?.play_url === channel.play_url;
+    const nowLeft = (bounds.now.getTime() - bounds.start.getTime()) / 60000 * GUIDE_PX_PER_MINUTE;
+    const nowMarker = nowLeft >= 0 && nowLeft <= bounds.width
+      ? `<div class="guide-now-marker" style="left:${nowLeft}px" aria-hidden="true"></div>`
+      : "";
+
+    return `<div class="guide-grid-row${isPlaying ? " guide-current-row" : ""}">
+      <div class="guide-station-cell">
+        <div class="guide-station-number">${escapeHtml(channel.number)}</div>
+        ${logo}
+        <div class="guide-station-copy">
+          <div class="guide-station-name">${escapeHtml(channel.name)}${generated}</div>
+          <div class="guide-station-group">${escapeHtml(channel.group || "")}</div>
+        </div>
+        <button type="button" class="btn ${isPlaying ? "btn-outline-light" : "btn-success"} btn-sm guide-station-play"
+          data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
+      </div>
+      <div class="guide-programme-track" style="width:${bounds.width}px;--guide-slot-width:${bounds.slotWidth}px">
+        ${renderProgrammeBlocks(channel, bounds)}
+        ${nowMarker}
+      </div>
     </div>`;
   }
 
@@ -87,56 +245,12 @@
   };
 
   renderGuide = function() {
+    const root = ensureTimelineShell();
+    if (!root) return;
     const visible = filteredGuideChannels();
-    guideEls.rows.innerHTML = visible.map(channel => {
-      const logo = channel.logo
-        ? `<img class="guide-logo" src="${escapeHtml(channel.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-        : "";
-      const generated = channel.generated
-        ? `<span class="badge text-bg-primary guide-generated-badge">Auto</span>`
-        : "";
-      const now = channel.now || null;
-      const next = channel.next || null;
-      const nowRange = formatProgrammeRange(now);
-      const programme = now
-        ? `
-          <div class="guide-programme-now">
-            <span class="guide-programme-now-badge">Now</span>
-            <span class="guide-programme-title">${escapeHtml(now.title || "Untitled")}</span>
-            ${nowRange ? `<span class="guide-programme-time">${escapeHtml(nowRange)}</span>` : ""}
-          </div>
-          ${now.subtitle ? `<div class="guide-programme-subtitle">${escapeHtml(now.subtitle)}</div>` : ""}`
-        : next
-          ? `<div class="guide-programme-empty">No programme airing now.</div>`
-          : `<div class="guide-programme-empty">No guide data for this channel.</div>`;
-      const schedule = renderUpcoming(channel);
-      const subtitle = channel.subtitle
-        ? `<div class="guide-channel-subtitle">${escapeHtml(channel.subtitle)}</div>`
-        : "";
-      const isCurrent = guideState.currentChannel?.play_url === channel.play_url;
-      return `
-        <tr class="${isCurrent ? "guide-current-row" : ""}">
-          <td>${escapeHtml(channel.number)}</td>
-          <td class="guide-channel-cell">
-            <div class="guide-channel-main">
-              ${logo}
-              <div class="guide-channel-copy">
-                <div class="guide-channel-identity">
-                  <span class="guide-channel-identity-name">${escapeHtml(channel.name)}</span>${generated}
-                </div>
-                ${programme}
-                ${schedule}
-                ${subtitle}
-              </div>
-            </div>
-          </td>
-          <td>${escapeHtml(channel.group || "—")}</td>
-          <td class="text-end">
-            <button class="btn ${isCurrent ? "btn-outline-light" : "btn-success"} btn-sm guide-play-btn" type="button"
-              data-play-url="${escapeHtml(channel.play_url)}">${isCurrent ? "Playing" : "Play"}</button>
-          </td>
-        </tr>`;
-    }).join("");
+    const bounds = timelineBounds();
+    root.style.setProperty("--guide-timeline-width", `${bounds.width}px`);
+    root.innerHTML = `${renderTimeHeader(bounds)}<div class="guide-timeline-body">${visible.map(channel => renderChannelRow(channel, bounds)).join("")}</div>`;
 
     guideEls.visibleCount.textContent = `${visible.length.toLocaleString()} channel${visible.length === 1 ? "" : "s"}`;
     guideEls.empty.classList.toggle("d-none", visible.length !== 0);
@@ -210,15 +324,6 @@
     guideEls.castScreenChannel.textContent = remoteProgrammeCopy(guideState.currentChannel);
   };
 
-  guideEls.rows.addEventListener("click", event => {
-    const button = event.target.closest(".guide-play-btn");
-    if (!button) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const channel = actualGuideChannel(button.dataset.playUrl);
-    if (channel) playChannel(channel);
-  }, true);
-
   guideEls.search.addEventListener("input", event => {
     event.stopImmediatePropagation();
     renderGuide();
@@ -234,5 +339,6 @@
   }, true);
 
   window.setInterval(() => loadGuide({silent: true}), 60_000);
+  ensureTimelineShell();
   loadGuide();
 })();
