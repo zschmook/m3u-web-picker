@@ -1,0 +1,537 @@
+(() => {
+  "use strict";
+
+  if (document.getElementById("uiAppShell")) return;
+
+  const PAGE_IDS = ["overview", "providers", "channels", "epg", "sports", "devices"];
+  const state = {
+    status: null,
+    activePage: "overview",
+    pollTimer: null,
+    elapsedTimer: null,
+  };
+
+  const el = id => document.getElementById(id);
+  const escapeHtml = value => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+  const icons = {
+    overview: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>',
+    providers: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v4H5zM5 11h14v4H5zM5 17h14v2H5z"/></svg>',
+    channels: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14M8 4v4M14 10v4M11 16v4"/></svg>',
+    epg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v13H4zM8 3v6M16 3v6M4 10h16"/></svg>',
+    sports: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8M16 8l-8 8"/></svg>',
+    devices: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>',
+    external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 13v6H5V5h6"/></svg>',
+  };
+
+  function formatNumber(value) {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toLocaleString() : "0";
+  }
+
+  function formatTime(value, fallback = "—") {
+    if (!value) return fallback;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  function formatElapsed(seconds) {
+    const value = Math.max(0, Math.floor(Number(seconds || 0)));
+    const minutes = Math.floor(value / 60);
+    const remainder = value % 60;
+    return `${minutes}:${String(remainder).padStart(2, "0")}`;
+  }
+
+  function navButton(page, label) {
+    return `<button class="ui-side-nav-item" type="button" data-ui-page-target="${page}">${icons[page]}<span>${label}</span></button>`;
+  }
+
+  function buildShell() {
+    const root = document.querySelector("body > .container-fluid");
+    if (!root) return false;
+
+    const shell = document.createElement("div");
+    shell.id = "uiAppShell";
+    shell.className = "ui-app-shell";
+    root.parentNode.insertBefore(shell, root);
+
+    const sidebar = document.createElement("aside");
+    sidebar.id = "uiSidebar";
+    sidebar.className = "ui-sidebar";
+    sidebar.setAttribute("aria-label", "Application navigation");
+    sidebar.innerHTML = `
+      <div class="ui-sidebar-brand">
+        <div class="ui-sidebar-mark">M3U</div>
+        <div>
+          <div class="ui-sidebar-title">Web Picker</div>
+          <div class="ui-sidebar-version" id="uiSidebarVersion">Experimental UI</div>
+        </div>
+      </div>
+      <nav class="ui-side-nav" aria-label="Main sections">
+        ${navButton("overview", "Overview")}
+        ${navButton("providers", "Providers")}
+        ${navButton("channels", "Channels")}
+        ${navButton("epg", "EPG")}
+        ${navButton("sports", "Sports Automation")}
+        ${navButton("devices", "Devices")}
+      </nav>
+      <div class="ui-side-links">
+        <a href="/guide">${icons.external}<span>TV Guide</span></a>
+        <a href="/user-guide" target="_blank" rel="noopener">${icons.external}<span>User Guide</span></a>
+      </div>
+      <section class="ui-system-card" aria-labelledby="uiSystemStatusTitle">
+        <div class="ui-system-card-heading">
+          <span id="uiSystemStatusTitle">System Status</span>
+          <span class="ui-health-dot is-loading" id="uiSystemHealthDot" aria-hidden="true"></span>
+        </div>
+        <div class="ui-system-health" id="uiSystemHealth">Loading…</div>
+        <div class="ui-system-metrics">
+          <div><span>Provider</span><strong id="uiProviderStatus">—</strong></div>
+          <div><span>All Channels</span><strong id="uiAllChannels">—</strong></div>
+          <div><span>Indexed Channels</span><strong id="uiIndexedChannels">—</strong></div>
+          <div><span>Sports Channels</span><strong id="uiSportsChannels">—</strong></div>
+          <div><span>HDHomeRun</span><strong id="uiHdhrStatus">—</strong></div>
+          <div><span>Roku</span><strong id="uiRokuStatus">—</strong></div>
+          <div><span>Streams</span><strong id="uiStreamsStatus">—</strong></div>
+        </div>
+        <div class="ui-system-divider"></div>
+        <div class="ui-system-times">
+          <div><span>Last update</span><strong id="uiLastUpdate">—</strong></div>
+          <div><span>Next update</span><strong id="uiNextUpdate">—</strong></div>
+        </div>
+        <div class="ui-system-actions">
+          <button id="uiUpdateNowBtn" class="btn ui-btn-primary" type="button">Update Now</button>
+          <button id="uiOutputsBtn" class="btn ui-btn-secondary" type="button">Outputs</button>
+        </div>
+        <div class="ui-update-result is-loading" id="uiUpdateResult">
+          <span class="ui-update-result-dot" aria-hidden="true"></span>
+          <span class="ui-update-result-copy">
+            <span class="ui-update-result-label">Update status</span>
+            <strong id="uiUpdateResultText">Loading…</strong>
+          </span>
+          <button id="uiUpdateDetailsBtn" class="ui-details-link d-none" type="button">Details</button>
+        </div>
+      </section>`;
+
+    const main = document.createElement("main");
+    main.className = "ui-main-shell";
+    main.appendChild(root);
+    shell.append(sidebar, main);
+    root.classList.add("ui-modern-root");
+
+    const mobileButton = document.createElement("button");
+    mobileButton.id = "uiSidebarToggle";
+    mobileButton.className = "ui-sidebar-toggle";
+    mobileButton.type = "button";
+    mobileButton.setAttribute("aria-label", "Open navigation");
+    mobileButton.innerHTML = '<span></span><span></span><span></span>';
+    document.body.appendChild(mobileButton);
+
+    const scrim = document.createElement("div");
+    scrim.id = "uiSidebarScrim";
+    scrim.className = "ui-sidebar-scrim";
+    document.body.appendChild(scrim);
+
+    mobileButton.addEventListener("click", () => document.body.classList.toggle("ui-sidebar-open"));
+    scrim.addEventListener("click", () => document.body.classList.remove("ui-sidebar-open"));
+    return true;
+  }
+
+  function makePage(id, title, subtitle = "") {
+    const section = document.createElement("section");
+    section.id = `uiPage-${id}`;
+    section.className = "ui-nav-page";
+    section.dataset.uiPage = id;
+    section.innerHTML = `
+      <header class="ui-page-header">
+        <div>
+          <div class="ui-page-eyebrow">M3U Web Picker</div>
+          <h1>${escapeHtml(title)}</h1>
+          ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
+        </div>
+      </header>`;
+    return section;
+  }
+
+  function preparePages() {
+    const root = document.querySelector(".ui-modern-root");
+    if (!root) return;
+
+    const originalBrand = document.querySelector(".app-brand-block h1");
+    const badge = originalBrand?.querySelector(".badge");
+    if (badge?.textContent?.trim()) el("uiSidebarVersion").textContent = badge.textContent.trim();
+
+    document.querySelector(".app-topbar")?.classList.add("ui-legacy-hidden");
+    document.querySelector(".ui-jump-nav")?.classList.add("ui-legacy-hidden");
+    document.querySelector("#uiOutputsDetails")?.classList.add("ui-legacy-hidden");
+    document.querySelectorAll(".ui-section-separator, .ui-section-anchor").forEach(node => node.classList.add("ui-legacy-hidden"));
+
+    const providerCard = el("providerSources")?.closest(".card");
+    if (providerCard) {
+      providerCard.dataset.uiPage = "providers";
+      providerCard.classList.add("ui-nav-page", "ui-page-card-root");
+      const body = providerCard.querySelector(":scope > .card-body");
+      if (body && !body.querySelector(".ui-page-inline-heading")) {
+        const intro = document.createElement("div");
+        intro.className = "ui-page-inline-heading";
+        intro.innerHTML = '<div class="ui-page-eyebrow">Sources</div><h1>Providers</h1><p>Manage the primary IPTV catalog and ordered sports fallbacks.</p>';
+        body.prepend(intro);
+      }
+    }
+
+    const channelShell = el("uiChannelSectionShell") || el("channelManagerHeader")?.parentElement;
+    if (channelShell) {
+      channelShell.dataset.uiPage = "channels";
+      channelShell.classList.add("ui-nav-page", "ui-page-card-root");
+      if (!channelShell.querySelector(":scope > .ui-page-inline-heading")) {
+        const heading = document.createElement("div");
+        heading.className = "ui-page-inline-heading ui-page-heading-before-section";
+        heading.innerHTML = '<div class="ui-page-eyebrow">Lineup</div><h1>Channels</h1><p>Search, index, filter, and order the channels in your curated lineup.</p>';
+        channelShell.prepend(heading);
+      }
+    }
+
+    const sportsCard = el("sportsSectionTitle")?.closest(".sports-card");
+    if (sportsCard) {
+      sportsCard.dataset.uiPage = "sports";
+      sportsCard.classList.add("ui-nav-page", "ui-page-card-root");
+      const body = sportsCard.querySelector(":scope > .card-body");
+      if (body && !body.querySelector(".ui-page-inline-heading")) {
+        const heading = document.createElement("div");
+        heading.className = "ui-page-inline-heading";
+        heading.innerHTML = '<div class="ui-page-eyebrow">Automation</div><h1>Sports Automation</h1><p>Build event channels from your rules, provider feeds, EPG data, and schedule APIs.</p>';
+        body.prepend(heading);
+      }
+    }
+
+    const epgPage = makePage("epg", "EPG", "Manage public and additional XMLTV sources used by the combined guide.");
+    const publicCard = el("publicEpgCard");
+    const epgTableCard = el("epgSources")?.closest(".card");
+    const epgInsertBefore = publicCard || epgTableCard || channelShell || sportsCard;
+    if (epgInsertBefore?.parentNode) epgInsertBefore.parentNode.insertBefore(epgPage, epgInsertBefore);
+    [publicCard, epgTableCard].filter(Boolean).forEach(card => {
+      if (card.parentNode !== epgPage) epgPage.appendChild(card);
+    });
+
+    const overview = makePage("overview", "Overview", "Application-wide update scheduling and output access.");
+    const overviewGrid = document.createElement("div");
+    overviewGrid.className = "ui-overview-grid";
+    overviewGrid.innerHTML = `
+      <section class="ui-modern-card ui-overview-update-card">
+        <div class="ui-card-heading"><div><span>Automatic Update</span><small>One application-wide refresh clock.</small></div></div>
+        <div id="uiOverviewMasterSlot"></div>
+      </section>
+      <section class="ui-modern-card">
+        <div class="ui-card-heading"><div><span>Outputs</span><small>Curated playlist and combined XMLTV guide.</small></div></div>
+        <div class="ui-output-summary">
+          <div><span>M3U Playlist</span><code>/playlist/channels.m3u</code></div>
+          <div><span>Combined EPG</span><code>/epg/epg.xml</code></div>
+        </div>
+        <button class="btn ui-btn-secondary" id="uiOverviewOutputsBtn" type="button">Open Outputs</button>
+      </section>`;
+    overview.appendChild(overviewGrid);
+    const firstPage = providerCard || epgPage || channelShell || sportsCard;
+    if (firstPage?.parentNode) firstPage.parentNode.insertBefore(overview, firstPage);
+    else root.prepend(overview);
+
+    const masterPanel = document.querySelector(".master-update-panel");
+    if (masterPanel) {
+      el("uiOverviewMasterSlot")?.appendChild(masterPanel);
+      masterPanel.classList.add("ui-overview-master-panel");
+      el("masterUpdateNowBtn")?.classList.add("ui-legacy-hidden");
+      el("masterUpdateRunning")?.classList.add("ui-legacy-hidden");
+    }
+
+    const devices = makePage("devices", "Devices", "HDHomeRun support, saved Roku targets, and active remote playback sessions.");
+    const devicesGrid = document.createElement("div");
+    devicesGrid.className = "ui-devices-grid";
+    devicesGrid.innerHTML = `
+      <section class="ui-modern-card" id="uiHdhrDeviceCard">
+        <div class="ui-card-heading"><div><span>HDHomeRun</span><small>Virtual tuner discovery and HTTP playback surface.</small></div></div>
+        <div id="uiHdhrDeviceSlot"></div>
+      </section>
+      <section class="ui-modern-card">
+        <div class="ui-card-heading"><div><span>Roku</span><small>Saved targets are identified by stable Roku identity, not IP address.</small></div><span class="ui-count-badge" id="uiRokuDeviceCount">0 saved</span></div>
+        <div id="uiRokuDeviceList" class="ui-roku-device-list"><div class="ui-empty-state">Loading saved devices…</div></div>
+        <a class="btn ui-btn-secondary ui-inline-action" href="/guide">Open TV Guide</a>
+      </section>
+      <section class="ui-modern-card">
+        <div class="ui-card-heading"><div><span>Remote Playback</span><small>Live HLS relays currently serving Roku or Cast receivers.</small></div></div>
+        <div class="ui-big-metric"><strong id="uiDeviceStreams">0</strong><span>active streams</span></div>
+      </section>`;
+    devices.appendChild(devicesGrid);
+    if (sportsCard?.parentNode) sportsCard.parentNode.insertBefore(devices, sportsCard.nextSibling);
+    else root.appendChild(devices);
+
+    const hdhrPanel = document.querySelector(".hdhr-support-panel");
+    if (hdhrPanel) {
+      el("uiHdhrDeviceSlot")?.appendChild(hdhrPanel);
+      hdhrPanel.classList.remove("ui-top-hdhr-panel", "mb-0");
+      hdhrPanel.classList.add("ui-device-native-panel");
+    }
+
+    document.querySelector(".playlist-toolbar")?.classList.add("ui-legacy-hidden");
+    el("uiOverviewOutputsBtn")?.addEventListener("click", openOutputsModal);
+  }
+
+  function buildModals() {
+    const outputs = document.createElement("div");
+    outputs.className = "modal fade ui-modern-modal";
+    outputs.id = "uiOutputsModal";
+    outputs.tabIndex = -1;
+    outputs.setAttribute("aria-hidden", "true");
+    outputs.innerHTML = `
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div><div class="ui-modal-eyebrow">Playlist Outputs</div><h2 class="modal-title">Copy output URLs</h2></div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="ui-output-copy-row">
+              <label for="uiM3uOutputUrl">M3U Playlist</label>
+              <div class="ui-copy-control"><input id="uiM3uOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiM3uOutputUrl">Copy</button></div>
+            </div>
+            <div class="ui-output-copy-row">
+              <label for="uiEpgOutputUrl">Combined EPG</label>
+              <div class="ui-copy-control"><input id="uiEpgOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiEpgOutputUrl">Copy</button></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(outputs);
+
+    const details = document.createElement("div");
+    details.className = "modal fade ui-modern-modal";
+    details.id = "uiUpdateDetailsModal";
+    details.tabIndex = -1;
+    details.setAttribute("aria-hidden", "true");
+    details.innerHTML = `
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div><div class="ui-modal-eyebrow">Master Update</div><h2 class="modal-title">Update details</h2></div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div id="uiUpdateDetailsSummary" class="ui-update-modal-summary"></div>
+            <div id="uiUpdateStageList" class="ui-update-stage-list"></div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(details);
+
+    outputs.addEventListener("click", async event => {
+      const button = event.target.closest("[data-ui-copy]");
+      if (!button) return;
+      const input = el(button.dataset.uiCopy);
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+      } catch {
+        input.select();
+        document.execCommand("copy");
+      }
+      const old = button.textContent;
+      button.textContent = "✓ Copied";
+      setTimeout(() => { button.textContent = old; }, 1400);
+    });
+  }
+
+  function showPage(page, {replaceHash = false} = {}) {
+    const target = PAGE_IDS.includes(page) ? page : "overview";
+    state.activePage = target;
+    document.querySelectorAll("[data-ui-page]").forEach(node => node.classList.toggle("ui-page-hidden", node.dataset.uiPage !== target));
+    document.querySelectorAll("[data-ui-page-target]").forEach(button => {
+      const active = button.dataset.uiPageTarget === target;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-current", active ? "page" : "false");
+    });
+    document.body.classList.remove("ui-sidebar-open");
+    const hash = `#${target}`;
+    if (location.hash !== hash) {
+      if (replaceHash) history.replaceState(null, "", hash);
+      else history.pushState(null, "", hash);
+    }
+    window.scrollTo({top: 0, behavior: "auto"});
+  }
+
+  function bindNavigation() {
+    document.querySelectorAll("[data-ui-page-target]").forEach(button => {
+      button.addEventListener("click", () => showPage(button.dataset.uiPageTarget));
+    });
+    window.addEventListener("hashchange", () => showPage(location.hash.slice(1), {replaceHash: true}));
+    const initial = PAGE_IDS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
+    showPage(initial, {replaceHash: true});
+  }
+
+  function setHealthClass(node, status) {
+    if (!node) return;
+    node.classList.remove("is-success", "is-warning", "is-failed", "is-running", "is-setup", "is-loading");
+    const mapped = status === "success" ? "is-success"
+      : status === "warning" ? "is-warning"
+      : status === "failed" || status === "error" ? "is-failed"
+      : status === "running" ? "is-running"
+      : status === "setup" ? "is-setup" : "is-loading";
+    node.classList.add(mapped);
+  }
+
+  function renderRokuDevices(devices) {
+    const list = el("uiRokuDeviceList");
+    const rows = Array.isArray(devices) ? devices : [];
+    if (el("uiRokuDeviceCount")) el("uiRokuDeviceCount").textContent = `${rows.length} saved`;
+    if (!list) return;
+    if (!rows.length) {
+      list.innerHTML = '<div class="ui-empty-state">No Roku devices saved yet. Discover and add them from TV Guide.</div>';
+      return;
+    }
+    list.innerHTML = rows.map(device => `
+      <div class="ui-roku-device-row">
+        <span class="ui-device-dot"></span>
+        <div><strong>${escapeHtml(device.name || "Roku TV")}</strong><small>${escapeHtml([device.model || device.model_number, device.host].filter(Boolean).join(" · "))}</small></div>
+      </div>`).join("");
+  }
+
+  function renderStatus(data) {
+    state.status = data;
+    const provider = data.provider || {};
+    const counts = data.counts || {};
+    const devices = data.devices || {};
+    const master = data.master_update || {};
+    const update = data.update || {};
+
+    el("uiProviderStatus").textContent = provider.label || "—";
+    el("uiAllChannels").textContent = formatNumber(counts.all_channels);
+    el("uiIndexedChannels").textContent = formatNumber(counts.indexed_channels);
+    el("uiSportsChannels").textContent = formatNumber(counts.sports_channels);
+    el("uiHdhrStatus").textContent = devices.hdhr?.enabled ? `On · ${formatNumber(devices.hdhr.tuners)} tuners` : "Off";
+    el("uiRokuStatus").textContent = `${formatNumber(devices.roku_saved)} saved`;
+    el("uiStreamsStatus").textContent = `${formatNumber(devices.active_streams)} active`;
+    el("uiDeviceStreams").textContent = formatNumber(devices.active_streams);
+    el("uiLastUpdate").textContent = formatTime(master.last_update, "Never");
+    el("uiNextUpdate").textContent = master.enabled ? formatTime(master.next_update, "—") : "Disabled";
+
+    const overall = master.running ? "running" : update.status;
+    const overallText = master.running ? "Updating" : (provider.status === "setup" ? "Setup needed" : update.status === "failed" ? "Attention needed" : update.status === "warning" ? "Needs review" : "Ready");
+    el("uiSystemHealth").textContent = overallText;
+    setHealthClass(el("uiSystemHealthDot"), overall);
+
+    const result = el("uiUpdateResult");
+    setHealthClass(result, update.status);
+    el("uiUpdateResultText").textContent = update.label || "—";
+    const detailsButton = el("uiUpdateDetailsBtn");
+    const issueCount = Number(update.error_count || 0) + Number(update.warning_count || 0);
+    detailsButton.classList.toggle("d-none", issueCount === 0 && update.status !== "failed" && update.status !== "warning");
+
+    const updateButton = el("uiUpdateNowBtn");
+    if (master.running) {
+      updateButton.disabled = true;
+      updateButton.textContent = `Updating · ${formatElapsed(master.elapsed_seconds)}`;
+    } else {
+      updateButton.disabled = false;
+      updateButton.textContent = "Update Now";
+    }
+
+    renderRokuDevices(devices.roku_devices);
+  }
+
+  function renderUpdateDetails() {
+    const data = state.status || {};
+    const update = data.update || {};
+    const master = data.master_update || {};
+    const summary = el("uiUpdateDetailsSummary");
+    if (summary) {
+      summary.innerHTML = `
+        <div class="ui-update-modal-state ${escapeHtml(update.status || "setup")}"><span></span><strong>${escapeHtml(update.label || "No update status")}</strong></div>
+        <div class="ui-update-meta">
+          <span><small>Last update</small><strong>${escapeHtml(formatTime(master.last_update, "Never"))}</strong></span>
+          <span><small>Duration</small><strong>${master.last_duration_seconds == null ? "—" : escapeHtml(formatElapsed(master.last_duration_seconds))}</strong></span>
+          <span><small>Trigger</small><strong>${escapeHtml(master.last_trigger || "—")}</strong></span>
+        </div>`;
+    }
+    const list = el("uiUpdateStageList");
+    const stages = Array.isArray(update.stages) ? update.stages : [];
+    if (!list) return;
+    list.innerHTML = stages.map(stage => {
+      const icon = stage.status === "success" ? "✓" : stage.status === "error" ? "×" : stage.status === "warning" ? "!" : "·";
+      return `<div class="ui-update-stage is-${escapeHtml(stage.status)}"><span class="ui-stage-icon">${icon}</span><div><strong>${escapeHtml(stage.name)}</strong><small>${escapeHtml(stage.detail || "")}</small></div></div>`;
+    }).join("") || '<div class="ui-empty-state">No update detail is available yet.</div>';
+  }
+
+  function openOutputsModal() {
+    const outputs = state.status?.outputs || {m3u: "/playlist/channels.m3u", epg: "/epg/epg.xml"};
+    el("uiM3uOutputUrl").value = `${location.origin}${outputs.m3u || "/playlist/channels.m3u"}`;
+    el("uiEpgOutputUrl").value = `${location.origin}${outputs.epg || "/epg/epg.xml"}`;
+    bootstrap.Modal.getOrCreateInstance(el("uiOutputsModal")).show();
+  }
+
+  function openUpdateDetails() {
+    renderUpdateDetails();
+    bootstrap.Modal.getOrCreateInstance(el("uiUpdateDetailsModal")).show();
+  }
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch(`/api/ui/status?_=${Date.now()}`, {cache: "no-store"});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Status request failed.");
+      renderStatus(data);
+    } catch (error) {
+      el("uiSystemHealth").textContent = "Status unavailable";
+      setHealthClass(el("uiSystemHealthDot"), "failed");
+      const result = el("uiUpdateResult");
+      setHealthClass(result, "failed");
+      el("uiUpdateResultText").textContent = error?.message || "Could not load status";
+      el("uiUpdateDetailsBtn")?.classList.add("d-none");
+    }
+  }
+
+  function bindActions() {
+    el("uiOutputsBtn")?.addEventListener("click", openOutputsModal);
+    el("uiUpdateDetailsBtn")?.addEventListener("click", openUpdateDetails);
+    el("uiUpdateNowBtn")?.addEventListener("click", () => {
+      const legacy = el("masterUpdateNowBtn");
+      if (!legacy || legacy.disabled) return;
+      const button = el("uiUpdateNowBtn");
+      button.disabled = true;
+      button.textContent = "Starting update…";
+      legacy.click();
+      setTimeout(refreshStatus, 300);
+    });
+
+    const statusNode = el("masterUpdateStatus");
+    if (statusNode) {
+      new MutationObserver(() => refreshStatus()).observe(statusNode, {childList: true, characterData: true, subtree: true});
+    }
+    const sportsStatus = el("sportsScanStatus");
+    if (sportsStatus) {
+      new MutationObserver(() => refreshStatus()).observe(sportsStatus, {childList: true, characterData: true, subtree: true, attributes: true});
+    }
+  }
+
+  function install() {
+    if (!buildShell()) return;
+    buildModals();
+    preparePages();
+    bindNavigation();
+    bindActions();
+    refreshStatus();
+    state.pollTimer = setInterval(refreshStatus, 10000);
+    state.elapsedTimer = setInterval(() => {
+      if (state.status?.master_update?.running) refreshStatus();
+    }, 1000);
+  }
+
+  install();
+})();
