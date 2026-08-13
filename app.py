@@ -71,7 +71,7 @@ def guide():
         '<script src="/static/js/guide_programmes.js?v=tv-grid-4"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/guide_back_button.js?v=guide-back-2"></script>\n</body>',
+        '<script src="/static/js/guide_back_button.js?v=guide-back-3"></script>\n</body>',
     )
 
 
