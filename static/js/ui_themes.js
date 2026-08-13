@@ -5,7 +5,13 @@
   const THEMES = [
     ["midnight", "Midnight"],
     ["slate", "Slate"],
+    ["oled-black", "OLED Black"],
+    ["carbon", "Carbon"],
     ["light", "Light"],
+    ["ice", "Ice"],
+    ["terminal-amber", "Terminal Amber"],
+    ["terminal-green", "Terminal Green"],
+    ["cornfield", "Cornfield"],
     ["ketchup-mustard", "Ketchup & Mustard"]
   ];
   const VALID = new Set(THEMES.map(([value]) => value));
