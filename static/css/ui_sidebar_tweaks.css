@@ -66,3 +66,148 @@
 #publicEpgDetails > summary::marker {
   content: "";
 }
+
+/* The modern shell was originally authored after the theme layer and still
+   painted several dark surfaces literally. Make Light own those surfaces too. */
+body[data-ui-theme="light"] .ui-app-shell {
+  background:
+    radial-gradient(circle at 78% 0%, rgba(37, 99, 235, 0.06), transparent 32rem),
+    var(--ui-page) !important;
+}
+
+body[data-ui-theme="light"] .ui-sidebar {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border-color: var(--ui-border) !important;
+  box-shadow: 14px 0 36px rgba(15, 23, 42, 0.08) !important;
+}
+
+body[data-ui-theme="light"] .ui-system-card,
+body[data-ui-theme="light"] .ui-page-card-root,
+body[data-ui-theme="light"] .ui-modern-card,
+body[data-ui-theme="light"] .ui-modern-root .card,
+body[data-ui-theme="light"] .ui-modern-root .ui-channel-section-shell {
+  background: var(--ui-panel) !important;
+  border-color: var(--ui-border) !important;
+  color: var(--ui-text) !important;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.07) !important;
+}
+
+body[data-ui-theme="light"] .ui-sidebar-title,
+body[data-ui-theme="light"] .ui-system-health,
+body[data-ui-theme="light"] .ui-system-metrics strong,
+body[data-ui-theme="light"] .ui-system-times strong,
+body[data-ui-theme="light"] .ui-card-heading span,
+body[data-ui-theme="light"] .ui-output-summary code,
+body[data-ui-theme="light"] .ui-big-metric strong,
+body[data-ui-theme="light"] .ui-count-badge {
+  color: var(--ui-heading) !important;
+}
+
+body[data-ui-theme="light"] .ui-sidebar-mark {
+  color: #ffffff !important;
+}
+
+body[data-ui-theme="light"] .ui-system-card-heading,
+body[data-ui-theme="light"] .ui-sidebar-version,
+body[data-ui-theme="light"] .ui-system-metrics span,
+body[data-ui-theme="light"] .ui-system-times span,
+body[data-ui-theme="light"] .ui-card-heading small,
+body[data-ui-theme="light"] .ui-output-summary span,
+body[data-ui-theme="light"] .ui-roku-device-row small,
+body[data-ui-theme="light"] .ui-big-metric span,
+body[data-ui-theme="light"] .ui-empty-state,
+body[data-ui-theme="light"] .ui-update-result-label {
+  color: var(--ui-muted) !important;
+}
+
+body[data-ui-theme="light"] .ui-side-nav-item,
+body[data-ui-theme="light"] .ui-side-links a {
+  color: #475569 !important;
+}
+
+body[data-ui-theme="light"] .ui-side-nav-item:hover,
+body[data-ui-theme="light"] .ui-side-links a:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+body[data-ui-theme="light"] .ui-side-nav-item.is-active {
+  background: #e8f0ff !important;
+  border-color: #bfdbfe !important;
+  color: #1e3a8a !important;
+}
+
+body[data-ui-theme="light"] .ui-side-nav-item.is-active svg {
+  color: #2563eb !important;
+}
+
+body[data-ui-theme="light"] .ui-output-summary > div,
+body[data-ui-theme="light"] .ui-roku-device-row,
+body[data-ui-theme="light"] .ui-update-modal-state,
+body[data-ui-theme="light"] .ui-update-meta span,
+body[data-ui-theme="light"] .ui-update-stage {
+  background: var(--ui-panel-soft) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body[data-ui-theme="light"] .btn.ui-btn-secondary,
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-primary,
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-success,
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-info,
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-light,
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-secondary {
+  background: #ffffff !important;
+  border-color: var(--ui-border-strong) !important;
+  color: #334155 !important;
+}
+
+body[data-ui-theme="light"] .btn.ui-btn-secondary:hover:not(:disabled),
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-primary:hover:not(:disabled),
+body[data-ui-theme="light"] .ui-modern-root .btn-outline-secondary:hover:not(:disabled) {
+  background: #f1f5f9 !important;
+  border-color: #64748b !important;
+  color: #0f172a !important;
+}
+
+body[data-ui-theme="light"] .ui-modern-root .form-control,
+body[data-ui-theme="light"] .ui-modern-root .form-select,
+body[data-ui-theme="light"] .ui-modern-modal input {
+  background: var(--ui-field) !important;
+  border-color: var(--ui-border-strong) !important;
+  color: var(--ui-text) !important;
+}
+
+body[data-ui-theme="light"] .ui-modern-root .form-label,
+body[data-ui-theme="light"] .ui-modern-root .provider-field-heading,
+body[data-ui-theme="light"] .ui-output-copy-row label {
+  color: #475569 !important;
+}
+
+body[data-ui-theme="light"] .ui-modern-root .table {
+  --bs-table-bg: transparent;
+  --bs-table-color: #1f2937;
+  --bs-table-border-color: var(--ui-border);
+  --bs-table-hover-bg: #f1f5f9;
+  --bs-table-hover-color: #0f172a;
+}
+
+body[data-ui-theme="light"] .ui-modern-root .table thead th {
+  color: #64748b !important;
+}
+
+body[data-ui-theme="light"] .ui-modern-modal .modal-content {
+  background: var(--ui-panel) !important;
+  border-color: var(--ui-border-strong) !important;
+  color: var(--ui-text) !important;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18) !important;
+}
+
+body[data-ui-theme="light"] .ui-sidebar-toggle {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: var(--ui-border-strong) !important;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14) !important;
+}
+
+body[data-ui-theme="light"] .ui-sidebar-toggle span {
+  background: #334155 !important;
+}
