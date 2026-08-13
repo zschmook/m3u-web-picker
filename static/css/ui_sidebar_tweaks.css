@@ -27,6 +27,33 @@
   display: block;
 }
 
+.ui-overview-right-stack {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.ui-overview-theme-card .ui-card-heading {
+  margin-bottom: 14px;
+}
+
+.ui-overview-theme-card .ui-theme-control {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.ui-overview-theme-card .ui-theme-control > span:first-child {
+  color: var(--ui-text);
+  font-size: 0.8rem;
+}
+
+.ui-overview-theme-card .ui-theme-control select {
+  min-width: 190px;
+}
+
 #publicEpgDetails > summary {
   cursor: default;
   list-style: none;
