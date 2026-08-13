@@ -55,7 +55,7 @@ def guide():
         '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-6">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=theme-pack-2">\n'
-        '<link rel="stylesheet" href="/static/css/guide_theme.css?v=guide-theme-1">\n'
+        '<link rel="stylesheet" href="/static/css/guide_theme.css?v=guide-theme-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
@@ -71,7 +71,7 @@ def guide():
         '<script src="/static/js/guide_programmes.js?v=tv-grid-4"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/guide_back_button.js?v=guide-back-1"></script>\n</body>',
+        '<script src="/static/js/guide_back_button.js?v=guide-back-2"></script>\n</body>',
     )
 
 
