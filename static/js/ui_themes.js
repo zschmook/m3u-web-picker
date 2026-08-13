@@ -46,6 +46,47 @@
     select.addEventListener("change", () => applyTheme(select.value));
   }
 
+  function placeThemePickerInOverview() {
+    const grid = document.querySelector("#uiPage-overview .ui-overview-grid");
+    const picker = document.querySelector(".ui-theme-control");
+    const outputsButton = document.getElementById("uiOverviewOutputsBtn");
+    const outputsCard = outputsButton?.closest(".ui-modern-card");
+    if (!grid || !picker || !outputsCard) return false;
+
+    let stack = grid.querySelector(":scope > .ui-overview-right-stack");
+    if (!stack) {
+      stack = document.createElement("div");
+      stack.className = "ui-overview-right-stack";
+      grid.insertBefore(stack, outputsCard);
+      stack.appendChild(outputsCard);
+    }
+
+    let themeCard = stack.querySelector(".ui-overview-theme-card");
+    if (!themeCard) {
+      themeCard = document.createElement("section");
+      themeCard.className = "ui-modern-card ui-overview-theme-card";
+      themeCard.innerHTML = `
+        <div class="ui-card-heading">
+          <div>
+            <span>Themes</span>
+            <small>Choose the appearance used throughout M3U Web Picker.</small>
+          </div>
+        </div>
+        <div id="uiOverviewThemeSlot"></div>`;
+      stack.insertBefore(themeCard, outputsCard);
+    }
+
+    document.getElementById("uiOverviewThemeSlot")?.appendChild(picker);
+    return true;
+  }
+
   applyTheme(selectedTheme());
   installThemePicker();
+
+  if (!placeThemePickerInOverview()) {
+    const observer = new MutationObserver(() => {
+      if (placeThemePickerInOverview()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 })();
