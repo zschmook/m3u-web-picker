@@ -53,10 +53,20 @@ def guide():
     html = html.replace(
         "</head>",
         '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-6">\n'
+        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
+        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=theme-pack-2">\n'
+        '<link rel="stylesheet" href="/static/css/guide_theme.css?v=guide-theme-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n</head>',
     )
     return html.replace(
         "</body>",
+        '<script>\n'
+        '(() => {\n'
+        '  const saved = localStorage.getItem("m3u-picker.ui.theme") || "midnight";\n'
+        '  const valid = new Set(["midnight","slate","oled-black","carbon","light","ice","terminal-amber","terminal-green","cornfield","ketchup-mustard"]);\n'
+        '  document.body.dataset.uiTheme = valid.has(saved) ? saved : "midnight";\n'
+        '})();\n'
+        '</script>\n'
         '<script src="/static/js/guide_experiments_ui.js?v=cast-flow-2"></script>\n'
         '<script src="/static/js/guide_programmes.js?v=tv-grid-4"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
