@@ -1,0 +1,164 @@
+/* Apply the main app's saved theme palette to the standalone TV Guide. */
+
+body.guide-body[data-ui-theme] {
+  background: var(--ui-page) !important;
+  color: var(--ui-text) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-header {
+  background: color-mix(in srgb, var(--ui-page) 96%, transparent) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-header h1,
+body.guide-body[data-ui-theme] .guide-player-title,
+body.guide-body[data-ui-theme] .guide-cast-screen-title,
+body.guide-body[data-ui-theme] .guide-station-head,
+body.guide-body[data-ui-theme] .guide-station-name,
+body.guide-body[data-ui-theme] .guide-station-number,
+body.guide-body[data-ui-theme] .guide-programme-block,
+body.guide-body[data-ui-theme] .guide-channel-name {
+  color: var(--ui-heading) !important;
+}
+
+body.guide-body[data-ui-theme] .small-muted,
+body.guide-body[data-ui-theme] .guide-diagnostics,
+body.guide-body[data-ui-theme] .guide-station-group,
+body.guide-body[data-ui-theme] .guide-programme-block-subtitle,
+body.guide-body[data-ui-theme] .guide-track-empty,
+body.guide-body[data-ui-theme] .guide-empty,
+body.guide-body[data-ui-theme] .guide-channel-subtitle {
+  color: var(--ui-muted) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-cast-host-label,
+body.guide-body[data-ui-theme] .guide-programme-block-time,
+body.guide-body[data-ui-theme] .guide-time-slot {
+  color: var(--ui-text) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-cast-relay,
+body.guide-body[data-ui-theme] a {
+  color: var(--ui-link) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-player-panel,
+body.guide-body[data-ui-theme] .guide-cast-screen,
+body.guide-body[data-ui-theme] .guide-list-wrap,
+body.guide-body[data-ui-theme] .guide-station-head,
+body.guide-body[data-ui-theme] .guide-time-head,
+body.guide-body[data-ui-theme] .guide-station-cell,
+body.guide-body[data-ui-theme] .guide-programme-block {
+  background: var(--ui-panel) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-timeline-wrap,
+body.guide-body[data-ui-theme] .guide-timeline,
+body.guide-body[data-ui-theme] .guide-programme-track,
+body.guide-body[data-ui-theme] .guide-logo,
+body.guide-body[data-ui-theme] .guide-diagnostics-body {
+  background-color: var(--ui-panel-soft) !important;
+  border-color: var(--ui-border) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-timeline-head,
+body.guide-body[data-ui-theme] .guide-grid-row {
+  border-color: var(--ui-border) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-programme-track {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(var(--guide-slot-width) - 1px),
+    color-mix(in srgb, var(--ui-border-strong) 58%, transparent) calc(var(--guide-slot-width) - 1px),
+    color-mix(in srgb, var(--ui-border-strong) 58%, transparent) var(--guide-slot-width)
+  ) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-grid-row.guide-current-row .guide-station-cell,
+body.guide-body[data-ui-theme] .guide-table tbody tr.guide-current-row > * {
+  background: color-mix(in srgb, var(--ui-accent) 16%, var(--ui-panel)) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-programme-block:hover,
+body.guide-body[data-ui-theme] .guide-programme-block:focus-visible {
+  border-color: var(--ui-accent) !important;
+  background: color-mix(in srgb, var(--ui-accent) 12%, var(--ui-panel-soft)) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-programme-block.is-current {
+  border-color: var(--ui-success) !important;
+  background: color-mix(in srgb, var(--ui-success) 16%, var(--ui-panel)) !important;
+}
+
+body.guide-body[data-ui-theme] .guide-cast-screen {
+  background: var(--ui-field) !important;
+}
+
+/* Keep the video canvas black regardless of appearance theme. */
+body.guide-body[data-ui-theme] .guide-player {
+  background: #000 !important;
+}
+
+body.guide-body[data-ui-theme] .form-control,
+body.guide-body[data-ui-theme] .form-select {
+  background: var(--ui-field) !important;
+  border-color: var(--ui-border-strong) !important;
+  color: var(--ui-text) !important;
+}
+
+body.guide-body[data-ui-theme] .form-control::placeholder {
+  color: var(--ui-muted) !important;
+  opacity: .72;
+}
+
+body.guide-body[data-ui-theme] .form-control:focus,
+body.guide-body[data-ui-theme] .form-select:focus {
+  border-color: var(--ui-accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 18%, transparent) !important;
+}
+
+body.guide-body[data-ui-theme] .btn-outline-light {
+  background: var(--ui-panel-soft) !important;
+  border-color: var(--ui-border-strong) !important;
+  color: var(--ui-text) !important;
+}
+
+body.guide-body[data-ui-theme] .btn-outline-light:hover:not(:disabled),
+body.guide-body[data-ui-theme] .btn-outline-light:focus-visible {
+  background: color-mix(in srgb, var(--ui-accent) 12%, var(--ui-panel-soft)) !important;
+  border-color: var(--ui-accent) !important;
+  color: var(--ui-heading) !important;
+}
+
+body.guide-body[data-ui-theme] .btn-success {
+  background: var(--ui-success) !important;
+  border-color: var(--ui-success) !important;
+  color: var(--ui-page) !important;
+}
+
+body.guide-body[data-ui-theme] .badge.text-bg-secondary {
+  background: var(--ui-panel-soft) !important;
+  border: 1px solid var(--ui-border) !important;
+  color: var(--ui-text) !important;
+}
+
+body.guide-body[data-ui-theme="terminal-amber"] {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 176, 0, .018) 0, rgba(255, 176, 0, .018) 1px, transparent 1px, transparent 4px),
+    var(--ui-page) !important;
+}
+
+body.guide-body[data-ui-theme="terminal-green"] {
+  background:
+    repeating-linear-gradient(0deg, rgba(44, 255, 104, .022) 0, rgba(44, 255, 104, .022) 1px, transparent 1px, transparent 4px),
+    var(--ui-page) !important;
+}
+
+body.guide-body[data-ui-theme="cornfield"] {
+  background:
+    radial-gradient(circle at 78% 0%, rgba(211, 166, 44, .08), transparent 34rem),
+    var(--ui-page) !important;
+}
