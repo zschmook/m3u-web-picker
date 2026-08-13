@@ -19,20 +19,20 @@ jobs:
         with:
           ref: ui-modernization
 
-      - name: Assemble PDF
+      - name: Assemble and verify PDF
         shell: bash
         run: |
           cat guide_pdf_chunks/part-*.b64 | tr -d '\n\r' | base64 --decode > M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
           test -s M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
           head -c 4 M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf | grep -q '%PDF'
+          echo "326e39df1a60898b2d94c7424c795fdb9839e6382505fb51b57afde786052a88  M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf" | sha256sum -c -
 
-      - name: Commit guide and remove temporary builder
+      - name: Commit guide and remove staging chunks
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
           git rm -r guide_pdf_chunks
-          git rm .github/workflows/build-v30-guide.yml
           git commit -m "Add v30 modern UI user guide"
           git push origin HEAD:ui-modernization
