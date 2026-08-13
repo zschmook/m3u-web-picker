@@ -1,0 +1,38 @@
+name: Build v30 user guide
+
+on:
+  push:
+    branches:
+      - ui-modernization
+    paths:
+      - guide_pdf_chunks/READY
+
+permissions:
+  contents: write
+
+jobs:
+  build-guide:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-modernization
+
+      - name: Assemble PDF
+        shell: bash
+        run: |
+          cat guide_pdf_chunks/part-*.b64 | tr -d '\n\r' | base64 --decode > M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
+          test -s M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
+          head -c 4 M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf | grep -q '%PDF'
+
+      - name: Commit guide and remove temporary builder
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add M3U-Web-Picker-v30-Modern-UI-User-Guide.pdf
+          git rm -r guide_pdf_chunks
+          git rm .github/workflows/build-v30-guide.yml
+          git commit -m "Add v30 modern UI user guide"
+          git push origin HEAD:ui-modernization
