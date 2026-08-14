@@ -1,10 +1,12 @@
 (() => {
   "use strict";
 
-  const SELECTOR = "img.guide-logo, img.sports-selection-logo";
+  const SELECTOR = "img.guide-logo, img.guide-matchup-logo, img.sports-selection-logo";
   const LEAGUE_PREFIX = /^(NFL|MLB|NHL|NBA|WNBA|NCAAF|NCAA|MLS)\b/i;
 
   function fallbackLabelFor(img) {
+    const explicit = String(img.dataset.logoFallback || "").trim();
+    if (explicit) return explicit.slice(0, 4).toUpperCase();
     const sportsName = img.closest(".sports-selection-result")?.querySelector(".sports-selection-copy strong")?.textContent;
     const stationName = img.closest(".guide-station-cell")?.querySelector(".guide-station-name")?.textContent;
     const legacyGuideName = img.closest(".guide-channel-main")?.querySelector(".guide-channel-name")?.textContent;
@@ -19,9 +21,12 @@
     if (!img?.isConnected) return;
     const fallback = document.createElement("span");
     const sports = img.classList.contains("sports-selection-logo");
+    const matchup = img.classList.contains("guide-matchup-logo");
     fallback.className = sports
       ? "sports-selection-logo sports-selection-logo-fallback ui-logo-fallback"
-      : "guide-logo ui-guide-logo-fallback ui-logo-fallback";
+      : matchup
+        ? "guide-matchup-logo ui-guide-logo-fallback ui-logo-fallback"
+        : "guide-logo ui-guide-logo-fallback ui-logo-fallback";
     fallback.setAttribute("aria-hidden", "true");
     fallback.textContent = fallbackLabelFor(img);
     img.replaceWith(fallback);
@@ -40,16 +45,37 @@
     }
   }
 
+  function isLocalRegistryUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return false;
+    try {
+      const parsed = new URL(raw, window.location.href);
+      return parsed.origin === window.location.origin && parsed.pathname === "/api/logo" && parsed.searchParams.has("key");
+    } catch {
+      return false;
+    }
+  }
+
   function install(img) {
     if (!(img instanceof HTMLImageElement) || img.dataset.uiLogoLoader === "true") return;
-    const original = absoluteRemoteUrl(img.getAttribute("src"));
-    if (!original) return;
+
+    const rawSource = String(img.getAttribute("src") || "").trim();
+    const original = absoluteRemoteUrl(rawSource);
+    const registrySource = isLocalRegistryUrl(rawSource);
+    if (!original && !registrySource) return;
 
     img.dataset.uiLogoLoader = "true";
-    img.dataset.uiLogoOriginal = original;
     img.referrerPolicy = "no-referrer";
     img.decoding = "async";
 
+    if (registrySource) {
+      img.addEventListener("error", () => replaceWithFallback(img), {once: true});
+      return;
+    }
+
+    img.dataset.uiLogoOriginal = original;
+    const identityKey = String(img.dataset.logoKey || "").trim();
+    const sourceKind = String(img.dataset.logoSource || "").trim();
     let triedDirect = false;
     img.addEventListener("error", () => {
       if (!triedDirect && img.isConnected) {
@@ -60,7 +86,10 @@
       replaceWithFallback(img);
     });
 
-    img.src = `/api/logo?url=${encodeURIComponent(original)}`;
+    const params = new URLSearchParams({url: original});
+    if (identityKey) params.set("key", identityKey);
+    if (sourceKind) params.set("source", sourceKind);
+    img.src = `/api/logo?${params.toString()}`;
   }
 
   function scan(root = document) {
