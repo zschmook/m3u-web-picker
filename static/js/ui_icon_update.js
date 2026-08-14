@@ -1,69 +1,126 @@
 (() => {
   "use strict";
 
-  const CHECKBOX_ID = "masterUpdateLogos";
-  const STATUS_ID = "masterIconUpdateStatus";
+  const CHECKBOX_SELECTOR = "[data-icon-update-checkbox]";
   const POLL_MS = 500;
   let pollTimer = null;
   let sawActiveRun = false;
   let lastCompletionSignature = "";
+  let logosEnabled = false;
+
+  const nativeFetch = window.fetch.bind(window);
 
   function masterButton() {
     return document.getElementById("masterUpdateNowBtn");
   }
 
-  function logoCheckbox() {
-    return document.getElementById(CHECKBOX_ID);
+  function logoCheckboxes() {
+    return [...document.querySelectorAll(CHECKBOX_SELECTOR)];
   }
 
-  function statusElement() {
-    return document.getElementById(STATUS_ID);
+  function statusElements() {
+    return [
+      document.getElementById("masterIconUpdateStatus"),
+      document.getElementById("uiIconUpdateStatus"),
+    ].filter(Boolean);
   }
 
-  function installControls() {
-    const button = masterButton();
-    if (!button || logoCheckbox()) return;
+  function syncCheckboxes(source = null) {
+    if (source) logosEnabled = Boolean(source.checked);
+    for (const checkbox of logoCheckboxes()) checkbox.checked = logosEnabled;
+  }
 
+  function buildCheckbox(id, extraClass = "") {
     const wrapper = document.createElement("div");
-    wrapper.className = "form-check mb-0 d-flex align-items-center gap-1";
-    wrapper.title = "Temporary: eagerly cache every known provider/sports icon after a manual update.";
+    wrapper.className = `form-check mb-0 d-flex align-items-center gap-1 ${extraClass}`.trim();
+    wrapper.title = "Temporary: eagerly cache every known provider/sports icon after a manual Update Now. No extra sports API requests.";
     wrapper.innerHTML = `
-      <input id="${CHECKBOX_ID}" class="form-check-input mt-0" type="checkbox">
-      <label class="form-check-label small" for="${CHECKBOX_ID}">Logos?</label>
+      <input id="${id}" data-icon-update-checkbox class="form-check-input mt-0" type="checkbox">
+      <label class="form-check-label small" for="${id}">Logos?</label>
     `;
-    button.parentElement?.insertBefore(wrapper, button);
+    const checkbox = wrapper.querySelector("input");
+    checkbox.checked = logosEnabled;
+    checkbox.addEventListener("change", () => syncCheckboxes(checkbox));
+    return wrapper;
+  }
+
+  function ensureOverviewControls() {
+    const button = masterButton();
+    if (!button) return;
+    const controls = button.closest(".master-update-controls") || button.parentElement;
+    if (!controls) return;
+
+    if (!document.getElementById("masterUpdateLogosOverview")) {
+      controls.insertBefore(buildCheckbox("masterUpdateLogosOverview"), button);
+    }
 
     const masterStatus = document.getElementById("masterUpdateStatus");
-    if (masterStatus && !statusElement()) {
+    if (masterStatus && !document.getElementById("masterIconUpdateStatus")) {
       const status = document.createElement("div");
-      status.id = STATUS_ID;
+      status.id = "masterIconUpdateStatus";
       status.className = "master-update-status small-muted mt-1 d-none";
       status.setAttribute("role", "status");
       status.setAttribute("aria-live", "polite");
       masterStatus.insertAdjacentElement("afterend", status);
     }
 
-    button.addEventListener("click", () => {
-      if (!logoCheckbox()?.checked) {
-        stopPolling();
-        hideStatus();
-        return;
-      }
-      sawActiveRun = false;
-      showQueued();
-      startPolling();
-    }, true);
+    if (button.dataset.iconUpdateBound !== "true") {
+      button.dataset.iconUpdateBound = "true";
+      button.addEventListener("click", () => {
+        if (!logosEnabled) {
+          stopPolling();
+          hideStatus();
+          return;
+        }
+        sawActiveRun = false;
+        showQueued();
+        startPolling();
+      }, true);
+    }
+  }
+
+  function ensureSidebarControls() {
+    const visibleButton = document.getElementById("uiUpdateNowBtn");
+    const actions = visibleButton?.closest(".ui-system-actions");
+    if (!visibleButton || !actions) return;
+
+    if (!document.getElementById("masterUpdateLogosSidebar")) {
+      const option = buildCheckbox("masterUpdateLogosSidebar", "ui-icon-update-option");
+      option.style.marginTop = "10px";
+      option.style.color = "var(--ui-text-muted, #9ca3af)";
+      actions.insertAdjacentElement("beforebegin", option);
+    }
+
+    if (!document.getElementById("uiIconUpdateStatus")) {
+      const status = document.createElement("div");
+      status.id = "uiIconUpdateStatus";
+      status.className = "small-muted mt-2 d-none";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+      actions.insertAdjacentElement("afterend", status);
+    }
+  }
+
+  function installControls() {
+    ensureOverviewControls();
+    ensureSidebarControls();
+    syncCheckboxes();
+  }
+
+  function setStatusText(text, tone = "") {
+    for (const status of statusElements()) {
+      status.classList.remove("d-none", "text-danger", "text-warning", "text-success");
+      if (tone) status.classList.add(tone);
+      status.textContent = text;
+    }
   }
 
   function showQueued() {
-    const status = statusElement();
-    if (!status) return;
-    status.classList.remove("d-none", "text-danger", "text-warning", "text-success");
-    status.textContent = "Icon update • queued with manual update";
+    setStatusText("Icon update • queued with manual update");
   }
 
   function hideStatus() {
-    statusElement()?.classList.add("d-none");
+    for (const status of statusElements()) status.classList.add("d-none");
   }
 
   function formatCount(value) {
@@ -82,40 +139,28 @@
   }
 
   function summaryFor(state) {
-    const processed = formatCount(state.processed);
-    const downloaded = formatCount(state.downloaded);
-    const cached = formatCount(state.cached);
-    const failed = formatCount(state.failed);
-    return `${processed} checked • ${downloaded} downloaded • ${cached} cached • ${failed} failed`;
+    return `${formatCount(state.processed)} checked • ${formatCount(state.downloaded)} downloaded • ${formatCount(state.cached)} cached • ${formatCount(state.failed)} failed`;
   }
 
   function renderIconUpdate(state) {
     if (!state || !state.requested) return;
-    const status = statusElement();
-    if (!status) return;
 
     const phase = String(state.status || "idle").toLowerCase();
     if (["waiting", "running"].includes(phase)) sawActiveRun = true;
-    status.classList.remove("d-none", "text-danger", "text-warning", "text-success");
 
     if (phase === "waiting") {
-      status.textContent = `Icon update • waiting for provider/sports refresh${state.detail ? ` • ${state.detail}` : ""}`;
+      setStatusText(`Icon update • waiting for provider/sports refresh${state.detail ? ` • ${state.detail}` : ""}`);
       return;
     }
 
     if (phase === "running") {
-      const processed = formatCount(state.processed);
-      const total = formatCount(state.total);
-      const downloaded = formatCount(state.downloaded);
-      const cached = formatCount(state.cached);
-      const failed = formatCount(state.failed);
-      status.textContent = `Icon update • ${processed}/${total} • ${downloaded} downloaded • ${cached} cached • ${failed} failed`;
+      setStatusText(`Icon update • ${formatCount(state.processed)}/${formatCount(state.total)} • ${formatCount(state.downloaded)} downloaded • ${formatCount(state.cached)} cached • ${formatCount(state.failed)} failed`);
       return;
     }
 
     if (phase === "complete") {
-      status.classList.add(Number(state.failed || 0) ? "text-warning" : "text-success");
-      status.textContent = `Icon update complete • ${summaryFor(state)}`;
+      const tone = Number(state.failed || 0) ? "text-warning" : "text-success";
+      setStatusText(`Icon update complete • ${summaryFor(state)}`, tone);
       const signature = completionSignature(state);
       if (sawActiveRun && signature && signature !== lastCompletionSignature) {
         lastCompletionSignature = signature;
@@ -126,8 +171,10 @@
     }
 
     if (phase === "failed" || phase === "skipped") {
-      status.classList.add(phase === "failed" ? "text-danger" : "text-warning");
-      status.textContent = `Icon update ${phase} • ${state.detail || "No icons were cached."}`;
+      setStatusText(
+        `Icon update ${phase} • ${state.detail || "No icons were cached."}`,
+        phase === "failed" ? "text-danger" : "text-warning",
+      );
       const signature = completionSignature(state);
       if (sawActiveRun && signature && signature !== lastCompletionSignature) {
         lastCompletionSignature = signature;
@@ -177,7 +224,7 @@
       const data = await response.json();
       renderIconUpdate(data.icon_update || {});
     } catch {
-      // Keep the inline queued/running state; the next poll can recover.
+      // The next poll can recover; keep the current inline status visible.
     }
   }
 
@@ -192,7 +239,6 @@
     pollTimer = null;
   }
 
-  const nativeFetch = window.fetch.bind(window);
   window.fetch = function(input, init = {}) {
     let url = "";
     try {
@@ -206,7 +252,7 @@
         if (typeof init.body === "string" && init.body.trim()) {
           try { body = JSON.parse(init.body); } catch { body = {}; }
         }
-        body.logos = Boolean(logoCheckbox()?.checked);
+        body.logos = Boolean(logosEnabled);
         init = {...init, headers, body: JSON.stringify(body)};
       }
     } catch {
