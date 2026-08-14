@@ -4,7 +4,12 @@
   const GUIDE_WINDOW_HOURS = 8;
   const GUIDE_SLOT_MINUTES = 30;
   const GUIDE_PX_PER_MINUTE = 5;
+  const TEAM_CATALOG_TTL_MS = 15 * 60 * 1000;
   let timelineRoot = null;
+  let sportsTeamCatalogLoadedAt = 0;
+  let lastGeneratedLogoSignature = "";
+  let teamLeagueLookup = new Map();
+  let teamGlobalLookup = new Map();
 
   function formatGuideClock(value) {
     if (!value) return "";
@@ -64,6 +69,176 @@
     const title = String(channel.now?.title || "").trim();
     if (!title) return channel.name || "";
     return `${title} · ${channel.name || "Live TV"}`;
+  }
+
+  function normalizeLogoText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+  }
+
+  function identityPart(value, limit = 90) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, limit);
+  }
+
+  function channelLogoIdentity(channel) {
+    const tvgId = String(channel?.tvg_id || "").trim().toLowerCase();
+    if (tvgId) return `tvg:${tvgId}`;
+    const name = identityPart(channel?.name || "");
+    const group = identityPart(channel?.group || "");
+    return name || group ? `channel:${name}:${group}` : "";
+  }
+
+  function teamLogoIdentity(team) {
+    const id = String(team?.id || "").trim().toLowerCase();
+    return id ? `team:${id}` : "";
+  }
+
+  function registryLogoUrl(identityKey) {
+    return identityKey ? `/api/logo?key=${encodeURIComponent(identityKey)}` : "";
+  }
+
+  function teamFallbackLabel(team) {
+    const bits = String(team?.name || "").trim().split(/\s+/).filter(Boolean);
+    const value = bits[bits.length - 1] || bits[0] || "TV";
+    return (value.match(/[A-Za-z0-9]/)?.[0] || "TV").toUpperCase();
+  }
+
+  function logoImageMarkup({src, key, source, fallback, className = "guide-logo"}) {
+    const effectiveSrc = String(src || "").trim() || registryLogoUrl(key);
+    if (!effectiveSrc) return "";
+    return `<img class="${className}"
+      src="${escapeHtml(effectiveSrc)}"
+      alt=""
+      loading="lazy"
+      referrerpolicy="no-referrer"
+      data-logo-key="${escapeHtml(key || "")}"
+      data-logo-source="${escapeHtml(source || "")}"
+      data-logo-fallback="${escapeHtml(fallback || "")}">`;
+  }
+
+  function leagueIdForChannel(channel) {
+    const prefix = String(channel?.name || "").split("•", 1)[0].trim().toLowerCase();
+    const compact = normalizeLogoText(prefix);
+    const direct = new Map([
+      ["nfl", "nfl"],
+      ["mlb", "mlb"],
+      ["nhl", "nhl"],
+      ["nba", "nba"],
+      ["wnba", "wnba"],
+      ["mls", "mls"],
+      ["ncaaf", "ncaaf-fbs"],
+      ["ncaa football", "ncaaf-fbs"],
+    ]);
+    if (direct.has(compact)) return direct.get(compact);
+    if (compact.includes("big ten") || compact === "acc" || compact === "sec") return "ncaaf-fbs";
+    return compact;
+  }
+
+  function addTeamLookup(map, key, team) {
+    if (!key) return;
+    if (!map.has(key)) {
+      map.set(key, team);
+      return;
+    }
+    if (map.get(key)?.id !== team.id) map.set(key, null);
+  }
+
+  function indexSportsTeamCatalog(items) {
+    teamLeagueLookup = new Map();
+    teamGlobalLookup = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!item || item.scope_type !== "team") continue;
+      const leagueId = String(item.league_id || "").trim();
+      const names = [item.name, ...(Array.isArray(item.aliases) ? item.aliases : [])];
+      for (const name of names) {
+        const normalized = normalizeLogoText(name);
+        if (!normalized) continue;
+        addTeamLookup(teamLeagueLookup, `${leagueId}|${normalized}`, item);
+        addTeamLookup(teamGlobalLookup, normalized, item);
+      }
+    }
+  }
+
+  async function ensureSportsTeamCatalog(force = false) {
+    if (!force && sportsTeamCatalogLoadedAt && Date.now() - sportsTeamCatalogLoadedAt < TEAM_CATALOG_TTL_MS) return;
+    try {
+      const response = await fetch(`/api/sports/catalog?type=team&_=${Date.now()}`, {cache: "no-store"});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not load sports logo catalog.");
+      indexSportsTeamCatalog(data.items || []);
+      sportsTeamCatalogLoadedAt = Date.now();
+    } catch (error) {
+      console.warn("Could not refresh sports logo catalog", error);
+    }
+  }
+
+  function resolveTeam(name, leagueId) {
+    const normalized = normalizeLogoText(name);
+    if (!normalized) return null;
+    return teamLeagueLookup.get(`${leagueId}|${normalized}`)
+      || teamGlobalLookup.get(normalized)
+      || null;
+  }
+
+  function eventTitleFromGeneratedChannel(channel) {
+    let value = String(channel?.name || "").trim();
+    const bullet = value.indexOf("•");
+    if (bullet >= 0) value = value.slice(bullet + 1).trim();
+    const feedSeparator = value.lastIndexOf("—");
+    if (feedSeparator >= 0) value = value.slice(0, feedSeparator).trim();
+    return value;
+  }
+
+  function matchupForChannel(channel) {
+    if (!channel?.generated) return null;
+    const title = eventTitleFromGeneratedChannel(channel);
+    const match = title.match(/^(.*?)\s+(?:@|at|vs\.?|versus)\s+(.*?)$/i);
+    if (!match) return null;
+    const leagueId = leagueIdForChannel(channel);
+    const away = resolveTeam(match[1], leagueId);
+    const home = resolveTeam(match[2], leagueId);
+    return away && home ? {away, home} : null;
+  }
+
+  function teamImageMarkup(team, className = "guide-logo") {
+    const key = teamLogoIdentity(team);
+    return logoImageMarkup({
+      src: team?.logo_url || "",
+      key,
+      source: team?.source || "sports-catalog",
+      fallback: teamFallbackLabel(team),
+      className,
+    });
+  }
+
+  function renderStationLogo(channel) {
+    const matchup = matchupForChannel(channel);
+    if (matchup) {
+      const subtitle = String(channel.subtitle || "").toLowerCase();
+      if (subtitle.includes("away broadcast")) return teamImageMarkup(matchup.away);
+      if (subtitle.includes("home broadcast")) return teamImageMarkup(matchup.home);
+      return `<div class="guide-matchup-logos" title="${escapeHtml(`${matchup.away.name} @ ${matchup.home.name}`)}">
+        ${teamImageMarkup(matchup.away, "guide-matchup-logo")}
+        <span class="guide-matchup-at" aria-hidden="true">@</span>
+        ${teamImageMarkup(matchup.home, "guide-matchup-logo")}
+      </div>`;
+    }
+
+    const key = channelLogoIdentity(channel);
+    const fallback = String(channel?.name || "").match(/[A-Za-z0-9]/)?.[0] || "TV";
+    return logoImageMarkup({
+      src: channel?.logo || "",
+      key,
+      source: channel?.generated ? "sports-generated" : "provider",
+      fallback,
+    });
   }
 
   function floorToGuideSlot(date) {
@@ -208,9 +383,7 @@
   }
 
   function renderChannelRow(channel, bounds) {
-    const logo = channel.logo
-      ? `<img class="guide-logo" src="${escapeHtml(channel.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-      : "";
+    const logo = renderStationLogo(channel);
     const generated = channel.generated
       ? '<span class="badge text-bg-primary guide-generated-badge">Auto</span>'
       : "";
@@ -283,6 +456,15 @@
 
       const previousPlayUrl = guideState.currentChannel?.play_url || "";
       guideState.channels = Array.isArray(data.channels) ? data.channels : [];
+      const generatedSignature = guideState.channels
+        .filter(channel => channel.generated)
+        .map(channel => `${channel.number}:${channel.name}`)
+        .join("|");
+      if (generatedSignature) {
+        await ensureSportsTeamCatalog(generatedSignature !== lastGeneratedLogoSignature);
+      }
+      lastGeneratedLogoSignature = generatedSignature;
+
       if (previousPlayUrl) {
         const refreshed = actualGuideChannel(previousPlayUrl);
         if (refreshed) {
