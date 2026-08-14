@@ -10,7 +10,7 @@ The current `main` branch is the v30 UI and device stack.
 - Theme support: Midnight, Slate, OLED Black, Carbon, Light, Ice, Terminal Amber, Terminal Green, Cornfield, and Ketchup & Mustard.
 - One primary IPTV provider plus optional fallback providers for Sports Automation.
 - Direct M3U and Xtream provider support.
-- Manual channel curation, search, filtering, numbering, and ordering.
+- Manual channel curation, search, filtering, numbering, and drag-and-drop ordering.
 - Generated sports channels with separate numbering and lifecycle cleanup.
 - Combined served M3U and XMLTV outputs.
 - Optional API-SPORTS schedule data for MLB, NFL, and NCAA football.
@@ -31,10 +31,10 @@ docker compose up -d --build --force-recreate
 Open:
 
 ```text
-http://localhost:10000
+http://localhost:9999
 ```
 
-The current v30 Compose stack also exposes host port 80 for HDHomeRun/Jellyfin bare-IP discovery compatibility.
+The production Compose stack runs the application with Waitress on container port 9999. Host port 80 is also exposed for HDHomeRun/Jellyfin bare-IP discovery compatibility.
 
 To stop it:
 
@@ -42,15 +42,15 @@ To stop it:
 docker compose down
 ```
 
-Runtime state for the current v30 stack is stored in `./debug-data`. Do not delete that directory unless you intentionally want a fresh configuration.
+Runtime state is stored in the persistent Docker volume `m3u-picker-data`. `docker compose down` keeps that volume. Only an explicit volume-removal command such as `docker compose down -v` removes it.
 
 ## Main outputs
 
 The two normal client-facing endpoints are:
 
 ```text
-http://YOUR-SERVER-IP:10000/playlist/channels.m3u
-http://YOUR-SERVER-IP:10000/epg/epg.xml
+http://YOUR-SERVER-IP:9999/playlist/channels.m3u
+http://YOUR-SERVER-IP:9999/epg/epg.xml
 ```
 
 `channels.m3u` contains the curated manual lineup plus generated Sports Automation channels. `epg.xml` contains guide data only for channels that are actually being served.
@@ -70,6 +70,7 @@ For Xtream providers, the UI can display account state and expiration metadata w
 Manual/static channels and generated sports channels are intentionally separate namespaces.
 
 - Saved manual channels remain exactly as selected and ordered.
+- Manual channels can be reordered by drag and drop from **Manage Order** before saving the new order.
 - Sports Automation never removes or replaces a saved manual channel because the stream happens to match.
 - A generated sports channel is also allowed to coexist with a manual channel using the same underlying provider stream.
 - Manual channels are ordered before generated sports channels.
