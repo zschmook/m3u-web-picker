@@ -112,6 +112,36 @@
   background: #0b1220;
 }
 
+.guide-matchup-logos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 52px;
+  flex: 0 0 52px;
+  min-width: 0;
+}
+
+.guide-matchup-logo {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin: 0;
+  object-fit: contain;
+  border-radius: .25rem;
+  background: #0b1220;
+}
+
+.guide-matchup-at {
+  width: 8px;
+  flex: 0 0 8px;
+  color: #94a3b8;
+  font-size: .62rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+}
+
 .guide-station-copy {
   min-width: 0;
   flex: 1 1 auto;
@@ -275,6 +305,23 @@
     width: 32px;
     height: 32px;
     flex-basis: 32px;
+  }
+
+  .guide-matchup-logos {
+    width: 47px;
+    flex-basis: 47px;
+  }
+
+  .guide-matchup-logo {
+    width: 18px;
+    height: 18px;
+    flex-basis: 18px;
+  }
+
+  .guide-matchup-at {
+    width: 7px;
+    flex-basis: 7px;
+    font-size: .58rem;
   }
 
   .guide-station-play {
