@@ -90,7 +90,10 @@ def _signature_path(digest: str) -> Path:
 
 def _clean_http_url(value: object) -> str:
     url = str(value or "").strip()
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return url[:4096]
@@ -125,6 +128,8 @@ def register_matchup_logo(
     home_team_id: object,
     home_team_name: object,
     home_logo_url: object,
+    away_fallback_logo_url: object = "",
+    home_fallback_logo_url: object = "",
     event_end: datetime | None = None,
 ) -> str:
     """Persist a tiny reconstructable matchup manifest and return its LAN URL.
@@ -132,6 +137,10 @@ def register_matchup_logo(
     The manifest is ephemeral. Team artwork remains owned by logo_registry and
     the shared logo cache. The composite PNG can be deleted at any time and is
     regenerated on demand from those persistent team assets.
+
+    Each team may carry a preferred and fallback upstream URL. Resolution always
+    checks the persistent identity cache first; new images then try the preferred
+    source (ESPN full/default for generated sports) before provider/Xtream.
     """
     away_id = str(away_team_id or "").strip()
     home_id = str(home_team_id or "").strip()
@@ -152,19 +161,21 @@ def register_matchup_logo(
         expiry_text = ""
 
     manifest = {
-        "version": 1,
+        "version": 2,
         "event_key": str(event_key or "")[:512],
         "away": {
             "team_id": away_id[:240],
             "name": str(away_team_name or "Away")[:240],
             "identity": logo_registry.team_identity(away_id),
             "source_url": _clean_http_url(away_logo_url),
+            "fallback_url": _clean_http_url(away_fallback_logo_url),
         },
         "home": {
             "team_id": home_id[:240],
             "name": str(home_team_name or "Home")[:240],
             "identity": logo_registry.team_identity(home_id),
             "source_url": _clean_http_url(home_logo_url),
+            "fallback_url": _clean_http_url(home_fallback_logo_url),
         },
         "expires_at": expiry_text,
     }
@@ -180,7 +191,9 @@ def _read_manifest(digest: str) -> dict | None:
         payload = json.loads(_manifest_path(digest).read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return None
-    if not isinstance(payload, dict) or payload.get("version") != 1:
+    # Version 1 manifests remain readable across the upgrade; they simply do
+    # not have an explicit provider fallback URL.
+    if not isinstance(payload, dict) or payload.get("version") not in {1, 2}:
         return None
     return payload
 
@@ -211,6 +224,7 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
         headers={
             "User-Agent": "Mozilla/5.0 (M3U Web Picker event logo cache)",
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": "https://www.espn.com/" if "espn" in urllib.parse.urlsplit(url).netloc.casefold() else "",
         },
     )
     with urllib.request.urlopen(request, timeout=6) as response:
@@ -250,72 +264,88 @@ def _cached_payload_for_digest(digest: str) -> tuple[bytes, str] | None:
     return None
 
 
+def _source_candidates(team: dict, row: dict | None) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(value: object, kind: str) -> None:
+        url = _clean_http_url(value)
+        if not url or url in seen:
+            return
+        seen.add(url)
+        candidates.append((url, kind))
+
+    add(team.get("source_url"), "event-logo:preferred")
+    add(team.get("fallback_url"), "event-logo:provider-fallback")
+    if row:
+        add(row.get("source_url"), "event-logo:registry-fallback")
+    return candidates
+
+
 def _resolve_team_asset(team: dict) -> tuple[bytes | None, str]:
     _logo_cache, _event_dir, db_path = _paths()
     identity = logo_registry.normalize_identity(team.get("identity"))
-    source_url = _clean_http_url(team.get("source_url"))
     row = logo_registry.lookup(db_path, identity) if identity else None
 
+    # Stable team identity wins first, regardless of which upstream originally
+    # populated it. This is the cache-first part of cache -> ESPN -> provider.
     if row:
         registered_digest = str(row.get("cache_digest") or "").strip().lower()
         if re.fullmatch(r"[0-9a-f]{64}", registered_digest):
             cached = _cached_payload_for_digest(registered_digest)
             if cached:
                 return cached[0], registered_digest
-        if not source_url:
-            source_url = _clean_http_url(row.get("source_url"))
 
-    if not source_url:
-        return None, ""
+    for source_url, source_kind in _source_candidates(team, row):
+        data_path, meta_path, digest = _shared_cache_paths(source_url)
+        try:
+            payload = data_path.read_bytes()
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            content_type = str(metadata.get("content_type") or "")
+            if payload and content_type.startswith("image/"):
+                if identity:
+                    logo_registry.record_success(
+                        db_path,
+                        identity,
+                        source_url=source_url,
+                        source_kind=source_kind,
+                        cache_digest=digest,
+                        content_type=content_type,
+                    )
+                return payload, digest
+        except (OSError, ValueError, TypeError):
+            pass
 
-    data_path, meta_path, digest = _shared_cache_paths(source_url)
-    try:
-        payload = data_path.read_bytes()
-        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        content_type = str(metadata.get("content_type") or "")
-        if payload and content_type.startswith("image/"):
+        try:
+            payload, content_type = _fetch_logo(source_url)
+            _atomic_write_bytes(data_path, payload)
+            _atomic_write_text(
+                meta_path,
+                json.dumps({"content_type": content_type, "source": source_url}, sort_keys=True),
+            )
             if identity:
                 logo_registry.record_success(
                     db_path,
                     identity,
                     source_url=source_url,
-                    source_kind="event-logo",
+                    source_kind=source_kind,
                     cache_digest=digest,
                     content_type=content_type,
                 )
             return payload, digest
-    except (OSError, ValueError, TypeError):
-        pass
+        except Exception:
+            if identity:
+                try:
+                    logo_registry.record_failure(
+                        db_path,
+                        identity,
+                        source_url=source_url,
+                        source_kind=source_kind,
+                    )
+                except Exception:
+                    pass
 
-    try:
-        payload, content_type = _fetch_logo(source_url)
-        _atomic_write_bytes(data_path, payload)
-        _atomic_write_text(
-            meta_path,
-            json.dumps({"content_type": content_type, "source": source_url}, sort_keys=True),
-        )
-        if identity:
-            logo_registry.record_success(
-                db_path,
-                identity,
-                source_url=source_url,
-                source_kind="event-logo",
-                cache_digest=digest,
-                content_type=content_type,
-            )
-        return payload, digest
-    except Exception:
-        if identity:
-            try:
-                logo_registry.record_failure(
-                    db_path,
-                    identity,
-                    source_url=source_url,
-                    source_kind="event-logo",
-                )
-            except Exception:
-                pass
-        return None, ""
+    return None, ""
 
 
 def _fallback_tile(label: str) -> Image.Image:
@@ -423,7 +453,7 @@ def render_event_logo(digest: str) -> tuple[bytes, str] | None:
     signature = hashlib.sha256(
         "\x1f".join(
             (
-                "event-logo-v1",
+                "event-logo-v2",
                 away_digest or "fallback:" + str(away.get("name") or ""),
                 home_digest or "fallback:" + str(home.get("name") or ""),
             )
