@@ -54,19 +54,64 @@ class EspnLogoPriorityTests(unittest.TestCase):
             "https://example.test/default.png",
         )
 
-    def test_expected_espn_leagues_are_explicit(self):
+    def test_known_leagues_still_use_direct_espn_mapping(self):
         self.assertEqual(espn_team_logos.ESPN_LEAGUES["nfl"], ("football", "nfl"))
         self.assertEqual(
             espn_team_logos.ESPN_LEAGUES["ncaaf-fbs"],
             ("football", "college-football"),
         )
 
+    def test_unlisted_generated_sport_uses_dynamic_espn_discovery(self):
+        original_dynamic = espn_team_logos._dynamic_candidates
+        original_index = espn_team_logos._team_index
+        try:
+            espn_team_logos._dynamic_candidates = lambda league_id, sport_id: [
+                ("lacrosse", "pll")
+            ]
+            espn_team_logos._team_index = lambda sport, league: {
+                espn_team_logos._normalize("Maryland Whipsnakes"): "https://example.test/pll.png"
+            }
+            self.assertEqual(
+                espn_team_logos.espn_full_default_url(
+                    "pll",
+                    "Maryland Whipsnakes",
+                    "lacrosse",
+                ),
+                "https://example.test/pll.png",
+            )
+        finally:
+            espn_team_logos._dynamic_candidates = original_dynamic
+            espn_team_logos._team_index = original_index
+
+    def test_dynamic_discovery_is_conservative(self):
+        original_sports = espn_team_logos._available_espn_sports
+        original_leagues = espn_team_logos._league_slugs_for_sport
+        try:
+            espn_team_logos._available_espn_sports = lambda: {"lacrosse"}
+            espn_team_logos._league_slugs_for_sport = lambda sport: {
+                "college-lacrosse",
+                "pll",
+                "nll",
+            }
+            candidates = espn_team_logos._dynamic_candidates(
+                "college-lacrosse",
+                "lacrosse",
+            )
+            self.assertEqual(candidates[0], ("lacrosse", "college-lacrosse"))
+        finally:
+            espn_team_logos._available_espn_sports = original_sports
+            espn_team_logos._league_slugs_for_sport = original_leagues
+
     def test_generated_feed_prefers_espn_and_keeps_provider_fallback(self):
         source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")
         self.assertIn("espn_team_logos.espn_full_default_url", source)
+        self.assertIn('event.get("sport_id") or ""', source)
         self.assertIn("away_fallback_logo_url=away_catalog_logo or away_api_logo", source)
         self.assertIn("home_fallback_logo_url=home_catalog_logo or home_api_logo", source)
-        self.assertLess(source.index("away_espn_logo"), source.index("away_catalog_logo,\n            away_api_logo"))
+        self.assertLess(
+            source.index("away_espn_logo"),
+            source.index("away_catalog_logo,\n            away_api_logo"),
+        )
 
     def test_event_compositor_is_cache_first_then_fallback_capable(self):
         source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
