@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -10,6 +11,7 @@ from pathlib import Path
 from flask import Response, request
 
 import core
+import logo_registry
 import sports
 
 
@@ -17,6 +19,73 @@ LOGO_CACHE_DIR = core.DATA_DIR / "logo_cache"
 LOGO_CACHE_TTL_SECONDS = 24 * 60 * 60
 LOGO_BROWSER_MAX_AGE_SECONDS = 6 * 60 * 60
 MAX_LOGO_BYTES = 2 * 1024 * 1024
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+_observed_provider_signature: tuple | None = None
+_observed_sports_signature: tuple | None = None
+_last_observation_check = 0.0
+
+
+def _cache_mtime_ns(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime_ns)
+    except OSError:
+        return 0
+
+
+def _observe_known_candidates_if_changed() -> None:
+    """Record candidate URLs without eagerly downloading thousands of images."""
+    global _observed_provider_signature, _observed_sports_signature, _last_observation_check
+
+    now = time.monotonic()
+    if now - _last_observation_check < 2.0:
+        return
+    _last_observation_check = now
+
+    provider_signature = (
+        str(core.last_refresh or ""),
+        len(core.channels),
+        _cache_mtime_ns(core.MASTER_CACHE_PATH),
+    )
+    if provider_signature != _observed_provider_signature:
+        logo_registry.observe_many(
+            core.DB_PATH,
+            (
+                (
+                    logo_registry.channel_identity(channel),
+                    str(channel.get("tvg_logo", "") or ""),
+                    "provider",
+                )
+                for channel in core.channels
+                if str(channel.get("tvg_logo", "") or "").strip()
+            ),
+        )
+        _observed_provider_signature = provider_signature
+
+    try:
+        last_scan = sports.last_scan(core.DB_PATH) or {}
+        sports_signature = (
+            str(last_scan.get("finished_at") or ""),
+            int(last_scan.get("channel_count") or 0),
+        )
+        if sports_signature != _observed_sports_signature:
+            catalog = sports.catalog_payload(core.DB_PATH, scope_type="team")
+            logo_registry.observe_many(
+                core.DB_PATH,
+                (
+                    (
+                        logo_registry.team_identity(item.get("id")),
+                        str(item.get("logo_url", "") or ""),
+                        str(item.get("source", "") or "sports-catalog"),
+                    )
+                    for item in catalog
+                    if str(item.get("logo_url", "") or "").strip()
+                ),
+            )
+            _observed_sports_signature = sports_signature
+    except Exception:
+        # Logo discovery is opportunistic and must never break image serving.
+        pass
 
 
 def _known_logo_urls() -> set[str]:
@@ -44,9 +113,16 @@ def _known_logo_urls() -> set[str]:
     return urls
 
 
-def _cache_paths(url: str) -> tuple[Path, Path]:
-    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+def _digest_for_url(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def _cache_paths_from_digest(digest: str) -> tuple[Path, Path]:
     return LOGO_CACHE_DIR / f"{digest}.bin", LOGO_CACHE_DIR / f"{digest}.json"
+
+
+def _cache_paths(url: str) -> tuple[Path, Path]:
+    return _cache_paths_from_digest(_digest_for_url(url))
 
 
 def _sniff_image_type(payload: bytes, header_type: str) -> str:
@@ -79,6 +155,27 @@ def _read_cached(data_path: Path, meta_path: Path) -> tuple[bytes, str] | None:
         return payload, content_type
     except (OSError, ValueError, TypeError):
         return None
+
+
+def _read_registered(identity_key: str) -> tuple[bytes, str] | None:
+    if not identity_key:
+        return None
+    try:
+        row = logo_registry.lookup(core.DB_PATH, identity_key)
+    except Exception:
+        return None
+    if not row:
+        return None
+    digest = str(row.get("cache_digest", "") or "").strip().lower()
+    content_type = str(row.get("content_type", "") or "").strip().lower()
+    if not _DIGEST_RE.fullmatch(digest) or not content_type.startswith("image/"):
+        return None
+    data_path, _meta_path = _cache_paths_from_digest(digest)
+    try:
+        payload = data_path.read_bytes()
+    except OSError:
+        return None
+    return (payload, content_type) if payload else None
 
 
 def _serve_logo(payload: bytes, content_type: str, cache_state: str) -> Response:
@@ -114,17 +211,46 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
 def register_image_routes(app):
     @app.get("/api/logo")
     def api_logo():
+        _observe_known_candidates_if_changed()
+
         url = str(request.args.get("url", "") or "").strip()
+        identity_key = logo_registry.normalize_identity(request.args.get("key", ""))
+        source_kind = str(request.args.get("source", "") or "").strip()[:80]
+        registry_row = logo_registry.lookup(core.DB_PATH, identity_key) if identity_key else None
+
+        if not url:
+            registered = _read_registered(identity_key)
+            if registered:
+                return _serve_logo(registered[0], registered[1], "registry")
+            return Response("Logo not found.\n", status=404, content_type="text/plain; charset=utf-8")
+
         parsed = urllib.parse.urlsplit(url)
         if not url or parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return Response("Logo not found.\n", status=404, content_type="text/plain; charset=utf-8")
-        if url not in _known_logo_urls():
+
+        known_url = url in _known_logo_urls()
+        if not known_url and registry_row:
+            known_url = str(registry_row.get("source_url", "") or "") == url
+        if not known_url:
             return Response("Logo not found.\n", status=404, content_type="text/plain; charset=utf-8")
 
+        if identity_key:
+            logo_registry.observe(core.DB_PATH, identity_key, url, source_kind)
+
         LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        data_path, meta_path = _cache_paths(url)
+        digest = _digest_for_url(url)
+        data_path, meta_path = _cache_paths_from_digest(digest)
         cached = _read_cached(data_path, meta_path)
         if cached and time.time() - data_path.stat().st_mtime <= LOGO_CACHE_TTL_SECONDS:
+            if identity_key:
+                logo_registry.record_success(
+                    core.DB_PATH,
+                    identity_key,
+                    source_url=url,
+                    source_kind=source_kind,
+                    cache_digest=digest,
+                    content_type=cached[1],
+                )
             return _serve_logo(cached[0], cached[1], "hit")
 
         try:
@@ -134,8 +260,27 @@ def register_image_routes(app):
                 meta_path,
                 json.dumps({"content_type": content_type, "source": url}, sort_keys=True),
             )
+            if identity_key:
+                logo_registry.record_success(
+                    core.DB_PATH,
+                    identity_key,
+                    source_url=url,
+                    source_kind=source_kind,
+                    cache_digest=digest,
+                    content_type=content_type,
+                )
             return _serve_logo(payload, content_type, "refresh")
         except Exception:
+            if identity_key:
+                logo_registry.record_failure(
+                    core.DB_PATH,
+                    identity_key,
+                    source_url=url,
+                    source_kind=source_kind,
+                )
             if cached:
                 return _serve_logo(cached[0], cached[1], "stale")
+            registered = _read_registered(identity_key)
+            if registered:
+                return _serve_logo(registered[0], registered[1], "registry-stale")
             return Response("Logo unavailable.\n", status=502, content_type="text/plain; charset=utf-8")
