@@ -38,6 +38,7 @@ def index():
         '<script src="/static/js/ui_sections.js?v=ui-refactor-9"></script>\n'
         '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
         '<script src="/static/js/ui_top_controls.js?v=ui-top-controls-10"></script>\n'
+        '<script src="/static/js/ui_icon_update.js?v=icon-update-1"></script>\n'
         '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-9"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
