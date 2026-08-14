@@ -18,7 +18,7 @@ class AppSettings:
 
     The object is intentionally immutable. Call ``load_settings`` again when a
     request needs to observe an environment override that may have changed
-    since module import (for example the experimental LAN relay host).
+    since module import (for example the LAN relay host).
     """
 
     data_dir: Path
@@ -58,7 +58,7 @@ def load_settings() -> AppSettings:
         ),
         cast_hls_dir=cast_hls_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
-        external_port=_env_int("M3U_EXTERNAL_PORT", 10000),
+        external_port=_env_int("M3U_EXTERNAL_PORT", 9999),
     )
 
 
