@@ -8,41 +8,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class IconWarmupContractTests(unittest.TestCase):
-    def test_icon_python_sources_parse(self):
-        for relative in ("api/images.py", "api/epg.py"):
+class LogoUpdateContractTests(unittest.TestCase):
+    def test_logo_python_sources_parse(self):
+        for relative in ("api/images.py", "api/epg.py", "espn_team_logos.py"):
             source = (ROOT / relative).read_text(encoding="utf-8")
             ast.parse(source, filename=relative)
 
-    def test_manual_icon_warmup_never_refreshes_schedule_api(self):
-        source = (ROOT / "api/images.py").read_text(encoding="utf-8")
-        self.assertIn("def warm_known_logos", source)
-        self.assertIn("core.sports_provider_channel_sets()", source)
-        self.assertIn('sports.catalog_payload(core.DB_PATH, scope_type="team")', source)
-        self.assertNotIn("refresh_schedule_api", source)
-        self.assertNotIn("schedule_api_requests", source)
+    def test_master_update_has_no_manual_logo_toggle(self):
+        source = (ROOT / "api" / "epg.py").read_text(encoding="utf-8")
+        self.assertNotIn('data.get("logos")', source)
+        self.assertNotIn("prepare_icon_update", source)
+        self.assertNotIn("warm_known_logos", source)
+        self.assertNotIn("icon_update", source)
 
-    def test_master_update_only_runs_warmup_when_requested(self):
-        source = (ROOT / "api/epg.py").read_text(encoding="utf-8")
-        self.assertIn('update_logos = bool(data.get("logos"))', source)
-        self.assertIn("image_api.prepare_icon_update()", source)
-        self.assertIn("icon_update = image_api.warm_known_logos()", source)
-
-    def test_temporary_ui_exposes_visible_logos_controls_and_status(self):
-        source = (ROOT / "static/js/ui_icon_update.js").read_text(encoding="utf-8")
-        self.assertIn('const CHECKBOX_SELECTOR = "[data-icon-update-checkbox]"', source)
-        self.assertIn('document.getElementById("uiUpdateNowBtn")', source)
-        self.assertIn('"masterUpdateLogosOverview"', source)
-        self.assertIn('"masterUpdateLogosSidebar"', source)
-        self.assertIn('"uiIconUpdateStatus"', source)
-        self.assertIn("Logos?", source)
-        self.assertIn("Icon update", source)
-        self.assertIn("body.logos", source)
-        self.assertIn("data.icon_update", source)
-
-    def test_icon_update_overlay_is_loaded_with_current_cache_bust(self):
+    def test_logos_checkbox_overlay_is_not_loaded(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn('/static/js/ui_icon_update.js?v=icon-update-2', source)
+        self.assertNotIn("ui_icon_update.js", source)
+        self.assertIn("ui_img_cache_status.js", source)
+
+    def test_generated_logos_use_automatic_espn_lookup(self):
+        source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")
+        resolver = (ROOT / "espn_team_logos.py").read_text(encoding="utf-8")
+        self.assertIn("espn_team_logos.espn_full_default_url", source)
+        self.assertIn('event.get("sport_id") or ""', source)
+        self.assertIn("_available_espn_sports", resolver)
+        self.assertIn("_league_slugs_for_sport", resolver)
+        self.assertIn("_dynamic_candidates", resolver)
 
 
 if __name__ == "__main__":
