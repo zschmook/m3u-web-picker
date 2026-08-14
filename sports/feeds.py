@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from typing import Iterable
 
+import event_logos
 import sports as _s
 
 
@@ -78,32 +79,50 @@ def _preferred_feed_logo(
 ) -> str:
     """Choose stable artwork for a generated feed.
 
-    Team/API artwork is preferred over provider channel artwork. Provider logos
-    are often generic event tiles and are more likely to be short-lived or
-    hotlink-protected. For a league-level event feed with no explicit team feed,
-    use the away team first because it is the first team in the displayed
-    "Away at Home" event name, then the home team.
+    Home/away team feeds keep a single team mark. Generic event, national,
+    Spanish, and backup feeds use a local, event-keyed ``Away @ Home`` composite
+    when both teams are known. The composite is derived from persistent cached
+    team artwork and is disposable; it can be regenerated at any time without
+    spending schedule-API quota.
     """
     feed_team_id = str(feed.get("team_id") or "")
+    feed_type = str(feed.get("feed_type") or "event").strip().lower()
     home_team_id = str(event.get("home_team_id") or "")
     away_team_id = str(event.get("away_team_id") or "")
+    home_api_logo = str(event.get("api_home_logo") or "")
+    away_api_logo = str(event.get("api_away_logo") or "")
+    home_catalog_logo = _catalog_team_logo(team_catalog, home_team_id)
+    away_catalog_logo = _catalog_team_logo(team_catalog, away_team_id)
 
-    if feed_team_id == home_team_id:
-        candidates = (
-            str(event.get("api_home_logo") or ""),
-            _catalog_team_logo(team_catalog, home_team_id),
+    if (
+        feed_type not in {"home", "away"}
+        and away_team_id
+        and home_team_id
+        and event.get("event_key")
+    ):
+        matchup_logo = event_logos.register_matchup_logo(
+            event_key=event.get("event_key"),
+            away_team_id=away_team_id,
+            away_team_name=event.get("away_team_name") or "Away",
+            away_logo_url=away_api_logo or away_catalog_logo,
+            home_team_id=home_team_id,
+            home_team_name=event.get("home_team_name") or "Home",
+            home_logo_url=home_api_logo or home_catalog_logo,
+            event_end=_s._event_end(event),
         )
-    elif feed_team_id == away_team_id:
-        candidates = (
-            str(event.get("api_away_logo") or ""),
-            _catalog_team_logo(team_catalog, away_team_id),
-        )
+        if matchup_logo:
+            return matchup_logo
+
+    if feed_team_id == home_team_id or feed_type == "home":
+        candidates = (home_api_logo, home_catalog_logo)
+    elif feed_team_id == away_team_id or feed_type == "away":
+        candidates = (away_api_logo, away_catalog_logo)
     else:
         candidates = (
-            str(event.get("api_away_logo") or ""),
-            _catalog_team_logo(team_catalog, away_team_id),
-            str(event.get("api_home_logo") or ""),
-            _catalog_team_logo(team_catalog, home_team_id),
+            away_api_logo,
+            away_catalog_logo,
+            home_api_logo,
+            home_catalog_logo,
         )
 
     for logo in candidates:
