@@ -1,89 +1,61 @@
-# v30-experiments: disposable/isolated debug stack.
+# Normal long-running M3U Web Picker instance.
 #
-# This intentionally does NOT use the normal m3u-picker container name,
-# normal named volume, normal backup folder, or normal host port.
-# It is safe to run beside the stable main instance.
+# Production runs with the Dockerfile's Waitress command on container port 9999.
+# Runtime state lives in the persistent m3u-picker-data Docker volume at
+# /app/data. `docker compose down` keeps that volume; only `down -v` removes it.
 #
-# Start (also launches the native HDHomeRun discovery helper quietly):
-#   sh scripts/start-experiments.sh
-#
-# Open:
-#   http://localhost:10000  (Cast control on this Mac)
-#   http://10.0.0.22:10000  (LAN access / Chromecast/Roku media relay)
-#   http://10.0.0.22        (HDHomeRun/Jellyfin bare-IP compatibility)
-#
-# Stop/remove only this experiment (also stops the discovery helper):
-#   sh scripts/stop-experiments.sh
-#
-# Reset ONLY the experimental state:
-#   docker compose down
-#   rm -rf debug-data
-#   mkdir -p debug-data
+# M3U_BACKUP_DIR controls the host directory mapped to /backups.
+# Example values:
+#   Linux:   /home/me/Documents/m3u_picker/nightly
+#   macOS:   /Users/me/Documents/m3u_picker/nightly
+#   Windows: C:/Users/me/Documents/m3u_picker/nightly
+#   Default: ./backups
 
-name: m3u-picker-v30-experiments
+name: m3u-picker
 
 services:
-  m3u-picker-v30-experiments:
+  m3u-picker:
     build:
       context: .
       dockerfile: Dockerfile
 
-    container_name: m3u-picker-v30-experiments
+    container_name: m3u-picker
 
     ports:
-      # Normal experimental UI/media path.
-      - "0.0.0.0:10000:9998"
-      # Jellyfin HDHomeRun discovery follows the UDP reply with a bare-IP
-      # http://<device-ip>/discover.json request, so expose the same Flask app
-      # directly on host port 80 instead of requiring hdhr_port80_proxy.py.
-      - "0.0.0.0:80:9998"
+      # Normal UI/media endpoint.
+      - "${M3U_HOST_PORT:-9999}:9999"
+      # HDHomeRun/Jellyfin bare-IP discovery follows UDP discovery with
+      # http://<device-ip>/discover.json, so serve the same app on port 80.
+      - "0.0.0.0:80:9999"
 
     environment:
-      FLASK_DEBUG: "1"
       PYTHONUNBUFFERED: "1"
-      M3U_BACKUP_ENABLED: "false"
-      # exp8: the Chromecast/Google TV and Roku fetch HLS from the host over the LAN.
+      M3U_BACKUP_ENABLED: "true"
+      M3U_DATA_DIR: /app/data
+      # Chromecast/Google TV and Roku fetch relayed media over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
-      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-10000}"
-      M3U_DATA_DIR: /app/debug-data
+      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-9999}"
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
       M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
       M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
       M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES: "${M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES:-268435456}"
+      M3U_BACKUP_CONTAINER_DIR: /backups
+      BACKUP_TIME: "03:15"
+      BACKUP_TIMEZONE: "America/New_York"
+      BACKUP_RETENTION_DAYS: "30"
+      MASTER_REFRESH_HOUR: "3"
+      MASTER_REFRESH_MINUTE: "0"
 
-    # Debug/reloader mode is deliberate for v30-experiments.
-    command: ["python", "app.py", "--dev"]
-
-    # Bind the source tree for fast experiments while keeping runtime state in
-    # this download's ./debug-data folder only.
     volumes:
       - type: bind
-        source: ./app.py
-        target: /app/app.py
-      - type: bind
-        source: ./core.py
-        target: /app/core.py
-      - type: bind
-        source: ./hdhr_config.py
-        target: /app/hdhr_config.py
-      - type: bind
-        source: ./sports
-        target: /app/sports
-      - type: bind
-        source: ./backup.py
-        target: /app/backup.py
-      - type: bind
-        source: ./api
-        target: /app/api
-      - type: bind
-        source: ./static
-        target: /app/static
-      - type: bind
-        source: ./templates
-        target: /app/templates
-      - type: bind
-        source: ./debug-data
-        target: /app/debug-data
+        source: "${M3U_BACKUP_DIR:-./backups}"
+        target: /backups
+      - type: volume
+        source: m3u-picker-data
+        target: /app/data
 
     restart: unless-stopped
+
+volumes:
+  m3u-picker-data:
