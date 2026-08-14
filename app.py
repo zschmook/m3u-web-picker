@@ -39,7 +39,7 @@ def index():
         '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
         '<script src="/static/js/ui_top_controls.js?v=ui-top-controls-10"></script>\n'
         '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/ui_resilient_images.js?v=logo-fallback-2"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
         '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
@@ -53,7 +53,7 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=tv-grid-6">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=matchup-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=theme-pack-2">\n'
         '<link rel="stylesheet" href="/static/css/guide_theme.css?v=guide-theme-2">\n'
@@ -69,9 +69,9 @@ def guide():
         '})();\n'
         '</script>\n'
         '<script src="/static/js/guide_experiments_ui.js?v=cast-flow-2"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=tv-grid-4"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=matchup-1"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
-        '<script src="/static/js/ui_resilient_images.js?v=logo-fallback-2"></script>\n'
+        '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/guide_back_button.js?v=guide-back-3"></script>\n</body>',
     )
 
