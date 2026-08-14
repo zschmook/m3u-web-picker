@@ -43,7 +43,8 @@ def index():
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
         '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
-        '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n</body>',
+        '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
+        '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n</body>',
     )
 
 
