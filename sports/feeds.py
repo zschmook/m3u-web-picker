@@ -79,6 +79,7 @@ def _espn_team_logo(event: dict, *, team_name: str) -> str:
         return espn_team_logos.espn_full_default_url(
             event.get("league_id") or _s._classification_id(event),
             team_name,
+            event.get("sport_id") or "",
         )
     except Exception:
         return ""
@@ -92,12 +93,12 @@ def _preferred_feed_logo(
 ) -> str:
     """Choose stable artwork for a generated feed.
 
-    ESPN's ordinary ``full/default`` mark is the preferred upstream team logo,
-    with provider/Xtream artwork retained as fallback. Generic event, national,
-    Spanish, and backup feeds continue to use the local event-keyed
-    ``Away @ Home`` composite. The compositor checks the persistent team cache
-    first, so image bytes are only fetched when a generated event actually needs
-    them instead of preloading an entire provider catalog.
+    Every generated matchup checks ESPN for the ordinary ``full/default`` team
+    mark first, with provider/Xtream artwork retained as fallback. ESPN catalog
+    discovery and results are cached, and the event compositor checks the
+    persistent image cache before it downloads either source. Generic event,
+    national, Spanish, and backup feeds continue to use the local event-keyed
+    ``Away @ Home`` composite.
     """
     feed_team_id = str(feed.get("team_id") or "")
     feed_type = str(feed.get("feed_type") or "event").strip().lower()
