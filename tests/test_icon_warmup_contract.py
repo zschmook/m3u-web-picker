@@ -28,17 +28,21 @@ class IconWarmupContractTests(unittest.TestCase):
         self.assertIn("image_api.prepare_icon_update()", source)
         self.assertIn("icon_update = image_api.warm_known_logos()", source)
 
-    def test_temporary_ui_exposes_logos_checkbox_and_status(self):
+    def test_temporary_ui_exposes_visible_logos_controls_and_status(self):
         source = (ROOT / "static/js/ui_icon_update.js").read_text(encoding="utf-8")
-        self.assertIn('const CHECKBOX_ID = "masterUpdateLogos"', source)
+        self.assertIn('const CHECKBOX_SELECTOR = "[data-icon-update-checkbox]"', source)
+        self.assertIn('document.getElementById("uiUpdateNowBtn")', source)
+        self.assertIn('"masterUpdateLogosOverview"', source)
+        self.assertIn('"masterUpdateLogosSidebar"', source)
+        self.assertIn('"uiIconUpdateStatus"', source)
         self.assertIn("Logos?", source)
         self.assertIn("Icon update", source)
         self.assertIn("body.logos", source)
         self.assertIn("data.icon_update", source)
 
-    def test_icon_update_overlay_is_loaded(self):
+    def test_icon_update_overlay_is_loaded_with_current_cache_bust(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn('/static/js/ui_icon_update.js?v=icon-update-1', source)
+        self.assertIn('/static/js/ui_icon_update.js?v=icon-update-2', source)
 
 
 if __name__ == "__main__":
