@@ -55,6 +55,7 @@ def guide():
     html = html.replace(
         "</head>",
         '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=matchup-1">\n'
+        '<link rel="stylesheet" href="/static/css/event_logo_normalization.css?v=event-logo-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=theme-pack-2">\n'
         '<link rel="stylesheet" href="/static/css/guide_theme.css?v=guide-theme-2">\n'
