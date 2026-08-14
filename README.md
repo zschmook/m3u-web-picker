@@ -25,7 +25,6 @@ The current `main` branch is the v30 UI and device stack.
 ## Quick start
 
 ```bash
-cp .env.example .env 2>/dev/null || true
 docker compose up -d --build --force-recreate
 ```
 
@@ -137,10 +136,9 @@ The Devices page includes the virtual HDHomeRun controls and status. The applica
 
 See [`PLEX-HDHR.md`](PLEX-HDHR.md) for additional integration notes.
 
-## Updating the checkout
+## Updating
 
 ```bash
-cd /Users/zacharyschmook/Desktop/repos/m3u-web-picker
 git switch main
 git pull --ff-only origin main
 docker compose down
