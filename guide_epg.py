@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 from zoneinfo import ZoneInfo
 
+import public_epg_logos
 import sports
 
 
@@ -204,6 +205,19 @@ def enrich_guide_channels(
     local_tz = ZoneInfo(timezone_value)
     anchor = now or datetime.now().astimezone()
     anchor = anchor.astimezone(local_tz)
+
+    # Logo selection is intentionally independent from programme matching.
+    # Manual channels prefer an exact public-EPG channel icon when one exists;
+    # sports-generated rows retain their sports/API artwork policy.
+    try:
+        import core
+
+        channels = public_epg_logos.apply_to_guide_items(
+            channels,
+            core.active_public_epg_paths(),
+        )
+    except Exception:
+        pass
 
     index, metadata = _cached_programme_index(Path(epg_path), timezone_value)
     enriched = []
