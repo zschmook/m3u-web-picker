@@ -63,26 +63,53 @@ def _feed_label(feed_type: str, event: dict, team_id: str) -> tuple[str, str]:
     return "Event Feed", "Provider event stream"
 
 
+def _catalog_team_logo(team_catalog: dict[str, dict], team_id: str) -> str:
+    if not team_id:
+        return ""
+    team = team_catalog.get(team_id)
+    return str(team.get("logo_url", "") or "") if team else ""
+
+
 def _preferred_feed_logo(
     event: dict,
     feed: dict,
     channel: dict,
     team_catalog: dict[str, dict],
 ) -> str:
-    """Choose stable artwork for a generated feed."""
+    """Choose stable artwork for a generated feed.
+
+    Team/API artwork is preferred over provider channel artwork. Provider logos
+    are often generic event tiles and are more likely to be short-lived or
+    hotlink-protected. For a league-level event feed with no explicit team feed,
+    use the away team first because it is the first team in the displayed
+    "Away at Home" event name, then the home team.
+    """
     feed_team_id = str(feed.get("team_id") or "")
-    logo = ""
-    if feed_team_id and feed_team_id == str(event.get("home_team_id") or ""):
-        logo = str(event.get("api_home_logo") or "")
-    elif feed_team_id and feed_team_id == str(event.get("away_team_id") or ""):
-        logo = str(event.get("api_away_logo") or "")
-    if not logo:
-        logo = str(channel.get("tvg_logo", "") or "")
-    if not logo and feed_team_id:
-        preferred_team = team_catalog.get(feed_team_id)
-        if preferred_team:
-            logo = str(preferred_team.get("logo_url", "") or "")
-    return logo
+    home_team_id = str(event.get("home_team_id") or "")
+    away_team_id = str(event.get("away_team_id") or "")
+
+    if feed_team_id == home_team_id:
+        candidates = (
+            str(event.get("api_home_logo") or ""),
+            _catalog_team_logo(team_catalog, home_team_id),
+        )
+    elif feed_team_id == away_team_id:
+        candidates = (
+            str(event.get("api_away_logo") or ""),
+            _catalog_team_logo(team_catalog, away_team_id),
+        )
+    else:
+        candidates = (
+            str(event.get("api_away_logo") or ""),
+            _catalog_team_logo(team_catalog, away_team_id),
+            str(event.get("api_home_logo") or ""),
+            _catalog_team_logo(team_catalog, home_team_id),
+        )
+
+    for logo in candidates:
+        if logo:
+            return logo
+    return str(channel.get("tvg_logo", "") or "")
 
 
 def _build_feeds(
