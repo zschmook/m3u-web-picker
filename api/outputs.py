@@ -1,6 +1,7 @@
 from flask import Response, redirect, request, send_file
 
 import core
+import public_epg_logos
 import sports
 
 
@@ -81,6 +82,16 @@ def register_output_routes(app):
         response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.COMBINED_EPG_PATH.stat().st_mtime))
         return response
 
+    def with_manual_epg_logos(text: str) -> str:
+        try:
+            return public_epg_logos.rewrite_manual_playlist_logos(
+                text,
+                core.active_public_epg_paths(),
+            )
+        except Exception:
+            # Logo enrichment is cosmetic and must never make a playlist fail.
+            return text
+
     @app.get("/playlist/channels.m3u")
     @app.get("/playlist/custom.m3u")
     def playlist():
@@ -101,6 +112,7 @@ def register_output_routes(app):
                 for line in lines
             ]
             text = "\n".join(lines) + "\n"
+        text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
@@ -108,11 +120,14 @@ def register_output_routes(app):
     @app.get("/playlist/all.m3u")
     def playlist_all():
         return Response(
-            core.m3u_from_channels(core.all_grouped_channels()),
+            with_manual_epg_logos(core.m3u_from_channels(core.all_grouped_channels())),
             mimetype="audio/x-mpegurl",
         )
 
     @app.get("/playlist/group/<slug>.m3u")
     def playlist_group(slug: str):
         _, items = core.group_channels_for_slug(slug)
-        return Response(core.m3u_from_channels(items), mimetype="audio/x-mpegurl")
+        return Response(
+            with_manual_epg_logos(core.m3u_from_channels(items)),
+            mimetype="audio/x-mpegurl",
+        )
