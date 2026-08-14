@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from typing import Iterable
 
+import espn_team_logos
 import event_logos
 import sports as _s
 
@@ -71,6 +72,18 @@ def _catalog_team_logo(team_catalog: dict[str, dict], team_id: str) -> str:
     return str(team.get("logo_url", "") or "") if team else ""
 
 
+def _espn_team_logo(event: dict, *, team_name: str) -> str:
+    if not team_name:
+        return ""
+    try:
+        return espn_team_logos.espn_full_default_url(
+            event.get("league_id") or _s._classification_id(event),
+            team_name,
+        )
+    except Exception:
+        return ""
+
+
 def _preferred_feed_logo(
     event: dict,
     feed: dict,
@@ -79,20 +92,26 @@ def _preferred_feed_logo(
 ) -> str:
     """Choose stable artwork for a generated feed.
 
-    Home/away team feeds keep a single team mark. Generic event, national,
-    Spanish, and backup feeds use a local, event-keyed ``Away @ Home`` composite
-    when both teams are known. The composite is derived from persistent cached
-    team artwork and is disposable; it can be regenerated at any time without
-    spending schedule-API quota.
+    ESPN's ordinary ``full/default`` mark is the preferred upstream team logo,
+    with provider/Xtream artwork retained as fallback. Generic event, national,
+    Spanish, and backup feeds continue to use the local event-keyed
+    ``Away @ Home`` composite. The compositor checks the persistent team cache
+    first, so image bytes are only fetched when a generated event actually needs
+    them instead of preloading an entire provider catalog.
     """
     feed_team_id = str(feed.get("team_id") or "")
     feed_type = str(feed.get("feed_type") or "event").strip().lower()
     home_team_id = str(event.get("home_team_id") or "")
     away_team_id = str(event.get("away_team_id") or "")
+    home_team_name = str(event.get("home_team_name") or "Home")
+    away_team_name = str(event.get("away_team_name") or "Away")
     home_api_logo = str(event.get("api_home_logo") or "")
     away_api_logo = str(event.get("api_away_logo") or "")
     home_catalog_logo = _catalog_team_logo(team_catalog, home_team_id)
     away_catalog_logo = _catalog_team_logo(team_catalog, away_team_id)
+
+    home_espn_logo = _espn_team_logo(event, team_name=home_team_name)
+    away_espn_logo = _espn_team_logo(event, team_name=away_team_name)
 
     if (
         feed_type not in {"home", "away"}
@@ -103,26 +122,30 @@ def _preferred_feed_logo(
         matchup_logo = event_logos.register_matchup_logo(
             event_key=event.get("event_key"),
             away_team_id=away_team_id,
-            away_team_name=event.get("away_team_name") or "Away",
-            away_logo_url=away_api_logo or away_catalog_logo,
+            away_team_name=away_team_name,
+            away_logo_url=away_espn_logo or away_catalog_logo or away_api_logo,
+            away_fallback_logo_url=away_catalog_logo or away_api_logo,
             home_team_id=home_team_id,
-            home_team_name=event.get("home_team_name") or "Home",
-            home_logo_url=home_api_logo or home_catalog_logo,
+            home_team_name=home_team_name,
+            home_logo_url=home_espn_logo or home_catalog_logo or home_api_logo,
+            home_fallback_logo_url=home_catalog_logo or home_api_logo,
             event_end=_s._event_end(event),
         )
         if matchup_logo:
             return matchup_logo
 
     if feed_team_id == home_team_id or feed_type == "home":
-        candidates = (home_api_logo, home_catalog_logo)
+        candidates = (home_espn_logo, home_catalog_logo, home_api_logo)
     elif feed_team_id == away_team_id or feed_type == "away":
-        candidates = (away_api_logo, away_catalog_logo)
+        candidates = (away_espn_logo, away_catalog_logo, away_api_logo)
     else:
         candidates = (
-            away_api_logo,
+            away_espn_logo,
             away_catalog_logo,
-            home_api_logo,
+            away_api_logo,
+            home_espn_logo,
             home_catalog_logo,
+            home_api_logo,
         )
 
     for logo in candidates:
