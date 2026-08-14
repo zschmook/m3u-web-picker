@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Response, request
@@ -24,6 +26,68 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _observed_provider_signature: tuple | None = None
 _observed_sports_signature: tuple | None = None
 _last_observation_check = 0.0
+_icon_update_lock = threading.Lock()
+_icon_update_run_lock = threading.Lock()
+_icon_update_state = {
+    "requested": False,
+    "running": False,
+    "status": "idle",
+    "stage": "",
+    "detail": "",
+    "total": 0,
+    "processed": 0,
+    "downloaded": 0,
+    "cached": 0,
+    "failed": 0,
+    "identities": 0,
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _set_icon_update_state(**changes) -> dict:
+    with _icon_update_lock:
+        _icon_update_state.update(changes)
+        return dict(_icon_update_state)
+
+
+def icon_update_payload() -> dict:
+    with _icon_update_lock:
+        return dict(_icon_update_state)
+
+
+def prepare_icon_update() -> dict:
+    """Mark an explicitly requested manual icon warm-up as queued."""
+    return _set_icon_update_state(
+        requested=True,
+        running=False,
+        status="waiting",
+        stage="Icon update",
+        detail="Waiting for the manual provider/sports refresh to finish.",
+        total=0,
+        processed=0,
+        downloaded=0,
+        cached=0,
+        failed=0,
+        identities=0,
+        started_at=None,
+        finished_at=None,
+    )
+
+
+def finish_icon_update_early(detail: str, *, status: str = "skipped") -> dict:
+    return _set_icon_update_state(
+        requested=True,
+        running=False,
+        status=status,
+        stage="Icon update",
+        detail=str(detail or "Icon update did not run."),
+        finished_at=_now_iso(),
+    )
 
 
 def _cache_mtime_ns(path: Path) -> int:
@@ -206,6 +270,178 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
         if final_url.scheme not in {"http", "https"}:
             raise ValueError("Invalid logo redirect.")
         return payload, content_type
+
+
+def _warmup_candidates() -> dict[str, list[tuple[str, str]]]:
+    """Return known logo URLs grouped with identities; this never calls a schedule API."""
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    seen_identity_url: set[tuple[str, str]] = set()
+
+    def add(identity_key: str, url: str, source_kind: str) -> None:
+        key = logo_registry.normalize_identity(identity_key)
+        clean_url = str(url or "").strip()
+        parsed = urllib.parse.urlsplit(clean_url)
+        if not key or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return
+        pair = (key, clean_url)
+        if pair in seen_identity_url:
+            return
+        seen_identity_url.add(pair)
+        grouped.setdefault(clean_url, []).append((key, str(source_kind or "")[:80]))
+
+    try:
+        provider_sets = core.sports_provider_channel_sets()
+    except Exception:
+        provider_sets = []
+    if provider_sets:
+        for source, source_channels in provider_sets:
+            source_kind = f"provider:{str(source.get('role') or 'source')}"
+            for channel in source_channels:
+                add(
+                    logo_registry.channel_identity(channel),
+                    str(channel.get("tvg_logo", "") or ""),
+                    source_kind,
+                )
+    else:
+        for channel in core.channels:
+            add(
+                logo_registry.channel_identity(channel),
+                str(channel.get("tvg_logo", "") or ""),
+                "provider",
+            )
+
+    # These are URLs already stored from normal schedule/catalog work. Reading
+    # them from SQLite does not spend API-SPORTS quota.
+    try:
+        for item in sports.catalog_payload(core.DB_PATH, scope_type="team"):
+            add(
+                logo_registry.team_identity(item.get("id")),
+                str(item.get("logo_url", "") or ""),
+                str(item.get("source", "") or "sports-catalog"),
+            )
+    except Exception:
+        pass
+    return grouped
+
+
+def _cache_warmup_url(url: str, identities: list[tuple[str, str]]) -> str:
+    """Populate one unique URL, then point all observed identities at its bytes."""
+    LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    digest = _digest_for_url(url)
+    data_path, meta_path = _cache_paths_from_digest(digest)
+    cached = _read_cached(data_path, meta_path)
+    if cached:
+        content_type = cached[1]
+        outcome = "cached"
+    else:
+        payload, content_type = _fetch_logo(url)
+        core.atomic_write_bytes(data_path, payload)
+        core.atomic_write_text(
+            meta_path,
+            json.dumps({"content_type": content_type, "source": url}, sort_keys=True),
+        )
+        outcome = "downloaded"
+
+    for identity_key, source_kind in identities:
+        logo_registry.record_success(
+            core.DB_PATH,
+            identity_key,
+            source_url=url,
+            source_kind=source_kind,
+            cache_digest=digest,
+            content_type=content_type,
+        )
+    return outcome
+
+
+def warm_known_logos() -> dict:
+    """Eagerly cache all known provider/team icons after an explicit manual update.
+
+    The candidate list comes only from provider caches and the local sports
+    catalog. It deliberately does not refresh or query any sports schedule API.
+    """
+    if not _icon_update_run_lock.acquire(blocking=False):
+        return icon_update_payload()
+    try:
+        started_at = _now_iso()
+        try:
+            grouped = _warmup_candidates()
+        except Exception as exc:
+            return _set_icon_update_state(
+                requested=True,
+                running=False,
+                status="failed",
+                stage="Icon update",
+                detail=f"Could not build icon list ({type(exc).__name__}).",
+                finished_at=_now_iso(),
+            )
+
+        identities = sum(len(items) for items in grouped.values())
+        _set_icon_update_state(
+            requested=True,
+            running=True,
+            status="running",
+            stage="Icon update",
+            detail="Caching known provider and sports icons.",
+            total=len(grouped),
+            processed=0,
+            downloaded=0,
+            cached=0,
+            failed=0,
+            identities=identities,
+            started_at=started_at,
+            finished_at=None,
+        )
+        downloaded = 0
+        cached_count = 0
+        failed = 0
+        processed = 0
+        for url, url_identities in grouped.items():
+            try:
+                outcome = _cache_warmup_url(url, url_identities)
+                if outcome == "downloaded":
+                    downloaded += 1
+                else:
+                    cached_count += 1
+            except Exception:
+                failed += 1
+                for identity_key, source_kind in url_identities:
+                    try:
+                        logo_registry.record_failure(
+                            core.DB_PATH,
+                            identity_key,
+                            source_url=url,
+                            source_kind=source_kind,
+                        )
+                    except Exception:
+                        pass
+            processed += 1
+            host = urllib.parse.urlsplit(url).hostname or "logo host"
+            _set_icon_update_state(
+                processed=processed,
+                downloaded=downloaded,
+                cached=cached_count,
+                failed=failed,
+                detail=f"{processed:,}/{len(grouped):,} unique icons checked • {host}",
+            )
+
+        detail = (
+            f"Checked {processed:,} unique icons: {downloaded:,} downloaded, "
+            f"{cached_count:,} already cached, {failed:,} failed."
+        )
+        return _set_icon_update_state(
+            running=False,
+            status="complete",
+            stage="Icon update",
+            detail=detail,
+            processed=processed,
+            downloaded=downloaded,
+            cached=cached_count,
+            failed=failed,
+            finished_at=_now_iso(),
+        )
+    finally:
+        _icon_update_run_lock.release()
 
 
 def register_image_routes(app):
