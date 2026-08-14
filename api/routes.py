@@ -16,6 +16,7 @@ from .groups import register_group_routes
 from .guide import register_guide_routes
 from .hdhr import register_hdhr_routes
 from .images import register_image_routes
+from .logo_cache_status import register_logo_cache_status_routes
 from .outputs import register_output_routes
 from .providers import register_provider_routes
 from .sports_routes import register_sports_routes
@@ -31,5 +32,6 @@ def register_routes(app):
     register_hdhr_routes(app)
     register_image_routes(app)
     register_event_image_routes(app)
+    register_logo_cache_status_routes(app)
     register_output_routes(app)
     register_ui_status_routes(app)
