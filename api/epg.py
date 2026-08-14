@@ -2,6 +2,7 @@ from flask import jsonify, request
 
 import core
 import sports
+from . import images as image_api
 
 
 def register_epg_routes(app):
@@ -12,6 +13,7 @@ def register_epg_routes(app):
             builtins=core.epg_builtin_payload(),
             public_epg=core.public_epg_payload(),
             master_update=core.master_update_payload(),
+            icon_update=image_api.icon_update_payload(),
         )
 
     @app.post("/api/epg")
@@ -47,7 +49,10 @@ def register_epg_routes(app):
 
     @app.get("/api/master-update")
     def api_master_update():
-        return jsonify(master_update=core.master_update_payload())
+        return jsonify(
+            master_update=core.master_update_payload(),
+            icon_update=image_api.icon_update_payload(),
+        )
 
     @app.patch("/api/master-update")
     def api_update_master_update():
@@ -66,19 +71,45 @@ def register_epg_routes(app):
 
     @app.post("/api/master-update/run")
     def api_run_master_update():
+        data = request.get_json(force=False, silent=True) or {}
+        update_logos = bool(data.get("logos"))
+        if update_logos:
+            image_api.prepare_icon_update()
         try:
             result = core.run_master_update(trigger="manual")
         except core.SportsScanError as exc:
-            return jsonify(error=str(exc), master_update=core.master_update_payload()), 409
+            if update_logos:
+                image_api.finish_icon_update_early(
+                    "Master update stopped before icon caching could run.",
+                    status="skipped",
+                )
+            return jsonify(
+                error=str(exc),
+                master_update=core.master_update_payload(),
+                icon_update=image_api.icon_update_payload(),
+            ), 409
         except Exception as exc:
+            if update_logos:
+                image_api.finish_icon_update_early(
+                    "Master update failed before icon caching could run.",
+                    status="skipped",
+                )
             print(f"Unexpected master update error: {exc}")
             return jsonify(
                 error="Master update failed. Existing outputs were kept.",
                 master_update=core.master_update_payload(),
+                icon_update=image_api.icon_update_payload(),
             ), 500
+
+        icon_update = image_api.icon_update_payload()
+        if update_logos:
+            icon_update = image_api.warm_known_logos()
+            result["icon_update"] = icon_update
+
         return jsonify(
             result=result,
             master_update=core.master_update_payload(),
+            icon_update=icon_update,
             sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH)),
             channels=core.combined_channels_for_api(),
             selected_ids=core.selected_ids_payload(),
@@ -123,6 +154,7 @@ def register_epg_routes(app):
             source_mode=core.source_mode,
             last_refresh=core.last_refresh,
             master_update=core.master_update_payload(),
+            icon_update=image_api.icon_update_payload(),
             public_epg=core.public_epg_payload(),
             epg_sources=core.epg_sources_payload(),
             data_dir=str(core.DATA_DIR),
