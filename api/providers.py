@@ -40,6 +40,66 @@ def register_provider_routes(app):
             providers=core.provider_sources_payload(),
         )
 
+    @app.post("/api/providers/validate")
+    def api_validate_provider():
+        """Probe provider connectivity/authentication without installing it.
+
+        The first-run wizard uses this to keep its schedule and Continue button
+        locked until the provider is actually reachable. Direct M3U URLs are
+        probed immediately. Xtream base URLs are probed again with credentials
+        once both username and password have been supplied.
+        """
+        if core.primary_provider_source() or core.source_mode == "file":
+            return jsonify(error="A primary provider is already configured."), 409
+
+        data = request.get_json(force=True, silent=True) or {}
+        url = str(data.get("url", "") or "").strip()
+        username = str(data.get("username", "") or "")
+        password = str(data.get("password", "") or "")
+        name = str(data.get("name", "") or "Primary")
+
+        if not url.startswith(("http://", "https://")):
+            return jsonify(error="URL must start with http:// or https://"), 400
+        if bool(username) != bool(password):
+            return jsonify(
+                valid=False,
+                waiting_for_credentials=True,
+                error="Enter both the Xtream username and password before validation.",
+            ), 409
+
+        try:
+            source, _text, _parsed = core.detect_provider_source(
+                name,
+                url,
+                username=username,
+                password=password,
+                role="primary",
+                load_channels=False,
+            )
+        except ValueError as exc:
+            message = core.redact_url_credentials(str(exc))
+            return jsonify(
+                valid=False,
+                waiting_for_credentials=not bool(username and password),
+                error=message,
+            ), 400
+        except Exception as exc:
+            message = core.redact_url_credentials(str(exc))
+            return jsonify(
+                valid=False,
+                waiting_for_credentials=not bool(username and password),
+                error=message,
+            ), 502
+
+        return jsonify(
+            valid=True,
+            kind=str(source.get("kind", "m3u") or "m3u"),
+            xtream_api=bool(source.get("xtream_api")),
+            account_status=source.get("account_status"),
+            expires_at=source.get("expires_at"),
+            credentials_used=bool(username and password),
+        )
+
     @app.post("/api/upload")
     def api_upload():
         if core.primary_provider_source() or core.source_mode == "file":
