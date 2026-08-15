@@ -21,10 +21,11 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertIn("logo_registry.lookup", source)
         self.assertIn("urllib.request.urlopen", source)
 
-    def test_generated_generic_feeds_use_event_logo(self):
-        source = (ROOT / "sports/feeds.py").read_text(encoding="utf-8")
+    def test_all_generated_matchup_feeds_use_event_logo(self):
+        source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")
         self.assertIn("event_logos.register_matchup_logo", source)
-        self.assertIn('feed_type not in {"home", "away"}', source)
+        self.assertIn("if away_team_id and home_team_id and event.get(\"event_key\")", source)
+        self.assertNotIn('feed_type not in {"home", "away"}', source)
         self.assertIn("away_team_id", source)
         self.assertIn("home_team_id", source)
 
@@ -44,15 +45,15 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertIn("Image.Resampling.LANCZOS", source)
 
     def test_event_logo_route_and_pillow_dependency_exist(self):
-        routes = (ROOT / "api/routes.py").read_text(encoding="utf-8")
-        api_source = (ROOT / "api/event_images.py").read_text(encoding="utf-8")
+        routes = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        api_source = (ROOT / "api" / "event_images.py").read_text(encoding="utf-8")
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn("register_event_image_routes", routes)
         self.assertIn('/api/event-logo/<digest>.png', api_source)
         self.assertIn("Pillow", requirements)
 
     def test_guide_uses_same_sized_logo_boxes(self):
-        source = (ROOT / "static/css/event_logo_normalization.css").read_text(encoding="utf-8")
+        source = (ROOT / "static" / "css" / "event_logo_normalization.css").read_text(encoding="utf-8")
         self.assertIn(".guide-logo", source)
         self.assertIn(".guide-matchup-logo", source)
         self.assertGreaterEqual(source.count("36px"), 6)
