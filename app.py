@@ -2,7 +2,7 @@
 import argparse
 import atexit
 import os
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, render_template, request, send_from_directory
 
 import core
 import hdhr_config
@@ -14,6 +14,26 @@ from settings import SETTINGS
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
+
+
+@app.after_request
+def disable_runtime_document_cache(response):
+    """Never let navigation/status pages resurrect stale update state.
+
+    Versioned static assets remain normally cacheable. The application shell,
+    guide document, and live Master Update status endpoints are intentionally
+    revalidated on every navigation/request so Chrome cannot restore an old UI
+    snapshot while an update is still running.
+    """
+    path = request.path
+    if (
+        path in {"/", "/guide", "/api/ui/status", "/api/master-update"}
+        or path.startswith("/api/master-update/")
+    ):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 def _dev_onboarding_required() -> bool:
@@ -49,6 +69,7 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n'
+        '<link rel="stylesheet" href="/static/css/update_lifecycle.css?v=update-lifecycle-1">\n'
         '<link rel="stylesheet" href="/static/css/onboarding_dev.css?v=dev-onboarding-1">\n</head>',
     )
     return html.replace(
@@ -63,6 +84,7 @@ def index():
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
+        '<script src="/static/js/update_lifecycle.js?v=update-lifecycle-1"></script>\n'
         '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'
         '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
         '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
