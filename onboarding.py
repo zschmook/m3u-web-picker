@@ -190,14 +190,17 @@ def mark_complete(
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT answers_json FROM app_onboarding WHERE id = 1"
+            "SELECT completed, completed_at, answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()
         answers = _decode_answers(row["answers_json"] if row else "{}")
-        # The first normal main-screen load claims this flag and starts one
-        # background Master Update. Keeping the trigger in persisted onboarding
-        # state makes the handoff survive the wizard's final page reload.
-        answers["initial_refresh_pending"] = True
-        answers.pop("initial_refresh_claimed_at", None)
+        already_completed = bool(row and row["completed"])
+        # Only the actual incomplete -> complete transition queues the one-shot
+        # refresh. Repeated complete requests must not resurrect it after the
+        # first main-screen load already claimed the work.
+        if not already_completed:
+            answers["initial_refresh_pending"] = True
+            answers.pop("initial_refresh_claimed_at", None)
+        completed_at = row["completed_at"] if row and row["completed_at"] else now
         conn.execute(
             """
             UPDATE app_onboarding
@@ -205,7 +208,7 @@ def mark_complete(
                 updated_at = ?, completed_at = ?
             WHERE id = 1
             """,
-            (json.dumps(answers), now, now),
+            (json.dumps(answers), now, completed_at),
         )
         conn.commit()
     return get_state(db_path, provider_configured=provider_configured)
