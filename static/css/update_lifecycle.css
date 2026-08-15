@@ -1,0 +1,33 @@
+.ui-guide-disabled,
+a.ui-guide-disabled {
+  opacity: 0.42 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.35);
+  text-decoration: none !important;
+}
+
+.ui-guide-disabled:hover,
+a.ui-guide-disabled:hover {
+  opacity: 0.42 !important;
+}
+
+.ui-health-dot.is-running,
+.ui-update-result.is-running .ui-update-result-dot {
+  animation: ui-update-live-pulse 1s ease-in-out infinite;
+}
+
+.ui-update-result.is-running {
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+@keyframes ui-update-live-pulse {
+  0%, 100% { transform: scale(0.82); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-health-dot.is-running,
+  .ui-update-result.is-running .ui-update-result-dot {
+    animation: none;
+  }
+}
