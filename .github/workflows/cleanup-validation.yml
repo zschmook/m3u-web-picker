@@ -22,6 +22,33 @@ jobs:
         run: docker compose config -q
       - name: Validate isolated wizard Compose
         run: docker compose -f docker-compose.dev.yml config -q
+      - name: Build Docker image
+        run: docker build -t m3u-web-picker-cleanup .
+      - name: Smoke test blank first-run container
+        run: |
+          docker run -d --name m3u-web-picker-smoke \
+            -e M3U_ONBOARDING_ENABLED=true \
+            -e M3U_DATA_DIR=/app/data \
+            -p 9999:9999 \
+            m3u-web-picker-cleanup
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9999/api/onboarding > /tmp/onboarding.json; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:9999/ > /tmp/index.html
+          python - <<'PY'
+          import json
+          payload = json.load(open('/tmp/onboarding.json', encoding='utf-8'))
+          assert payload['enabled'] is True
+          assert payload['state']['required'] is True
+          assert payload['state']['completed'] is False
+          html = open('/tmp/index.html', encoding='utf-8').read()
+          assert 'onboarding-pending' in html
+          assert '/static/js/onboarding.js' in html
+          PY
+          docker rm -f m3u-web-picker-smoke
       - name: Compile Python
         run: python -m compileall -q .
       - name: Check JavaScript syntax
