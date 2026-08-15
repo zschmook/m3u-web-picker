@@ -28,6 +28,7 @@ RUN mkdir -p /app/exports /app/data /app/debug-data /backups
 
 EXPOSE 9999 9998
 
-# Waitress is used for the normal container. The debug Compose file overrides
-# this command and runs `python app.py --dev` on internal port 9998 instead.
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=9999", "app:app"]
+# Master Updates run on their own application worker thread, so Waitress request
+# threads remain dedicated to navigation, static assets, and live status calls.
+# Keep extra request capacity for browsers/TV clients polling concurrently.
+CMD ["waitress-serve", "--threads=8", "--host=0.0.0.0", "--port=9999", "app:app"]
