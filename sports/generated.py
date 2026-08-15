@@ -62,6 +62,11 @@ def _generated_raw(channel: dict, generated: dict) -> list[str]:
     }
     if generated.get("tvg_logo"):
         attrs["tvg-logo"] = generated["tvg_logo"]
+    else:
+        # Generated sports rows inherit the provider's EXTINF only as a source
+        # template. A provider/station logo is not event identity, so scrub it
+        # when this generated event has no valid event/team artwork of its own.
+        raw[0] = re.sub(r'\s+tvg-logo="[^"]*"', "", raw[0], flags=re.I)
     raw[0] = _rewrite_extinf(raw[0], attrs, generated["display_name"])
     if raw[-1] != playback_url:
         raw[-1] = playback_url
