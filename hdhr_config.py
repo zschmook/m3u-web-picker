@@ -15,10 +15,9 @@ _LOCK = threading.RLock()
 def is_enabled() -> bool:
     """Return the persisted HDHomeRun support state.
 
-    The experiments branch already advertised the HDHomeRun facade before this
-    toggle existed, so missing state intentionally preserves that behavior and
-    defaults to enabled. Once the user changes the switch, the explicit value is
-    persisted across rebuilds.
+    HDHomeRun support existed before this toggle was persisted, so missing state
+    intentionally preserves that behavior and defaults to enabled. Once the user
+    changes the switch, the explicit value is persisted across rebuilds.
     """
     with _LOCK:
         if not HDHR_CONFIG_PATH.exists():
