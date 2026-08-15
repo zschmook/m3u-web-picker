@@ -41,7 +41,7 @@ def _connect(db_path: Path | str) -> sqlite3.Connection:
 
 
 def _safe_count(conn: sqlite3.Connection, table_name: str) -> int:
-    if table_name not in {"selections", "sports_rules", "master_update_runs"}:
+    if table_name not in {"selections", "sports_rules"}:
         return 0
     try:
         row = conn.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
@@ -57,10 +57,12 @@ def _looks_like_fresh_install(
 ) -> bool:
     if provider_configured:
         return False
+    # Schema/catalog rows and background update history are not user setup.
+    # A dev install remains "fresh" until the user has configured a provider,
+    # saved manual channels, or added sports rules.
     return (
         _safe_count(conn, "selections") == 0
         and _safe_count(conn, "sports_rules") == 0
-        and _safe_count(conn, "master_update_runs") == 0
     )
 
 
