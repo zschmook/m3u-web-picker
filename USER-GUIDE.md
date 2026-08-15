@@ -137,7 +137,7 @@ Roku devices are discovered over the local network and saved by stable device id
 Roku playback requires the M3U Web Picker developer receiver to be sideloaded on the Roku. The receiver ZIP is kept at:
 
 ```text
-roku-receiver/dist/m3u-web-picker-roku-receiver-exp1.zip
+roku-receiver/dist/m3u-web-picker-roku-receiver.zip
 ```
 
 To enable Roku developer mode, from the Roku home screen press:
