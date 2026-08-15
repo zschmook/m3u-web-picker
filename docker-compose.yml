@@ -1,17 +1,16 @@
-# Normal long-running M3U Web Picker instance.
+# Experimental first-run / Jellyfin integration instance.
 #
-# Production runs with the Dockerfile's Waitress command on container port 9999.
-# Runtime state lives in the persistent m3u-picker-data Docker volume at
-# /app/data. `docker compose down` keeps that volume; only `down -v` removes it.
+# This branch deliberately runs as a separate -dev Compose project on host port
+# 9998 so it can coexist with the normal m3u-picker instance. Its data volume is
+# disposable by design: onboarding tests should start with `docker compose down
+# -v` so the first-run wizard sees a genuinely fresh application state.
 #
-# M3U_BACKUP_DIR controls the host directory mapped to /backups.
-# Example values:
-#   Linux:   /home/me/Documents/m3u_picker/nightly
-#   macOS:   /Users/me/Documents/m3u_picker/nightly
-#   Windows: C:/Users/me/Documents/m3u_picker/nightly
-#   Default: ./backups
+# Optional Jellyfin cache integration:
+#   M3U_JELLYFIN_CACHE_DIR=/absolute/path/to/jellyfin/cache docker compose up -d --build
+# The wizard asks the user to paste that same host path and will refuse to
+# enable deletion unless the bind mount is present and writable.
 
-name: m3u-picker
+name: m3u-picker-dev
 
 services:
   m3u-picker:
@@ -19,28 +18,26 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    container_name: m3u-picker
+    container_name: m3u-picker-dev
 
     ports:
-      # Normal UI/media endpoint.
-      - "${M3U_HOST_PORT:-9999}:9999"
-      # HDHomeRun/Jellyfin bare-IP discovery follows UDP discovery with
-      # http://<device-ip>/discover.json, so serve the same app on port 80.
-      - "0.0.0.0:80:9999"
+      - "${M3U_HOST_PORT:-9998}:9999"
 
     environment:
       PYTHONUNBUFFERED: "1"
+      M3U_DEV_ONBOARDING: "true"
       M3U_BACKUP_ENABLED: "true"
       M3U_DATA_DIR: /app/data
-      # Chromecast/Google TV and Roku fetch relayed media over the LAN.
       M3U_LAN_HOST: "${M3U_LAN_HOST:-10.0.0.22}"
-      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-9999}"
+      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-9998}"
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
       M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
       M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
       M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES: "${M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES:-268435456}"
       M3U_BACKUP_CONTAINER_DIR: /backups
+      M3U_JELLYFIN_CACHE_HOST_DIR: "${M3U_JELLYFIN_CACHE_DIR:-}"
+      M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
       BACKUP_TIME: "03:15"
       BACKUP_TIMEZONE: "America/New_York"
       BACKUP_RETENTION_DAYS: "30"
@@ -49,13 +46,16 @@ services:
 
     volumes:
       - type: bind
-        source: "${M3U_BACKUP_DIR:-./backups}"
+        source: "${M3U_BACKUP_DIR:-./data/backups-dev}"
         target: /backups
+      - type: bind
+        source: "${M3U_JELLYFIN_CACHE_DIR:-./data/jellyfin-cache-disabled}"
+        target: /jellyfin-cache
       - type: volume
-        source: m3u-picker-data
+        source: m3u-picker-dev-data
         target: /app/data
 
     restart: unless-stopped
 
 volumes:
-  m3u-picker-data:
+  m3u-picker-dev-data:
