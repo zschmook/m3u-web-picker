@@ -69,7 +69,7 @@ def index():
         '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
         '<script src="/static/js/onboarding_dev.js?v=dev-onboarding-1"></script>\n'
         '<script src="/static/js/onboarding_dev_enhancements.js?v=dev-onboarding-2"></script>\n'
-        '<script src="/static/js/onboarding_provider_validation.js?v=dev-onboarding-3"></script>\n</body>',
+        '<script src="/static/js/onboarding_provider_validation_v2.js?v=dev-onboarding-4"></script>\n</body>',
     )
 
 
