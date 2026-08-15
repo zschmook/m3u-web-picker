@@ -57,6 +57,28 @@ class MatchupLogoAllFeedsTests(unittest.TestCase):
             self.assertIn("espncdn.com", call.kwargs["away_logo_url"])
             self.assertIn("espncdn.com", call.kwargs["home_logo_url"])
 
+    def test_generated_event_never_falls_back_to_provider_station_logo(self):
+        event = {
+            "event_key": "mlb:chicago-white-sox@detroit-tigers:2026-08-15",
+            "league_id": "mlb",
+            "sport_id": "baseball",
+            "away_team_id": "",
+            "away_team_name": "Chicago White Sox",
+            "home_team_id": "",
+            "home_team_name": "Detroit Tigers",
+            "api_away_logo": "",
+            "api_home_logo": "",
+        }
+        feed = {"feed_type": "event", "team_id": ""}
+        channel = {"tvg_logo": "https://provider.test/philadelphia-phillies.png"}
+
+        with patch("sports.feeds._espn_team_logo", return_value=""), patch(
+            "sports.feeds.event_logos.register_matchup_logo", return_value=""
+        ):
+            logo = sports._preferred_feed_logo(event, feed, channel, {})
+
+        self.assertEqual(logo, "")
+
 
 if __name__ == "__main__":
     unittest.main()
