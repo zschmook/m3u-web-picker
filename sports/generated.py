@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from contextlib import closing
@@ -60,12 +61,25 @@ def _generated_raw(channel: dict, generated: dict) -> list[str]:
     return raw
 
 
-def _generated_tvg_id(assigned_number: int) -> str:
-    """Return a credential-free XMLTV id stable for one numbered sports slot."""
-    number = int(assigned_number)
-    if number < 0:
-        raise ValueError("Sports channel numbers must be non-negative.")
-    return f"m3u-picker-sports-{number}"
+def _generated_tvg_id(identity: str | int) -> str:
+    """Return a credential-free XMLTV id for one generated sports identity.
+
+    New generated channels pass their logical ``channel_key`` so Jellyfin sees
+    a new channel identity when a reusable numbered slot is assigned to a
+    different event/feed. Integer input is retained for legacy database
+    migrations that predate logical sports identities.
+    """
+    if isinstance(identity, int):
+        number = int(identity)
+        if number < 0:
+            raise ValueError("Sports channel numbers must be non-negative.")
+        return f"m3u-picker-sports-{number}"
+
+    channel_key = str(identity or "").strip()
+    if not channel_key:
+        raise ValueError("Sports channel identity is required.")
+    digest = hashlib.sha256(channel_key.encode("utf-8")).hexdigest()[:24]
+    return f"m3u-picker-sports-{digest}"
 
 
 def purge_stale_generated(
