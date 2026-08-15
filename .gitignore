@@ -8,12 +8,7 @@ config.json
 *.xml
 
 backups/
-backups-sports-debug/
 data/
 .env
 .vscode/
 .idea/
-
-debug-data/
-
-!debug-data/.gitkeep
