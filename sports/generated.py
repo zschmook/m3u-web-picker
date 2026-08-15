@@ -3,12 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import sports as _s
+
+
+# Generated channel rows live in SQLite while their XMLTV programmes live in
+# files. Readers take this lock too so they never observe two different sports
+# generations while the publish step switches those resources over.
+generated_publish_lock = threading.RLock()
 
 
 def _rewrite_extinf(line: str, attrs: dict[str, str], display_name: str) -> str:
@@ -197,6 +204,16 @@ def publish_generated(
     generated_at: str,
 ) -> None:
     """Atomically replace generated rows and prepared guide exports."""
+    with generated_publish_lock:
+        _publish_generated_locked(db_path, generated, prepared_epg, generated_at)
+
+
+def _publish_generated_locked(
+    db_path: Path | str,
+    generated: list[dict],
+    prepared_epg: list[tuple[Path, Path]],
+    generated_at: str,
+) -> None:
     installed_epg: list[tuple[Path, Path | None]] = []
     with closing(_s._connect(db_path)) as conn:
         conn.execute("BEGIN IMMEDIATE")
