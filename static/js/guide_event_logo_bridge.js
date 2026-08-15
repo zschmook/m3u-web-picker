@@ -18,8 +18,14 @@
       const eventLogo = normalizedEventLogoUrl(channel);
       if (!channel?.generated || !eventLogo) return;
 
-      const rawMatchup = row.querySelector(".guide-matchup-logos");
-      if (!rawMatchup) return;
+      // All generated feeds for a matchup use the same Away @ Home artwork.
+      // Older guide rendering may have emitted a single-team image for home
+      // or away feeds, so replace either representation with the normalized
+      // server-side event composite. Feed identity stays in the subtitle.
+      const renderedLogo = row.querySelector(
+        ".guide-matchup-logos, .guide-logo, .guide-event-composite-logo"
+      );
+      if (!renderedLogo) return;
 
       const image = document.createElement("img");
       image.className = "guide-event-composite-logo";
@@ -30,7 +36,7 @@
       image.referrerPolicy = "no-referrer";
       image.dataset.uiLogoLoader = "true";
       image.dataset.eventLogoNormalized = "true";
-      rawMatchup.replaceWith(image);
+      renderedLogo.replaceWith(image);
     });
   }
 
