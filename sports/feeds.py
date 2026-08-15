@@ -96,9 +96,10 @@ def _preferred_feed_logo(
     Every generated matchup checks ESPN for the ordinary ``full/default`` team
     mark first, with provider/Xtream artwork retained as fallback. ESPN catalog
     discovery and results are cached, and the event compositor checks the
-    persistent image cache before it downloads either source. Generic event,
-    national, Spanish, and backup feeds continue to use the local event-keyed
-    ``Away @ Home`` composite.
+    persistent image cache before it downloads either source. Every feed for a
+    matchup uses the same local event-keyed ``Away @ Home`` composite; home,
+    away, national, Spanish, and provider feed distinctions stay in subtitle
+    metadata rather than changing the station artwork.
     """
     feed_team_id = str(feed.get("team_id") or "")
     feed_type = str(feed.get("feed_type") or "event").strip().lower()
@@ -114,12 +115,7 @@ def _preferred_feed_logo(
     home_espn_logo = _espn_team_logo(event, team_name=home_team_name)
     away_espn_logo = _espn_team_logo(event, team_name=away_team_name)
 
-    if (
-        feed_type not in {"home", "away"}
-        and away_team_id
-        and home_team_id
-        and event.get("event_key")
-    ):
+    if away_team_id and home_team_id and event.get("event_key"):
         matchup_logo = event_logos.register_matchup_logo(
             event_key=event.get("event_key"),
             away_team_id=away_team_id,
