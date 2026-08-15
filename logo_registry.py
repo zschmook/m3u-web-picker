@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 from contextlib import closing
@@ -12,6 +13,7 @@ _MAX_IDENTITY_LENGTH = 240
 _MAX_SOURCE_LENGTH = 80
 _MAX_URL_LENGTH = 4096
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_LOG = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -175,12 +177,19 @@ def lookup(db_path: Path | str, identity_key: object) -> dict | None:
     key = normalize_identity(identity_key)
     if not key:
         return None
-    with closing(_connect(db_path)) as conn:
-        row = conn.execute(
-            "SELECT * FROM logo_registry WHERE identity_key = ?",
-            (key,),
-        ).fetchone()
-    return dict(row) if row else None
+    try:
+        with closing(_connect(db_path)) as conn:
+            row = conn.execute(
+                "SELECT * FROM logo_registry WHERE identity_key = ?",
+                (key,),
+            ).fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as exc:
+        # Logo registry metadata must never prevent a cached/upstream image from
+        # being used. A transient busy/locked database simply behaves like a
+        # cache miss and the image pipeline continues.
+        _LOG.warning("Logo registry lookup failed for %s: %s", key, exc)
+        return None
 
 
 def record_success(
@@ -200,31 +209,37 @@ def record_success(
     source = _clean_source(source_kind)
     digest = str(cache_digest or "").strip()[:128]
     mime = str(content_type or "").strip()[:160]
-    with closing(_connect(db_path)) as conn:
-        conn.execute(
-            """
-            INSERT INTO logo_registry
-                (identity_key, source_kind, source_url, cache_digest, content_type,
-                 first_seen_at, last_seen_at, last_success_at, failure_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-            ON CONFLICT(identity_key) DO UPDATE SET
-                source_kind = CASE
-                    WHEN excluded.source_kind <> '' THEN excluded.source_kind
-                    ELSE logo_registry.source_kind
-                END,
-                source_url = CASE
-                    WHEN excluded.source_url <> '' THEN excluded.source_url
-                    ELSE logo_registry.source_url
-                END,
-                cache_digest = excluded.cache_digest,
-                content_type = excluded.content_type,
-                last_seen_at = excluded.last_seen_at,
-                last_success_at = excluded.last_success_at,
-                failure_count = 0
-            """,
-            (key, source, url, digest, mime, now, now, now),
-        )
-        conn.commit()
+    try:
+        with closing(_connect(db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO logo_registry
+                    (identity_key, source_kind, source_url, cache_digest, content_type,
+                     first_seen_at, last_seen_at, last_success_at, failure_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(identity_key) DO UPDATE SET
+                    source_kind = CASE
+                        WHEN excluded.source_kind <> '' THEN excluded.source_kind
+                        ELSE logo_registry.source_kind
+                    END,
+                    source_url = CASE
+                        WHEN excluded.source_url <> '' THEN excluded.source_url
+                        ELSE logo_registry.source_url
+                    END,
+                    cache_digest = excluded.cache_digest,
+                    content_type = excluded.content_type,
+                    last_seen_at = excluded.last_seen_at,
+                    last_success_at = excluded.last_success_at,
+                    failure_count = 0
+                """,
+                (key, source, url, digest, mime, now, now, now),
+            )
+            conn.commit()
+    except sqlite3.Error as exc:
+        # The bytes have already been fetched/cached when this is called. Do not
+        # turn successful image retrieval into a placeholder because optional
+        # registry bookkeeping hit a transient SQLite error.
+        _LOG.warning("Logo registry success write failed for %s: %s", key, exc)
 
 
 def record_failure(
