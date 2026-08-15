@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 30
     env:
       M3U_DISABLE_SCHEDULER: "true"
-      M3U_DATA_DIR: ${{ runner.temp }}/m3u-picker-test-data
+      M3U_DATA_DIR: /tmp/m3u-picker-test-data
       PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out branch
