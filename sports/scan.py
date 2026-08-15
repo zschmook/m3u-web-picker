@@ -310,12 +310,13 @@ def _build_generated_channels(ctx: ScanContext) -> None:
                 ctx.team_catalog,
             )
             source_channel_key = str(channel.get("url", "") or "")
+            channel_key = (
+                f"sports:{event['event_key']}:{feed_type}:{source_channel_key}"
+            )
             event_start = event.get("start")
             event_end = _s._event_end(event)
             item = {
-                "channel_key": (
-                    f"sports:{event['event_key']}:{feed_type}:{source_channel_key}"
-                ),
+                "channel_key": channel_key,
                 "source_channel_key": source_channel_key,
                 "event_key": event["event_key"],
                 "league_id": classification_id,
@@ -326,7 +327,7 @@ def _build_generated_channels(ctx: ScanContext) -> None:
                 "group_title": group_title,
                 "url": source_channel_key,
                 "playback_url": _s.generated_stream_path(assigned),
-                "tvg_id": _s._generated_tvg_id(assigned),
+                "tvg_id": _s._generated_tvg_id(channel_key),
                 "source_tvg_id": str(channel.get("tvg_id", "") or ""),
                 "tvg_logo": logo,
                 "event_title": event.get("display_name", ""),
@@ -574,7 +575,7 @@ def scan_channels(
         message=message,
         event_count=len(ctx.selected_events),
         channel_count=len(ctx.generated),
-        target_date=target_date,
+        target_date=ctx.target_date,
         trigger=trigger,
     )
     return _result_payload(ctx, message, malformed_count)
