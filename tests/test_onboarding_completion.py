@@ -31,3 +31,8 @@ def test_completion_queues_exactly_one_initial_refresh(tmp_path: Path):
 
     # A reload of the main screen must not launch a second full update.
     assert onboarding.claim_initial_refresh(db_path, provider_configured=True) is False
+
+    # Repeating the completion request also must not resurrect the one-shot.
+    repeated = onboarding.mark_complete(db_path, provider_configured=True)
+    assert repeated["answers"]["initial_refresh_pending"] is False
+    assert onboarding.claim_initial_refresh(db_path, provider_configured=True) is False
