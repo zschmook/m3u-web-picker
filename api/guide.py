@@ -9,6 +9,7 @@ from guide_epg import enrich_guide_channels
 from media import browser, hls
 from settings import load_settings
 from playback import roku
+from sports.generated import generated_publish_lock
 from .http import json_error, no_cache
 
 
@@ -76,13 +77,17 @@ def register_guide_routes(app):
 
     @app.get("/api/guide/channels")
     def api_guide_channels():
-        items = core.curated_channels_for_guide()
-        sports_settings = sports.get_settings(core.DB_PATH)
-        items, epg_status = enrich_guide_channels(
-            items,
-            core.COMBINED_EPG_PATH,
-            timezone_name=str(sports_settings.get("timezone", "America/New_York")),
-        )
+        # Generated sports rows and their XMLTV files publish together under this
+        # lock. Hold it through enrichment so one response cannot pair an old
+        # channel/logo row with programmes from the newly published guide.
+        with generated_publish_lock:
+            items = core.curated_channels_for_guide()
+            sports_settings = sports.get_settings(core.DB_PATH)
+            items, epg_status = enrich_guide_channels(
+                items,
+                core.COMBINED_EPG_PATH,
+                timezone_name=str(sports_settings.get("timezone", "America/New_York")),
+            )
         response = jsonify(count=len(items), channels=items, epg=epg_status)
         return no_cache(response)
 
