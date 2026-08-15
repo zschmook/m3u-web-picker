@@ -17,14 +17,6 @@
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
-  function markDevBuild() {
-    const badge = document.querySelector(".app-brand-block .badge");
-    if (badge && !/\bdev\b/i.test(badge.textContent || "")) {
-      badge.textContent = `${String(badge.textContent || "v30-experiments").trim()}-dev`;
-    }
-    document.title = document.title.includes("DEV") ? document.title : `${document.title} DEV`;
-  }
-
   async function api(path, options = {}) {
     const response = await fetch(path, options);
     let data = {};
@@ -80,8 +72,8 @@
       <div class="dev-onboarding-shell" role="dialog" aria-modal="true" aria-labelledby="devOnboardingTitle">
         <div class="dev-onboarding-header">
           <div>
-            <div class="dev-onboarding-kicker">Experimental first-run setup</div>
-            <div class="dev-onboarding-title" id="devOnboardingTitle">M3U Web Picker -dev</div>
+            <div class="dev-onboarding-kicker">First-run setup</div>
+            <div class="dev-onboarding-title" id="devOnboardingTitle">M3U Web Picker</div>
           </div>
           <div class="dev-onboarding-step-count" id="devOnboardingStepCount"></div>
         </div>
@@ -417,7 +409,7 @@
   }
 
   async function chooseJellyfin(usingJellyfin) {
-    setBusy(true, usingJellyfin ? "Enabling experimental Jellyfin integration setup…" : "Leaving Jellyfin integration disabled…");
+    setBusy(true, usingJellyfin ? "Configuring Jellyfin integration…" : "Leaving Jellyfin integration disabled…");
     try {
       const data = await api("/api/jellyfin-cache", {
         method: "PATCH",
@@ -446,7 +438,7 @@
     const sportsEnabled = Boolean(ctx.payload?.sports?.settings?.enabled);
     body().innerHTML = `
       <h2>Are You Using Jellyfin?</h2>
-      <div class="dev-onboarding-help">The experimental integration can clear Jellyfin's local cache only after a successful Picker update. It is completely optional.</div>
+      <div class="dev-onboarding-help">The optional cache integration can clear Jellyfin's local cache only after a successful Picker update. It is completely optional.</div>
       <div class="dev-onboarding-choice-row">
         <button class="dev-onboarding-choice" id="devJellyfinYes" type="button">
           <strong>Yes, I use Jellyfin</strong>
@@ -476,7 +468,7 @@
     const savedPath = jellyfin.host_path || runtime.configured_host_path || "";
     body().innerHTML = `
       <h2>Jellyfin Cache Directory</h2>
-      <div class="dev-onboarding-help">Paste the local Jellyfin cache directory. The dev container must be started with that same host path mounted through <code>M3U_JELLYFIN_CACHE_DIR</code>.</div>
+      <div class="dev-onboarding-help">Paste the local Jellyfin cache directory. The M3U Web Picker container must be started with that same host path mounted through <code>M3U_JELLYFIN_CACHE_DIR</code>.</div>
       <div class="dev-onboarding-grid">
         <div class="dev-onboarding-field wide">
           <label for="devJellyfinCachePath">Local Jellyfin cache directory</label>
@@ -494,7 +486,7 @@
       </label>
       <div class="dev-onboarding-summary">
         <strong>Container mount:</strong> ${runtime.mount_configured ? "configured" : "not configured yet"}<br>
-        <span class="dev-onboarding-muted">If validation says the mount is missing, restart the dev container with the pasted path:</span>
+        <span class="dev-onboarding-muted">If validation says the mount is missing, restart the container with the pasted path:</span>
         <code class="dev-onboarding-code" id="devJellyfinMountCommand">${esc(mountCommand(savedPath))}</code>
       </div>
       ${actions(true, "Validate, Enable & Finish")}
@@ -577,10 +569,10 @@
   }
 
   async function start() {
-    markDevBuild();
     try {
       ctx.payload = await api("/api/onboarding");
-      if (!ctx.payload.dev_enabled || !ctx.payload.state?.required || ctx.payload.state?.completed) {
+      const enabled = ctx.payload.enabled ?? ctx.payload.dev_enabled;
+      if (!enabled || !ctx.payload.state?.required || ctx.payload.state?.completed) {
         document.documentElement.classList.remove("onboarding-pending", "onboarding-active");
         return;
       }
@@ -588,7 +580,7 @@
       await render();
     } catch (error) {
       document.documentElement.classList.remove("onboarding-pending", "onboarding-active");
-      console.error("Dev onboarding failed to initialize:", error);
+      console.error("Onboarding failed to initialize:", error);
     }
   }
 
