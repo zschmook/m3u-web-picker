@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from flask import jsonify, request
 
 import core
@@ -37,6 +39,15 @@ def _payload() -> dict:
     }
 
 
+def _run_initial_refresh() -> None:
+    try:
+        core.run_master_update(trigger="onboarding")
+    except Exception as exc:
+        # The one-shot handoff is best-effort. Normal Update Status/reporting
+        # records the failure and the user can run Update Now again from the UI.
+        print(f"Initial post-onboarding Master Update failed: {exc}")
+
+
 def register_onboarding_routes(app):
     @app.get("/api/onboarding")
     def api_onboarding():
@@ -65,6 +76,37 @@ def register_onboarding_routes(app):
             provider_configured=True,
         )
         return jsonify(state=state, complete=True)
+
+    @app.post("/api/onboarding/initial-refresh")
+    def api_onboarding_initial_refresh():
+        if not onboarding.dev_onboarding_enabled():
+            return jsonify(error="Initial onboarding refresh is available only in -dev."), 404
+        if not _provider_configured():
+            return jsonify(error="Primary provider is not configured."), 409
+
+        # If something is already updating, that work satisfies the first-load
+        # requirement; claim the flag so a second full refresh is not stacked on
+        # top of it.
+        if core.master_update_payload().get("running"):
+            claimed = onboarding.claim_initial_refresh(
+                core.DB_PATH,
+                provider_configured=True,
+            )
+            return jsonify(started=False, already_running=True, claimed=claimed), 202
+
+        claimed = onboarding.claim_initial_refresh(
+            core.DB_PATH,
+            provider_configured=True,
+        )
+        if not claimed:
+            return jsonify(started=False, pending=False), 200
+
+        threading.Thread(
+            target=_run_initial_refresh,
+            daemon=True,
+            name="m3u-onboarding-initial-refresh",
+        ).start()
+        return jsonify(started=True, pending=False), 202
 
     @app.get("/api/jellyfin-cache")
     def api_jellyfin_cache():
