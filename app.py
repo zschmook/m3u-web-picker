@@ -4,7 +4,9 @@ import atexit
 import os
 from flask import Flask, render_template, send_from_directory
 
+import core
 import hdhr_config
+import onboarding
 from api import register_routes
 from api.hdhr_discovery import start_hdhr_discovery, stop_hdhr_discovery
 from core import DEV_PORT, PORT
@@ -14,11 +16,29 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
 
+def _dev_onboarding_required() -> bool:
+    try:
+        return onboarding.setup_required(
+            core.DB_PATH,
+            provider_configured=bool(core.primary_provider_source() or core.source_mode == "file"),
+        )
+    except Exception as exc:
+        print(f"Could not determine dev onboarding state: {exc}")
+        return False
+
+
 @app.get("/")
 def index():
     html = render_template("index.html")
+    if _dev_onboarding_required():
+        html = html.replace(
+            '<html lang="en">',
+            '<html lang="en" class="onboarding-pending">',
+            1,
+        )
     html = html.replace(
         "</head>",
+        '<style>html.onboarding-pending body{visibility:hidden}</style>\n'
         '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-9">\n'
@@ -28,7 +48,8 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n</head>',
+        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n'
+        '<link rel="stylesheet" href="/static/css/onboarding_dev.css?v=dev-onboarding-1">\n</head>',
     )
     return html.replace(
         "</body>",
@@ -45,7 +66,8 @@ def index():
         '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'
         '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
         '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
-        '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n</body>',
+        '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
+        '<script src="/static/js/onboarding_dev.js?v=dev-onboarding-1"></script>\n</body>',
     )
 
 
