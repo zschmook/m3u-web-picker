@@ -8,10 +8,12 @@ import onboarding
 import sports
 
 
-# Install the post-success Jellyfin cleanup before ui_status installs the master
-# update reporting wrapper. That lets cache cleanup warnings flow into the same
-# update result/report without rolling back a successful Picker publish.
-jellyfin_cache.install(core)
+# Install the post-success Jellyfin cleanup only for the experimental -dev
+# runtime, and do it before ui_status installs the master-update reporting
+# wrapper. That keeps normal imports/tests behavior unchanged while allowing
+# cache-cleanup warnings to flow into the same update report in -dev.
+if onboarding.dev_onboarding_enabled():
+    jellyfin_cache.install(core)
 
 
 def _provider_configured() -> bool:
