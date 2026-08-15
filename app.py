@@ -18,13 +18,7 @@ app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
 @app.after_request
 def disable_runtime_document_cache(response):
-    """Never let navigation/status pages resurrect stale update state.
-
-    Versioned static assets remain normally cacheable. The application shell,
-    guide document, and live Master Update status endpoints are intentionally
-    revalidated on every navigation/request so Chrome cannot restore an old UI
-    snapshot while an update is still running.
-    """
+    """Never let navigation/status pages resurrect stale update state."""
     path = request.path
     if (
         path in {"/", "/guide", "/api/ui/status", "/api/master-update"}
@@ -36,21 +30,21 @@ def disable_runtime_document_cache(response):
     return response
 
 
-def _dev_onboarding_required() -> bool:
+def _onboarding_required() -> bool:
     try:
         return onboarding.setup_required(
             core.DB_PATH,
             provider_configured=bool(core.primary_provider_source() or core.source_mode == "file"),
         )
     except Exception as exc:
-        print(f"Could not determine dev onboarding state: {exc}")
+        print(f"Could not determine onboarding state: {exc}")
         return False
 
 
 @app.get("/")
 def index():
     html = render_template("index.html")
-    if _dev_onboarding_required():
+    if _onboarding_required():
         html = html.replace(
             '<html lang="en">',
             '<html lang="en" class="onboarding-pending">',
@@ -70,7 +64,7 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n'
         '<link rel="stylesheet" href="/static/css/update_lifecycle.css?v=update-lifecycle-1">\n'
-        '<link rel="stylesheet" href="/static/css/onboarding_dev.css?v=dev-onboarding-1">\n</head>',
+        '<link rel="stylesheet" href="/static/css/onboarding.css?v=onboarding-1">\n</head>',
     )
     return html.replace(
         "</body>",
@@ -80,7 +74,7 @@ def index():
         '<script src="/static/js/ui_sections.js?v=ui-refactor-9"></script>\n'
         '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
         '<script src="/static/js/ui_top_controls.js?v=ui-top-controls-10"></script>\n'
-        '<script src="/static/js/ui_brand_meta.js?v=ui-refactor-9"></script>\n'
+        '<script src="/static/js/ui_brand_meta.js?v=v30-brand-1"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
@@ -89,10 +83,10 @@ def index():
         '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
         '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
         '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
-        '<script src="/static/js/onboarding_dev.js?v=dev-onboarding-1"></script>\n'
-        '<script src="/static/js/onboarding_dev_enhancements.js?v=dev-onboarding-2"></script>\n'
-        '<script src="/static/js/onboarding_provider_validation_v2.js?v=dev-onboarding-4"></script>\n'
-        '<script src="/static/js/onboarding_manual_channels.js?v=dev-onboarding-5"></script>\n</body>',
+        '<script src="/static/js/onboarding.js?v=onboarding-1"></script>\n'
+        '<script src="/static/js/onboarding_enhancements.js?v=onboarding-2"></script>\n'
+        '<script src="/static/js/onboarding_provider_validation_v2.js?v=onboarding-4"></script>\n'
+        '<script src="/static/js/onboarding_manual_channels.js?v=onboarding-5"></script>\n</body>',
     )
 
 
@@ -130,8 +124,8 @@ def guide():
 def user_guide():
     return send_from_directory(
         app.root_path,
-        "M3U-Web-Picker-v22.1-RC5-User-Guide.pdf",
-        mimetype="application/pdf",
+        "USER-GUIDE.md",
+        mimetype="text/plain",
         as_attachment=False,
     )
 

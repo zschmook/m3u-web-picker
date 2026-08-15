@@ -1,173 +1,110 @@
 # M3U Web Picker
 
-M3U Web Picker is a self-hosted Flask application for curating IPTV channels, generating clean M3U/XMLTV outputs, automating temporary sports channels, and serving the result to clients such as Jellyfin, Plex, VLC, Roku, Chromecast/Google TV, and HDHomeRun-compatible software.
+M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current `main` branch is the v30 UI and device stack.
-
-## Highlights
-
-- Modern sidebar UI with dedicated Overview, Providers, Channels, EPG, Sports Automation, and Devices pages.
-- Theme support: Midnight, Slate, OLED Black, Carbon, Light, Ice, Terminal Amber, Terminal Green, Cornfield, and Ketchup & Mustard.
-- One primary IPTV provider plus optional fallback providers for Sports Automation.
-- Direct M3U and Xtream provider support.
-- Manual channel curation, search, filtering, numbering, and drag-and-drop ordering.
-- Generated sports channels with separate numbering and lifecycle cleanup.
-- Combined served M3U and XMLTV outputs.
-- Optional API-SPORTS schedule data for MLB, NFL, and NCAA football.
-- Free public-country EPG fallback sources.
-- Built-in TV Guide with Now/Next programme data and an eight-hour timeline.
-- Browser playback through the local HLS relay.
-- Chromecast / Google Cast handoff.
-- Persistent multi-Roku discovery, saved Roku identities, and independent Roku playback sessions.
-- Virtual HDHomeRun discovery and lineup support.
-- Application-wide automatic update scheduling plus manual Update Now.
+The current main line is **v30** and is intended to run in Docker on Windows, macOS, or Linux.
 
 ## Quick start
 
-```bash
-docker compose up -d --build --force-recreate
-```
-
-Open:
-
-```text
-http://localhost:9999
-```
-
-The production Compose stack runs the application with Waitress on container port 9999. Host port 80 is also exposed for HDHomeRun/Jellyfin bare-IP discovery compatibility.
-
-To stop it:
+Docker is the only runtime requirement for the normal install path.
 
 ```bash
-docker compose down
+git clone https://github.com/zschmook/m3u-web-picker.git
+cd m3u-web-picker
+docker compose up -d --build
 ```
 
-Runtime state is stored in the persistent Docker volume `m3u-picker-data`. `docker compose down` keeps that volume. Only an explicit volume-removal command such as `docker compose down -v` removes it.
+Open `http://localhost:9999`.
+
+A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
+
+## First-run setup
+
+The setup flow can configure:
+
+- a primary M3U or Xtream provider;
+- manual channels to keep in the curated lineup;
+- Sports Automation and team/league rules;
+- optional API-SPORTS schedule support for supported leagues;
+- the automatic Master Update schedule;
+- optional Jellyfin cache cleanup.
+
+Provider credentials and application state are stored in the persistent Docker data volume, not in the repository.
 
 ## Main outputs
 
-The two normal client-facing endpoints are:
+The two normal client-facing outputs are:
 
-```text
-http://YOUR-SERVER-IP:9999/playlist/channels.m3u
-http://YOUR-SERVER-IP:9999/epg/epg.xml
-```
+- M3U: `/playlist/channels.m3u`
+- Combined XMLTV: `/epg/epg.xml`
 
-`channels.m3u` contains the curated manual lineup plus generated Sports Automation channels. `epg.xml` contains guide data only for channels that are actually being served.
-
-Older output routes remain compatibility aliases where supported, but new client configuration should use the endpoints above.
-
-## Providers
-
-M3U Web Picker uses one primary provider as the normal channel catalog. The primary may be loaded from a direct M3U URL or from Xtream credentials.
-
-Fallback providers are optional and are used by Sports Automation when a suitable feed is not available from the primary. They do not replace the primary Channel Manager catalog.
-
-For Xtream providers, the UI can display account state and expiration metadata when the provider reports it. Credentials remain server-side and are stored in the local runtime configuration, so protect the data directory accordingly.
-
-## Channels
-
-Manual/static channels and generated sports channels are intentionally separate namespaces.
-
-- Saved manual channels remain exactly as selected and ordered.
-- Manual channels can be reordered by drag and drop from **Manage Order** before saving the new order.
-- Sports Automation never removes or replaces a saved manual channel because the stream happens to match.
-- A generated sports channel is also allowed to coexist with a manual channel using the same underlying provider stream.
-- Manual channels are ordered before generated sports channels.
-- Generated sports channel numbers can use large values; the TV Guide keeps the number column separate from station logos and names.
-
-## EPG
-
-Provider guide data is preferred. User-configured guide sources and enabled free public-country guides can fill uncovered gaps without replacing higher-priority programmes that overlap the same time window.
-
-The public-country guide selector is available from the EPG page. United States is enabled on a fresh configuration and additional countries can be enabled as needed.
+Sports-only output and additional diagnostic/status endpoints are also exposed by the application.
 
 ## Sports Automation
 
-Sports Automation creates temporary event channels from saved rules and removes them when they are no longer relevant.
+Sports Automation scans provider channels and XMLTV data, matches configured teams/leagues, and publishes temporary event channels. Optional API-SPORTS schedule data can provide canonical schedules for MLB, NFL, and NCAA Football selections.
 
-Important behavior:
+Manual channels and generated sports channels are separate namespaces. A generated sports feed must not remove or replace a saved manual channel even when both point to the same underlying stream.
 
-- Broad league/conference rules normally choose one best feed per game.
-- Explicit team rules can expand the game into the requested home, away, national, or event feeds.
-- Team + league overlap resolves to one logical event instead of duplicate channel blocks.
-- Replays/classic games can be included or excluded.
-- Replay airings reuse the same logical event/channel identity when enabled.
-- Generated channels use a 90-minute postgame grace period before lifecycle cleanup.
-- Clear filler rows such as `No Event Today`, `No Game Today`, and `Signing Off` are ignored.
+Sports channel numbers are organized into stable league blocks. Generated channel identity is independent of the reusable numeric slot so guide clients do not confuse a new event with an older event that previously occupied the same number.
 
-API-SPORTS schedule integration is optional. When configured, the application can use canonical MLB, NFL, and NCAA football schedule data while retaining provider/XMLTV matching as the fallback path.
+## TV Guide and devices
 
-## Automatic updates
+The built-in TV Guide uses the curated lineup and Combined XMLTV output. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 
-Overview contains the application-wide update schedule and status.
+For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. On macOS, `scripts/detect-lan-host.sh` prints the address on the default route.
 
-A master update refreshes the required schedule/provider/guide data, rebuilds generated sports channels, publishes M3U/XMLTV outputs, and records the result. Manual **Update Now** runs the same pipeline without changing the next scheduled run.
+## Jellyfin cache integration
 
-The sidebar status card shows provider state, channel counts, HDHomeRun state, saved Roku count, active streams, last update, next update, and the most recent update result.
+Jellyfin cache cleanup is optional and experimental. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
 
-## TV Guide
+The cache directory must be explicitly mounted into the container with `M3U_JELLYFIN_CACHE_DIR`. The wizard requires an acknowledgement before enabling deletion because clearing Jellyfin cache data may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
 
-Open **TV Guide** from the sidebar.
+## Persistent data and backups
 
-The standalone guide uses the same saved application theme and includes:
+The normal Compose project is `m3u-picker` and stores application state in the `m3u-picker-data` Docker volume. `docker compose down` preserves the volume. `docker compose down -v` deletes it.
 
-- Search across channel and programme data.
-- Current-time marker and programme timeline.
-- Direct browser Play/Stop.
-- Cast and Roku handoff for the current channel.
-- Multi-Roku selection when more than one saved/discovered Roku is available.
-- Back navigation to the app.
+Backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
 
-Provider stream URLs and credentials are not exposed in the guide payload.
+## Clean first-run testing
 
-## Roku and Cast
+An isolated development Compose file is kept specifically for testing the setup wizard without touching the normal instance:
 
-Roku playback uses the M3U Web Picker Roku receiver and the local ffmpeg-backed HLS relay. Saved Roku devices use stable Roku identity rather than IP address as identity, so a DHCP address change can be reconciled during discovery.
+```bash
+docker compose -f docker-compose.dev.yml down -v
+docker compose -f docker-compose.dev.yml up -d --build
+```
 
-Each Roku has an independent playback session. Starting playback on Roku B does not stop Roku A.
-
-Google Cast uses the same current-channel handoff model: select/play a channel first, then choose the remote receiver.
-
-See [`CASTING.md`](CASTING.md) for device-specific details.
-
-## HDHomeRun
-
-The Devices page includes the virtual HDHomeRun controls and status. The application provides HDHomeRun-style discovery, device metadata, lineup data, and tuner configuration for compatible clients.
-
-See [`PLEX-HDHR.md`](PLEX-HDHR.md) for additional integration notes.
+That stack uses host port `9998` and a separate `m3u-picker-dev-data` volume. Using `-v` is intentional for this isolated wizard test because the point is to start from a genuinely blank database.
 
 ## Updating
 
+For a normal source checkout:
+
 ```bash
-git switch main
 git pull --ff-only origin main
-docker compose down
-docker compose up -d --build --force-recreate
+docker compose up -d --build
 ```
 
-Persistent state is not removed by those commands.
+Do not remove the data volume during a normal update.
 
 ## Tests
 
-The repository includes regression tests for the application API, sports matching/lifecycle behavior, multi-Roku handling, update reporting, and the v30 UI contract.
-
-Run the test suite with:
+The repository uses Python `unittest` tests and JavaScript syntax checks can be run with Node when available:
 
 ```bash
-pytest
+python -m unittest discover -s tests
+python -m compileall -q .
+find static -name '*.js' -print0 | xargs -0 -n1 node --check
 ```
 
-## Project structure
+## Current known cleanup items
 
-- `app.py` - Flask application entry point and UI routes.
-- `api/` - application/device/output API routes.
-- `sports/` - sports rules, matching, schedule integration, and generated-channel logic.
-- `static/` - application, TV Guide, theme, and device UI assets.
-- `templates/` - Flask templates.
-- `roku-receiver/` - Roku receiver application.
-- `tests/` - regression tests.
+Two non-blocking issues are still being tracked:
 
-## Notes
+- update-state indicators can visibly finish a fraction of a cycle apart because the sidebar/status layer and Master Update lifecycle layer still have overlapping rendering responsibilities;
+- provider events that lose a recognized league classification can fall into generic `football`/`sports` numbering blocks, producing very high sports channel numbers and occasional duplicate event rows.
 
-This project is intended for streams and guide data that you are authorized to access. M3U Web Picker does not provide IPTV service, provider credentials, or channel subscriptions.
+Both are functional cleanup items rather than data-loss problems.
+
+See `USER-GUIDE.md` for the operator-oriented setup and troubleshooting notes.

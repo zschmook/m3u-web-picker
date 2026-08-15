@@ -1,14 +1,10 @@
-# Normal long-running M3U Web Picker instance.
+# Isolated clean-install / setup-wizard test stack.
 #
-# Runtime state lives in the persistent m3u-picker-data Docker volume at
-# /app/data. `docker compose down` keeps that volume; only `down -v` removes it.
-# A genuinely fresh volume launches the first-run setup wizard.
-#
-# M3U_BACKUP_DIR controls the host directory mapped to /backups.
-# M3U_JELLYFIN_CACHE_DIR optionally maps a Jellyfin cache directory for the
-# experimental post-update cache cleanup integration.
+# This project intentionally uses host port 9998 and a separate disposable data
+# volume so it can coexist with the normal m3u-picker stack. Use `down -v` when
+# testing first-run behavior so the wizard sees a genuinely blank database.
 
-name: m3u-picker
+name: m3u-picker-dev
 
 services:
   m3u-picker:
@@ -16,13 +12,10 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    container_name: m3u-picker
+    container_name: m3u-picker-dev
 
     ports:
-      - "${M3U_HOST_PORT:-9999}:9999"
-      # Some HDHomeRun/Jellyfin discovery flows follow UDP discovery with a
-      # bare-IP HTTP request, so expose the same app on host port 80 as well.
-      - "0.0.0.0:80:9999"
+      - "${M3U_DEV_HOST_PORT:-9998}:9999"
 
     environment:
       PYTHONUNBUFFERED: "1"
@@ -30,7 +23,7 @@ services:
       M3U_BACKUP_ENABLED: "true"
       M3U_DATA_DIR: /app/data
       M3U_LAN_HOST: "${M3U_LAN_HOST:-}"
-      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-9999}"
+      M3U_EXTERNAL_PORT: "${M3U_DEV_EXTERNAL_PORT:-9998}"
       M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
       M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
       M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
@@ -47,16 +40,16 @@ services:
 
     volumes:
       - type: bind
-        source: "${M3U_BACKUP_DIR:-./backups}"
+        source: "${M3U_DEV_BACKUP_DIR:-./data/backups-dev}"
         target: /backups
       - type: bind
         source: "${M3U_JELLYFIN_CACHE_DIR:-./data/jellyfin-cache-disabled}"
         target: /jellyfin-cache
       - type: volume
-        source: m3u-picker-data
+        source: m3u-picker-dev-data
         target: /app/data
 
     restart: unless-stopped
 
 volumes:
-  m3u-picker-data:
+  m3u-picker-dev-data:

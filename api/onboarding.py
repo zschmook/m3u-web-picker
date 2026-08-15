@@ -9,11 +9,10 @@ import onboarding
 import sports
 
 
-# Install the post-success Jellyfin cleanup only for the experimental -dev
-# runtime, and do it before ui_status installs the master-update reporting
-# wrapper. That keeps normal imports/tests behavior unchanged while allowing
-# cache-cleanup warnings to flow into the same update report in -dev.
-if onboarding.dev_onboarding_enabled():
+# Install the post-success Jellyfin cleanup wrapper before ui_status installs
+# the Master Update reporting wrapper. Cleanup warnings then flow into the same
+# final update report without changing normal update execution order.
+if onboarding.onboarding_enabled():
     jellyfin_cache.install(core)
 
 
@@ -22,8 +21,12 @@ def _provider_configured() -> bool:
 
 
 def _payload() -> dict:
+    enabled = onboarding.onboarding_enabled()
     return {
-        "dev_enabled": onboarding.dev_onboarding_enabled(),
+        "enabled": enabled,
+        # Compatibility for the first wizard implementation. New UI code should
+        # prefer `enabled`; older cached clients can continue to read this key.
+        "dev_enabled": enabled,
         "state": onboarding.get_state(
             core.DB_PATH,
             provider_configured=_provider_configured(),
@@ -69,8 +72,8 @@ def register_onboarding_routes(app):
 
     @app.post("/api/onboarding/initial-refresh")
     def api_onboarding_initial_refresh():
-        if not onboarding.dev_onboarding_enabled():
-            return jsonify(error="Initial onboarding refresh is available only in -dev."), 404
+        if not onboarding.onboarding_enabled():
+            return jsonify(error="Initial onboarding refresh is not enabled."), 404
         if not _provider_configured():
             return jsonify(error="Primary provider is not configured."), 409
 

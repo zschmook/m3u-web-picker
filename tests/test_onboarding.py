@@ -9,11 +9,11 @@ from unittest.mock import patch
 import onboarding
 
 
-class DevOnboardingTests(unittest.TestCase):
-    def test_fresh_dev_database_requires_onboarding_and_progress_persists(self):
+class OnboardingTests(unittest.TestCase):
+    def test_fresh_database_requires_onboarding_and_progress_persists(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
-            {"M3U_DEV_ONBOARDING": "true"},
+            {"M3U_ONBOARDING_ENABLED": "true", "M3U_DEV_ONBOARDING": ""},
             clear=False,
         ):
             db_path = Path(temp_dir) / "picker.db"
@@ -52,17 +52,17 @@ class DevOnboardingTests(unittest.TestCase):
     def test_existing_provider_does_not_start_first_run_wizard(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
-            {"M3U_DEV_ONBOARDING": "true"},
+            {"M3U_ONBOARDING_ENABLED": "true", "M3U_DEV_ONBOARDING": ""},
             clear=False,
         ):
             db_path = Path(temp_dir) / "picker.db"
             state = onboarding.get_state(db_path, provider_configured=True)
             self.assertFalse(state["required"])
 
-    def test_non_dev_runtime_never_requires_dev_onboarding(self):
+    def test_disabled_runtime_never_requires_onboarding(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
-            {"M3U_DEV_ONBOARDING": "false"},
+            {"M3U_ONBOARDING_ENABLED": "false", "M3U_DEV_ONBOARDING": "true"},
             clear=False,
         ):
             db_path = Path(temp_dir) / "picker.db"
@@ -74,6 +74,16 @@ class DevOnboardingTests(unittest.TestCase):
                     provider_configured=False,
                 )
             )
+
+    def test_legacy_dev_flag_remains_supported(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"M3U_DEV_ONBOARDING": "true"},
+            clear=True,
+        ):
+            db_path = Path(temp_dir) / "picker.db"
+            self.assertTrue(onboarding.onboarding_enabled())
+            self.assertTrue(onboarding.get_state(db_path, provider_configured=False)["required"])
 
 
 if __name__ == "__main__":

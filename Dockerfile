@@ -1,6 +1,6 @@
 # M3U Web Picker runs as a Linux container on Docker Desktop (macOS/Windows)
-# and Docker Engine (Linux). The application always listens on port 9999 in
-# production; Compose decides which host port maps to it.
+# and Docker Engine (Linux). The application listens on port 9999 in the
+# container; Compose controls the host-facing port.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,9 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Experimental browser playback uses ffmpeg to normalize whatever the IPTV
-# provider serves into fragmented MP4 (H.264/AAC) that normal web browsers can
-# decode. Keep it inside the container so the host does not need ffmpeg.
+# Browser/Roku/Cast playback uses ffmpeg to normalize provider media when a
+# client cannot consume the source format directly. Keep ffmpeg in the image so
+# the host does not need its own installation.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
@@ -22,13 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
-# /backups is the fixed path inside the container. docker-compose.yml maps a
-# user-selected host directory to it. The live SQLite DB remains in /app.
-RUN mkdir -p /app/exports /app/data /app/debug-data /backups
+RUN mkdir -p /app/exports /app/data /backups
 
-EXPOSE 9999 9998
+EXPOSE 9999
 
 # Master Updates run on their own application worker thread, so Waitress request
 # threads remain dedicated to navigation, static assets, and live status calls.
-# Keep extra request capacity for browsers/TV clients polling concurrently.
 CMD ["waitress-serve", "--threads=8", "--host=0.0.0.0", "--port=9999", "app:app"]

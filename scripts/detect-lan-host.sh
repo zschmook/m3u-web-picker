@@ -1,9 +1,8 @@
 #!/bin/sh
 set -eu
 
-# macOS helper for v30-experiments. It reports the IPv4 address on the
-# interface carrying the default route. This is the address LAN clients use
-# to reach the experimental service on port 10000.
+# macOS helper: print the IPv4 address on the interface carrying the default
+# route. Use this value for M3U_LAN_HOST when LAN clients need to reach Picker.
 iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
 if [ -z "${iface:-}" ]; then
   iface="en0"

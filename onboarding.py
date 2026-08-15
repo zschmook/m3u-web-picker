@@ -23,13 +23,26 @@ CREATE TABLE IF NOT EXISTS app_onboarding (
 """
 
 
+def _enabled_value(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def onboarding_enabled() -> bool:
+    """Return whether first-run onboarding is enabled for this runtime.
+
+    M3U_ONBOARDING_ENABLED is the current public setting. M3U_DEV_ONBOARDING is
+    retained as a compatibility fallback so existing dev/test deployments do
+    not suddenly lose their setup flow.
+    """
+    value = os.environ.get("M3U_ONBOARDING_ENABLED")
+    if value is None:
+        value = os.environ.get("M3U_DEV_ONBOARDING", "")
+    return _enabled_value(value)
+
+
 def dev_onboarding_enabled() -> bool:
-    return str(os.environ.get("M3U_DEV_ONBOARDING", "")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    """Backward-compatible alias for older imports/tests."""
+    return onboarding_enabled()
 
 
 def _connect(db_path: Path | str) -> sqlite3.Connection:
@@ -66,8 +79,8 @@ def _looks_like_fresh_install(
     if provider_configured:
         return False
     # Schema/catalog rows and background update history are not user setup.
-    # A dev install remains "fresh" until the user has configured a provider,
-    # saved manual channels, or added sports rules.
+    # An install remains fresh until the user has configured a provider, saved
+    # manual channels, or added sports rules.
     return (
         _safe_count(conn, "selections") == 0
         and _safe_count(conn, "sports_rules") == 0
@@ -85,7 +98,7 @@ def _ensure_state(
             return
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         required = bool(
-            dev_onboarding_enabled()
+            onboarding_enabled()
             and _looks_like_fresh_install(
                 conn,
                 provider_configured=provider_configured,
@@ -142,7 +155,7 @@ def setup_required(
 ) -> bool:
     state = get_state(db_path, provider_configured=provider_configured)
     return bool(
-        dev_onboarding_enabled()
+        onboarding_enabled()
         and state.get("required")
         and not state.get("completed")
     )
