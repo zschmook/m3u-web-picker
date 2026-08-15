@@ -4,7 +4,6 @@ __pycache__
 .DS_Store
 *.zip
 backups/
-backups-sports-debug/
 .vscode/
 .idea/
 config.json
@@ -13,5 +12,3 @@ config.json
 *.xml
 .env
 data/
-
-debug-data/
