@@ -5,6 +5,7 @@ from flask import jsonify
 import core
 import hdhr_config
 import master_update_reports
+import master_update_worker
 import roku_devices
 import sports
 from media import hls
@@ -131,7 +132,7 @@ def _update_health() -> dict:
 
     errors = [item for item in stages if item["status"] == "error"]
     warnings = [item for item in stages if item["status"] == "warning"]
-    master = core.master_update_payload()
+    master = master_update_worker.payload()
 
     if master.get("running"):
         status = "running"
@@ -164,7 +165,7 @@ def ui_status_payload() -> dict:
     generated_count = len(sports.generated_rows(core.DB_PATH))
     saved_roku = roku_devices.list_saved(core.DB_PATH)
     report = master_update_reports.latest(core.DB_PATH)
-    master = dict(core.master_update_payload())
+    master = dict(master_update_worker.payload())
     if report:
         master["last_update"] = report.get("finished_at") or master.get("last_update")
         master["last_duration_seconds"] = report.get("duration_seconds")
@@ -213,4 +214,8 @@ def ui_status_payload() -> dict:
 def register_ui_status_routes(app):
     @app.get("/api/ui/status")
     def api_ui_status():
-        return jsonify(ui_status_payload())
+        response = jsonify(ui_status_payload())
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
