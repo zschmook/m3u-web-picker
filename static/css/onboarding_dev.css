@@ -211,9 +211,45 @@ html.onboarding-active body {
   background: #0b1220;
 }
 
-.dev-onboarding-ack input {
-  width: 2.5rem;
-  height: 1.3rem;
+.dev-onboarding-ack input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 2.7rem;
+  width: 2.7rem;
+  height: 1.45rem;
+  margin: 0;
+  border: 1px solid #64748b;
+  border-radius: 999px;
+  background: #334155;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.dev-onboarding-ack input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: #f8fafc;
+  transition: transform 120ms ease;
+}
+
+.dev-onboarding-ack input[type="checkbox"]:checked {
+  border-color: #22c55e;
+  background: #15803d;
+}
+
+.dev-onboarding-ack input[type="checkbox"]:checked::before {
+  transform: translateX(1.2rem);
+}
+
+.dev-onboarding-ack input[type="checkbox"]:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }
 
 .dev-onboarding-catalog-toolbar {
