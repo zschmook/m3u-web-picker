@@ -138,9 +138,11 @@ def register_matchup_logo(
     the shared logo cache. The composite PNG can be deleted at any time and is
     regenerated on demand from those persistent team assets.
 
-    Each team may carry a preferred and fallback upstream URL. Resolution always
-    checks the persistent identity cache first; new images then try the preferred
-    source (ESPN full/default for generated sports) before provider/Xtream.
+    Each team may carry a preferred and fallback upstream URL. Resolution first
+    checks whether the exact current preferred URL is already cached, then tries
+    that preferred source (ESPN when available), then provider/Xtream fallback.
+    An older provider cache entry therefore cannot permanently block a newly
+    resolved ESPN logo for the same stable team identity.
     """
     away_id = str(away_team_id or "").strip()
     home_id = str(home_team_id or "").strip()
@@ -282,19 +284,43 @@ def _source_candidates(team: dict, row: dict | None) -> list[tuple[str, str]]:
     return candidates
 
 
+def _registered_cache_for_current_preferred(
+    row: dict | None,
+    preferred_url: str,
+) -> tuple[bytes | None, str]:
+    if not row:
+        return None, ""
+    registered_digest = str(row.get("cache_digest") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", registered_digest):
+        return None, ""
+
+    # If there is a current preferred URL, only an identity cache entry created
+    # from that exact URL gets to short-circuit resolution. This preserves the
+    # cache-first behavior for ESPN without letting a stale provider hit outrank
+    # a newly discovered ESPN source.
+    if preferred_url:
+        _data_path, _meta_path, preferred_digest = _shared_cache_paths(preferred_url)
+        if registered_digest != preferred_digest:
+            return None, ""
+
+    cached = _cached_payload_for_digest(registered_digest)
+    if not cached:
+        return None, ""
+    return cached[0], registered_digest
+
+
 def _resolve_team_asset(team: dict) -> tuple[bytes | None, str]:
     _logo_cache, _event_dir, db_path = _paths()
     identity = logo_registry.normalize_identity(team.get("identity"))
     row = logo_registry.lookup(db_path, identity) if identity else None
+    preferred_url = _clean_http_url(team.get("source_url"))
 
-    # Stable team identity wins first, regardless of which upstream originally
-    # populated it. This is the cache-first part of cache -> ESPN -> provider.
-    if row:
-        registered_digest = str(row.get("cache_digest") or "").strip().lower()
-        if re.fullmatch(r"[0-9a-f]{64}", registered_digest):
-            cached = _cached_payload_for_digest(registered_digest)
-            if cached:
-                return cached[0], registered_digest
+    cached_payload, cached_digest = _registered_cache_for_current_preferred(
+        row,
+        preferred_url,
+    )
+    if cached_payload:
+        return cached_payload, cached_digest
 
     for source_url, source_kind in _source_candidates(team, row):
         data_path, meta_path, digest = _shared_cache_paths(source_url)
@@ -348,6 +374,19 @@ def _resolve_team_asset(team: dict) -> tuple[bytes | None, str]:
     return None, ""
 
 
+def _fallback_initials(label: str) -> str:
+    words = [
+        re.sub(r"[^A-Za-z0-9]", "", word)
+        for word in str(label or "TV").strip().split()
+    ]
+    words = [word for word in words if word]
+    if len(words) >= 2:
+        return (words[0][0] + words[-1][0]).upper()
+    if words:
+        return words[0][:2].upper()
+    return "TV"
+
+
 def _fallback_tile(label: str) -> Image.Image:
     tile = Image.new("RGBA", (TEAM_BOX_PX, TEAM_BOX_PX), (0, 0, 0, 0))
     draw = ImageDraw.Draw(tile)
@@ -359,8 +398,7 @@ def _fallback_tile(label: str) -> Image.Image:
         outline=(119, 136, 160, 210),
         width=2,
     )
-    words = str(label or "TV").strip().split()
-    text = "".join(word[0] for word in words[-2:] if word)[:2].upper() or "TV"
+    text = _fallback_initials(label)
     try:
         font = ImageFont.load_default(size=30)
     except TypeError:
