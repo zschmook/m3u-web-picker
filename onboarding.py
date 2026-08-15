@@ -40,6 +40,14 @@ def _connect(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+def _decode_answers(value) -> dict:
+    try:
+        answers = json.loads(value or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        answers = {}
+    return answers if isinstance(answers, dict) else {}
+
+
 def _safe_count(conn: sqlite3.Connection, table_name: str) -> int:
     if table_name not in {"selections", "sports_rules"}:
         return 0
@@ -116,17 +124,11 @@ def get_state(
             "current_step": 1,
             "answers": {},
         }
-    try:
-        answers = json.loads(row["answers_json"] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        answers = {}
-    if not isinstance(answers, dict):
-        answers = {}
     return {
         "required": bool(row["required"]),
         "completed": bool(row["completed"]),
         "current_step": min(7, max(1, int(row["current_step"] or 1))),
-        "answers": answers,
+        "answers": _decode_answers(row["answers_json"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "completed_at": row["completed_at"],
@@ -160,12 +162,7 @@ def update_state(
         ).fetchone()
         if not row:
             raise RuntimeError("Onboarding state could not be created.")
-        try:
-            merged = json.loads(row["answers_json"] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            merged = {}
-        if not isinstance(merged, dict):
-            merged = {}
+        merged = _decode_answers(row["answers_json"])
         if isinstance(answers, dict):
             merged.update(answers)
         step = int(row["current_step"] or 1)
@@ -192,13 +189,54 @@ def mark_complete(
     _ensure_state(db_path, provider_configured=provider_configured)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT answers_json FROM app_onboarding WHERE id = 1"
+        ).fetchone()
+        answers = _decode_answers(row["answers_json"] if row else "{}")
+        # The first normal main-screen load claims this flag and starts one
+        # background Master Update. Keeping the trigger in persisted onboarding
+        # state makes the handoff survive the wizard's final page reload.
+        answers["initial_refresh_pending"] = True
+        answers.pop("initial_refresh_claimed_at", None)
         conn.execute(
             """
             UPDATE app_onboarding
-            SET completed = 1, current_step = 7, updated_at = ?, completed_at = ?
+            SET completed = 1, current_step = 7, answers_json = ?,
+                updated_at = ?, completed_at = ?
             WHERE id = 1
             """,
-            (now, now),
+            (json.dumps(answers), now, now),
         )
         conn.commit()
     return get_state(db_path, provider_configured=provider_configured)
+
+
+def claim_initial_refresh(
+    db_path: Path | str,
+    *,
+    provider_configured: bool,
+) -> bool:
+    """Atomically claim the one-shot post-onboarding Master Update."""
+    _ensure_state(db_path, provider_configured=provider_configured)
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT completed, answers_json FROM app_onboarding WHERE id = 1"
+        ).fetchone()
+        if not row or not bool(row["completed"]):
+            return False
+        answers = _decode_answers(row["answers_json"])
+        if not bool(answers.get("initial_refresh_pending")):
+            return False
+        answers["initial_refresh_pending"] = False
+        answers["initial_refresh_claimed_at"] = now
+        conn.execute(
+            """
+            UPDATE app_onboarding
+            SET answers_json = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (json.dumps(answers), now),
+        )
+        conn.commit()
+    return True
