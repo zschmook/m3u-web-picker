@@ -6,7 +6,7 @@ The current main line is **v30** and is intended to run in Docker on Windows, ma
 
 ## Quick start
 
-Docker is the only runtime requirement for the normal install path.
+Docker is the application runtime. Git is used by the source-checkout workflow below; users without Git can download/extract the repository source and run the same Compose command from that directory.
 
 ```bash
 git clone https://github.com/zschmook/m3u-web-picker.git
