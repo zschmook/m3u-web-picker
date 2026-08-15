@@ -54,6 +54,43 @@ The built-in TV Guide uses the curated lineup and Combined XMLTV output. The Dev
 
 For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. On macOS, `scripts/detect-lan-host.sh` prints the address on the default route.
 
+## Roku receiver
+
+M3U Web Picker includes its own Roku developer receiver so channels from the built-in TV Guide can be sent directly to a Roku on the same LAN. Multiple Roku devices can be discovered and saved, and saved devices are reconciled by stable device identity when their DHCP address changes.
+
+The sideloadable receiver is included in the repository at:
+
+```text
+roku-receiver/dist/m3u-web-picker-roku-receiver.zip
+```
+
+Do **not** extract that ZIP before installing it on the Roku.
+
+To enable Roku developer mode, from the Roku home screen press:
+
+```text
+Home
+Home
+Home
+Up
+Up
+Right
+Left
+Right
+Left
+Right
+```
+
+Choose **Enable installer and restart**, accept the developer agreement, set a developer password, and let the Roku restart. If necessary, also allow local-network control under Roku's **Control by mobile apps** setting.
+
+From a computer on the same LAN, open the Roku's IP address in a browser, sign in to the Development Application Installer with username `rokudev` and the developer-mode password, choose **Install with zip**, and upload `m3u-web-picker-roku-receiver.zip`.
+
+Roku permits only one sideloaded developer application at a time, so installing this receiver replaces any other sideloaded developer channel.
+
+After installation, use the M3U Web Picker TV Guide/Devices controls to discover or save the Roku and send a channel to it. Roku playback uses the Picker's LAN HLS relay, so `M3U_LAN_HOST` must point to the Picker host's actual LAN IPv4 address.
+
+More detailed Roku troubleshooting is in `USER-GUIDE.md`.
+
 ## Jellyfin cache integration
 
 Jellyfin cache cleanup is optional and experimental. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
