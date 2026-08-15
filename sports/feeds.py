@@ -107,12 +107,12 @@ def _preferred_feed_logo(
     """Choose stable artwork for a generated feed.
 
     Every generated matchup checks ESPN for the ordinary ``full/default`` team
-    mark first, with provider/Xtream artwork retained as fallback. ESPN catalog
-    discovery and results are cached, and the event compositor checks the
-    persistent image cache before it downloads either source. Every feed for a
-    matchup uses the same local event-keyed ``Away @ Home`` composite; home,
-    away, national, Spanish, and provider feed distinctions stay in subtitle
-    metadata rather than changing the station artwork.
+    mark first, with schedule/catalog artwork retained as team-level fallback.
+    ESPN catalog discovery and results are cached, and the event compositor
+    checks the persistent image cache before it downloads either source. Every
+    feed for a matchup uses the same local event-keyed ``Away @ Home`` composite;
+    home, away, national, Spanish, and provider feed distinctions stay in
+    subtitle metadata rather than changing the station artwork.
     """
     feed_team_id = str(feed.get("team_id") or "")
     feed_type = str(feed.get("feed_type") or "event").strip().lower()
@@ -161,7 +161,11 @@ def _preferred_feed_logo(
     for logo in candidates:
         if logo:
             return logo
-    return str(channel.get("tvg_logo", "") or "")
+
+    # A provider stream/station logo is not event identity. If matchup artwork
+    # is unavailable, let the guide use its neutral fallback rather than showing
+    # an unrelated team's cached/provider mark for the current game.
+    return ""
 
 
 def _build_feeds(
