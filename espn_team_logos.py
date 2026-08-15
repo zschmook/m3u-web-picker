@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import re
 import threading
 import time
@@ -55,6 +56,7 @@ ESPN_SPORT_ALIASES: dict[str, str] = {
 }
 
 _LOCK = threading.RLock()
+_LOG = logging.getLogger(__name__)
 _MEMORY_INDEX: dict[tuple[str, str], tuple[float, dict[str, str]]] = {}
 _MEMORY_AVAILABLE_SPORTS: tuple[float, set[str]] | None = None
 _MEMORY_LEAGUES: dict[str, tuple[float, set[str]]] = {}
@@ -129,7 +131,7 @@ def _fetch_json(url: str) -> dict:
 
 
 def _full_default_logo(team: dict) -> str:
-    """Return only ESPN's ordinary full/default logo variant."""
+    """Return ESPN's ordinary non-dark, non-scoreboard full/default mark."""
     for logo in team.get("logos") or []:
         if not isinstance(logo, dict):
             continue
@@ -144,6 +146,41 @@ def _full_default_logo(team: dict) -> str:
             if url:
                 return url
     return ""
+
+
+def _first_logo(team: dict) -> str:
+    """Return ESPN logos[0], or the first later entry with a usable URL."""
+    logos = team.get("logos") or []
+    if not isinstance(logos, list):
+        return ""
+    for logo in logos:
+        if not isinstance(logo, dict):
+            continue
+        url = _clean_http_url(logo.get("href"))
+        if url:
+            return url
+    return ""
+
+
+def _preferred_logo(team: dict) -> str:
+    """Prefer full/default; if ESPN lacks it, keep ESPN ahead of provider art."""
+    return _full_default_logo(team) or _first_logo(team)
+
+
+def _team_alias_names(team: dict) -> set[str]:
+    names = {
+        str(team.get("displayName") or ""),
+        str(team.get("shortDisplayName") or ""),
+        str(team.get("abbreviation") or ""),
+        str(team.get("slug") or "").replace("-", " ").replace("_", " "),
+        str(team.get("name") or ""),
+        str(team.get("nickname") or ""),
+    }
+    location = str(team.get("location") or "").strip()
+    nickname = str(team.get("name") or team.get("nickname") or "").strip()
+    if location and nickname:
+        names.add(f"{location} {nickname}")
+    return {name.strip() for name in names if str(name).strip()}
 
 
 def _build_index(payload: dict) -> dict[str, str]:
@@ -162,22 +199,11 @@ def _build_index(payload: dict) -> dict[str, str]:
         team = entry.get("team") or {}
         if not isinstance(team, dict):
             continue
-        logo = _full_default_logo(team)
+        logo = _preferred_logo(team)
         if not logo:
             continue
 
-        names = {
-            str(team.get("displayName") or ""),
-            str(team.get("shortDisplayName") or ""),
-            str(team.get("abbreviation") or ""),
-            str(team.get("slug") or "").replace("-", " ").replace("_", " "),
-        }
-        location = str(team.get("location") or "").strip()
-        nickname = str(team.get("name") or team.get("nickname") or "").strip()
-        if location and nickname:
-            names.add(f"{location} {nickname}")
-
-        for name in names:
+        for name in _team_alias_names(team):
             key = _normalize(name)
             if not key or key in ambiguous:
                 continue
@@ -188,6 +214,64 @@ def _build_index(payload: dict) -> dict[str, str]:
             else:
                 aliases[key] = logo
     return aliases
+
+
+def _team_query_variants(team_name: object) -> list[str]:
+    raw = re.sub(r"\s+", " ", str(team_name or "")).strip()
+    if not raw:
+        return []
+    values = [raw]
+    without_parenthetical = re.sub(r"\s*\([^)]*\)\s*", " ", raw).strip()
+    if without_parenthetical and without_parenthetical != raw:
+        values.append(without_parenthetical)
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        key = _normalize(value)
+        if key and key not in seen:
+            seen.add(key)
+            output.append(key)
+    return output
+
+
+def _lookup_team_logo(index: dict[str, str], team_name: object) -> str:
+    """Resolve exact aliases first, then a cautious unique near-match."""
+    variants = _team_query_variants(team_name)
+    if not variants:
+        return ""
+
+    for key in variants:
+        direct = _clean_http_url(index.get(key, ""))
+        if direct:
+            return direct
+
+    query = variants[0]
+    if len(query) < 6:
+        return ""
+
+    # Collapse aliases that point to the same team logo before ranking so a
+    # team with many ESPN aliases does not manufacture a fake confidence gap.
+    scores_by_logo: dict[str, float] = {}
+    for alias, raw_logo in index.items():
+        logo = _clean_http_url(raw_logo)
+        if not alias or not logo:
+            continue
+        score = difflib.SequenceMatcher(None, query, alias).ratio()
+        if min(len(query), len(alias)) >= 6 and (
+            query.startswith(alias) or alias.startswith(query)
+        ):
+            score = max(score, 0.93)
+        scores_by_logo[logo] = max(scores_by_logo.get(logo, 0.0), score)
+
+    ranked = sorted(
+        ((score, logo) for logo, score in scores_by_logo.items()),
+        reverse=True,
+    )
+    if not ranked or ranked[0][0] < 0.88:
+        return ""
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.05:
+        return ""
+    return ranked[0][1]
 
 
 def _catalog_file(espn_sport: str, espn_league: str) -> Path:
@@ -238,8 +322,16 @@ def _team_index(espn_sport: str, espn_league: str) -> dict[str, str]:
         try:
             index = _build_index(_fetch_json(url))
             _atomic_write_text(path, json.dumps({"index": index}, sort_keys=True))
-        except Exception:
-            index = _load_index(path, allow_stale=True) or {}
+        except Exception as exc:
+            stale = _load_index(path, allow_stale=True)
+            index = stale or {}
+            _LOG.warning(
+                "ESPN logo catalog fetch failed for %s/%s; using %s cache: %s",
+                espn_sport,
+                espn_league,
+                "stale" if stale is not None else "empty",
+                exc,
+            )
 
         _MEMORY_INDEX[cache_key] = (now, index)
         return index
@@ -296,8 +388,9 @@ def _available_espn_sports() -> set[str]:
                     path,
                     json.dumps({"sports": sorted(cached)}, sort_keys=True),
                 )
-            except Exception:
+            except Exception as exc:
                 cached = _load_slug_cache(path, "sports") or set()
+                _LOG.debug("ESPN sport discovery failed: %s", exc)
 
         _MEMORY_AVAILABLE_SPORTS = (now, cached)
         return cached
@@ -330,8 +423,9 @@ def _league_slugs_for_sport(espn_sport: str) -> set[str]:
                     path,
                     json.dumps({"leagues": sorted(cached)}, sort_keys=True),
                 )
-            except Exception:
+            except Exception as exc:
                 cached = _load_slug_cache(path, "leagues") or set()
+                _LOG.debug("ESPN league discovery failed for %s: %s", espn_sport, exc)
 
         _MEMORY_LEAGUES[espn_sport] = (now, cached)
         return cached
@@ -369,12 +463,12 @@ def _dynamic_candidates(league_id: str, sport_id: str) -> list[tuple[str, str]]:
         ((_league_match_score(league_id, slug), slug) for slug in slugs),
         reverse=True,
     )
-    # Conservative on purpose: a provider logo is better than an ESPN logo
-    # from the wrong league/team with the same generic mascot name.
+    # Team matching inside the candidate league is still required, so trying a
+    # few moderately similar league slugs is safer than dropping ESPN entirely.
     return [
         (espn_sport, slug)
-        for score, slug in ranked[:3]
-        if score >= 0.72
+        for score, slug in ranked[:5]
+        if score >= 0.60
     ]
 
 
@@ -383,16 +477,16 @@ def espn_full_default_url(
     team_name: object,
     sport_id: object = "",
 ) -> str:
-    """Return ESPN's full/default mark, then let the caller fall back to provider art.
+    """Return ESPN artwork, preferring full/default and then ESPN logos[0].
 
-    The explicit mappings cover common leagues. Every other generated event
-    still checks ESPN by discovering ESPN's sports/leagues and conservatively
-    matching this app's sport/league ID. Results and misses are cached for the
-    process/catalog TTL, so repeated scans do not hammer ESPN.
+    Explicit mappings cover common leagues. Every other generated event still
+    checks ESPN by discovering ESPN's sports/leagues and conservatively matching
+    this app's sport/league ID. Team resolution uses exact ESPN aliases first,
+    then one cautious unique near-match. Results and misses are cached for the
+    process/catalog TTL so repeated scans do not hammer ESPN.
     """
     league_key = str(league_id or "").strip().casefold()
-    team_key = _normalize(team_name)
-    if not team_key:
+    if not _team_query_variants(team_name):
         return ""
 
     candidates: list[tuple[str, str]] = []
@@ -408,7 +502,7 @@ def espn_full_default_url(
             candidates.append(candidate)
 
     for espn_sport, espn_league in candidates:
-        logo = _clean_http_url(_team_index(espn_sport, espn_league).get(team_key, ""))
+        logo = _lookup_team_logo(_team_index(espn_sport, espn_league), team_name)
         if logo:
             return logo
     return ""
