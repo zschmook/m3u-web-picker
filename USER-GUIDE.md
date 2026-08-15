@@ -1,6 +1,6 @@
 # M3U Web Picker — User Guide
 
-This guide describes the current v30 application. Historical RC documentation has been removed from the active tree; older material remains available in Git history if needed.
+This guide describes the current v30 application. Historical RC/experiment documents have been removed from the active tree; older material remains available in Git history if needed.
 
 ## 1. Start the application
 
@@ -108,11 +108,11 @@ Normal client URLs are:
 
 Use the Outputs button in the UI to copy fully qualified URLs for the current host.
 
-## 9. TV Guide, Roku, Cast, and HDHomeRun
+## 9. TV Guide and LAN playback
 
-The built-in TV Guide displays the curated lineup and programme windows. Roku targets are saved by stable device identity so DHCP address changes can be reconciled.
+The built-in TV Guide displays the curated lineup and programme windows. Provider URLs and credentials remain server-side; browser/Cast/Roku/HDHomeRun playback uses Picker-owned routes.
 
-For LAN playback/discovery, configure the host LAN IPv4 address:
+For LAN playback/discovery, configure the host LAN IPv4 address in `.env`:
 
 ```text
 M3U_LAN_HOST=192.168.x.x
@@ -124,7 +124,71 @@ On macOS:
 ./scripts/detect-lan-host.sh
 ```
 
-Virtual HDHomeRun discovery uses UDP 65001 and the application's HTTP discovery/lineup endpoints. The normal Compose stack also publishes container port 9999 on host port 80 for clients that follow discovery with a bare-IP HTTP request.
+Rebuild/restart after changing `.env`.
+
+### Browser and Google Cast
+
+The browser player uses the server-side ffmpeg normalization path. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
+
+### Roku
+
+Roku devices are discovered over the local network and saved by stable device identity, with serial-number fallback, so a saved target can be reconciled after a DHCP address change. Multiple saved Roku targets are supported.
+
+Roku playback requires the M3U Web Picker developer receiver to be sideloaded on the Roku. The receiver ZIP is kept at:
+
+```text
+roku-receiver/dist/m3u-web-picker-roku-receiver-exp1.zip
+```
+
+To enable Roku developer mode, from the Roku home screen press:
+
+```text
+Home
+Home
+Home
+Up
+Up
+Right
+Left
+Right
+Left
+Right
+```
+
+Choose **Enable installer and restart**, accept the developer agreement, set a developer password, and let the Roku restart. If required, also allow local-network control under Roku's **Control by mobile apps** setting.
+
+From a computer on the same LAN, open the Roku's IP address in a browser (`http://ROKU-IP`), sign in to the Development Application Installer with username `rokudev` and the developer-mode password, choose **Install with zip**, and upload the ZIP above without extracting it first. Roku allows only one sideloaded developer application at a time.
+
+After installation, use the TV Guide's Roku controls to discover/save a device and send the currently selected channel to it. The Roku pulls the HLS relay from the Picker host, so `M3U_LAN_HOST` must be correct.
+
+### Virtual HDHomeRun / Plex-style tuner clients
+
+Virtual HDHomeRun support presents the same curated manual + generated-sports lineup through tuner-shaped HTTP endpoints. The normal M3U/XMLTV outputs remain the source of truth.
+
+Useful endpoints on the normal `9999` application port are:
+
+```text
+/discover.json
+/lineup_status.json
+/lineup.json
+/device.xml
+/capability
+```
+
+Channel streams resolve through:
+
+```text
+/hdhr/stream/<channel-number>
+/auto/v<channel-number>
+```
+
+The facade advertises two tuners. Discovery uses UDP 65001. The normal Compose stack also publishes the app on host port 80 because some HDHomeRun/Plex/Jellyfin discovery flows follow UDP discovery with a bare-IP HTTP request such as `http://<picker-ip>/discover.json`.
+
+For a client that accepts XMLTV guide data separately, use the same final guide:
+
+```text
+http://<picker-lan-ip>:9999/epg/epg.xml
+```
 
 ## 10. Backups and persistence
 
@@ -155,6 +219,10 @@ This is the one workflow where `-v` is expected: the dev stack has a separate di
 ### LAN devices cannot reach the Picker
 
 Set `M3U_LAN_HOST` to the host computer's actual private IPv4 address and rebuild/restart the Compose stack.
+
+### Roku is discovered but playback does not start
+
+Discovery proves that a Roku ECP device is reachable; it does not prove the sideloaded M3U Web Picker receiver is installed. Confirm developer mode is enabled and reinstall the receiver ZIP if needed.
 
 ### Jellyfin still shows old artwork
 
