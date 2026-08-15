@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from typing import Iterable
 
+import espn_known_logos
 import espn_team_logos
 import event_logos
 import sports as _s
@@ -75,12 +76,24 @@ def _catalog_team_logo(team_catalog: dict[str, dict], team_id: str) -> str:
 def _espn_team_logo(event: dict, *, team_name: str) -> str:
     if not team_name:
         return ""
+    league_id = event.get("league_id") or _s._classification_id(event)
     try:
-        return espn_team_logos.espn_full_default_url(
-            event.get("league_id") or _s._classification_id(event),
+        logo = espn_team_logos.espn_full_default_url(
+            league_id,
             team_name,
             event.get("sport_id") or "",
         )
+        if logo:
+            return logo
+    except Exception:
+        pass
+
+    # The ESPN team-list API is still the primary resolver for every sport.
+    # MLB additionally has a complete local canonical team list, so if ESPN's
+    # catalog endpoint is unavailable or oddly omits one team we can still try
+    # the ordinary ESPN full/default CDN URL before falling back to provider art.
+    try:
+        return espn_known_logos.direct_full_default_url(league_id, team_name)
     except Exception:
         return ""
 
