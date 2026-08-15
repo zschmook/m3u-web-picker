@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import threading
-
 from flask import jsonify, request
 
 import core
 import jellyfin_cache
+import master_update_worker
 import onboarding
 import sports
 
@@ -37,15 +36,6 @@ def _payload() -> dict:
         },
         "jellyfin": jellyfin_cache.get_settings(core.DB_PATH),
     }
-
-
-def _run_initial_refresh() -> None:
-    try:
-        core.run_master_update(trigger="onboarding")
-    except Exception as exc:
-        # The one-shot handoff is best-effort. Normal Update Status/reporting
-        # records the failure and the user can run Update Now again from the UI.
-        print(f"Initial post-onboarding Master Update failed: {exc}")
 
 
 def register_onboarding_routes(app):
@@ -87,7 +77,7 @@ def register_onboarding_routes(app):
         # If something is already updating, that work satisfies the first-load
         # requirement; claim the flag so a second full refresh is not stacked on
         # top of it.
-        if core.master_update_payload().get("running"):
+        if master_update_worker.payload().get("running"):
             claimed = onboarding.claim_initial_refresh(
                 core.DB_PATH,
                 provider_configured=True,
@@ -101,12 +91,31 @@ def register_onboarding_routes(app):
         if not claimed:
             return jsonify(started=False, pending=False), 200
 
-        threading.Thread(
-            target=_run_initial_refresh,
-            daemon=True,
-            name="m3u-onboarding-initial-refresh",
-        ).start()
-        return jsonify(started=True, pending=False), 202
+        try:
+            started, master = master_update_worker.start(trigger="onboarding")
+        except Exception as exc:
+            print(f"Could not start initial post-onboarding Master Update: {exc}")
+            return jsonify(
+                error="Could not start the initial Master Update.",
+                started=False,
+                pending=False,
+            ), 500
+
+        if not started:
+            # A job won the race after the check above. That active job still
+            # satisfies the one-shot first-load refresh requirement.
+            return jsonify(
+                started=False,
+                already_running=True,
+                claimed=True,
+                master_update=master,
+            ), 202
+
+        return jsonify(
+            started=True,
+            pending=False,
+            master_update=master,
+        ), 202
 
     @app.get("/api/jellyfin-cache")
     def api_jellyfin_cache():
