@@ -73,6 +73,19 @@ def _stop_host() -> None:
     )
 
 
+def _unlink_best_effort(path) -> None:
+    # Windows can keep a just-terminated process' log handle alive briefly.
+    # Logs/env files are not persistent Picker state, so they must never abort
+    # an otherwise successful -v style reset.
+    for _ in range(20):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except OSError:
+            time.sleep(0.1)
+    print(f"Warning: could not remove {path.name}; continuing reinstall.")
+
+
 def _reset_install_state() -> None:
     # Preview/native Windows reinstall behavior intentionally mirrors
     # `docker compose down -v`: start fresh, but retain the expensive runtime
@@ -85,11 +98,8 @@ def _reset_install_state() -> None:
     ):
         shutil.rmtree(directory, ignore_errors=True)
 
-    for path in (
-        _installer.HOST_LOG,
-        _installer.HOST_ENV,
-    ):
-        path.unlink(missing_ok=True)
+    _unlink_best_effort(_installer.HOST_LOG)
+    _unlink_best_effort(_installer.HOST_ENV)
 
 
 def _install_fresh() -> None:
