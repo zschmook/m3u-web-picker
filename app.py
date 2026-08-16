@@ -80,7 +80,7 @@ def index():
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
         '<script src="/static/js/update_lifecycle.js?v=update-lifecycle-1"></script>\n'
         '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'
-        '<script src="/static/js/ui_epg_static.js?v=epg-static-1"></script>\n'
+        '<script src="/static/js/ui_epg_static.js?v=output-lan-1"></script>\n'
         '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
         '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
         '<script src="/static/js/onboarding.js?v=onboarding-1"></script>\n'
