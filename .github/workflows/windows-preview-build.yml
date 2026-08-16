@@ -1,0 +1,30 @@
+name: Windows Preview Build
+
+on:
+  push:
+    branches:
+      - agent/windows-python-dev-m3u
+    paths:
+      - installer/windows-dev/**
+      - .github/workflows/windows-preview-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build installer
+        run: python installer/windows-dev/build.py
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-Python-Dev-Setup
+          path: installer/windows-dev/dist/M3U-Web-Picker-Python-Dev-Setup.exe
+          if-no-files-found: error
