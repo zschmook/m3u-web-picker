@@ -2,7 +2,7 @@
 import argparse
 import atexit
 import os
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, redirect, render_template, request, send_from_directory
 
 import core
 import hdhr_config
@@ -113,6 +113,8 @@ def index():
 
 @app.get("/guide")
 def guide():
+    if _onboarding_initial_refresh_required():
+        return redirect("/")
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
