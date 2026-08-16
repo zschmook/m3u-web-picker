@@ -6,6 +6,12 @@ on:
       - agent/windows-python-dev-m3u
     paths:
       - installer/windows-dev/**
+      - host_runtime.py
+      - app.py
+      - api/guide_debug.py
+      - jellyfin_cache.py
+      - static/js/guide_debug_ts.js
+      - static/js/onboarding_navigation_fix.js
       - .github/workflows/windows-preview-build.yml
   workflow_dispatch:
 
