@@ -38,7 +38,7 @@
     if (current === "Sports API Information") return 4;
     if (current === "Jellyfin Cache Directory") return 6;
 
-    if (current === "Are You Using Jellyfin?") {
+    if (current === "Are You Using Jellyfin?" || current === "Is Jellyfin Running on This Computer?") {
       const payload = await api("/api/onboarding");
       const sportsEnabled = Boolean(payload?.sports?.settings?.enabled);
       if (!sportsEnabled) return 2;
@@ -87,6 +87,32 @@
     location.reload();
   }
 
+  function enhanceJellyfinChoicePage() {
+    const body = wizardBody();
+    const title = body?.querySelector("h2");
+    if (!body || !title) return;
+    if (title.textContent.trim() !== "Are You Using Jellyfin?") return;
+    if (body.dataset.jellyfinHostCopy === "true") return;
+    body.dataset.jellyfinHostCopy = "true";
+
+    title.textContent = "Is Jellyfin Running on This Computer?";
+    const help = body.querySelector(".dev-onboarding-help");
+    if (help) {
+      help.textContent = "This optional integration is only for clearing the cache of a Jellyfin server that lives on this machine. Using Jellyfin somewhere else does not require it.";
+    }
+
+    const yes = document.getElementById("devJellyfinYes");
+    const no = document.getElementById("devJellyfinNo");
+    const yesStrong = yes?.querySelector("strong");
+    const yesDetail = yes?.querySelector("span");
+    const noStrong = no?.querySelector("strong");
+    const noDetail = no?.querySelector("span");
+    if (yesStrong) yesStrong.textContent = "Yes, Jellyfin is on this computer";
+    if (yesDetail) yesDetail.textContent = "Configure its local cache directory next.";
+    if (noStrong) noStrong.textContent = "No, not on this computer";
+    if (noDetail) noDetail.textContent = "Finish setup without local cache integration.";
+  }
+
   function enhanceJellyfinCachePage() {
     if (heading() !== "Jellyfin Cache Directory") return;
     if (document.getElementById("devJellyfinNotHere")) return;
@@ -117,6 +143,11 @@
     });
   }
 
+  function enhanceCurrentStep() {
+    enhanceJellyfinChoicePage();
+    enhanceJellyfinCachePage();
+  }
+
   document.addEventListener("click", event => {
     const back = event.target.closest("#devOnboardingBack");
     if (!back) return;
@@ -133,7 +164,7 @@
     });
   }, true);
 
-  const observer = new MutationObserver(() => enhanceJellyfinCachePage());
+  const observer = new MutationObserver(() => enhanceCurrentStep());
   observer.observe(document.body, {childList: true, subtree: true});
-  enhanceJellyfinCachePage();
+  enhanceCurrentStep();
 })();
