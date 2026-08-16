@@ -6,10 +6,10 @@ The current main line is **v30**. Windows has a packaged Python-host installer, 
 
 ## Downloads
 
-Packaged installers are published through **GitHub Releases**:
+Packaged installers are published through **GitHub Releases**. No Git checkout is required for either installer:
 
-- **Windows:** `M3U-Web-Picker-Windows-Setup.exe` — Python/Waitress host runtime, private venv and FFmpeg, no Docker/WSL/Git required.
-- **macOS:** `M3U-Web-Picker-macOS.zip` — contains `install.command` and `uninstall.command` for the host-Python runtime.
+- **Windows:** [Download `M3U-Web-Picker-Windows-Setup.exe`](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe) — Python/Waitress host runtime, private venv and FFmpeg, no Docker/WSL/Git required.
+- **macOS:** [Download `M3U-Web-Picker-macOS.dmg`](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — user-scoped host-Python installer with install/uninstall command files.
 - **Linux:** you're on your own. The Docker/source path is there if you want it.
 
 The installer packaging workflow is manual/release-triggered only; it does not run on every push.
@@ -153,7 +153,13 @@ Do not remove the data volume during a normal update.
 
 ## Packaging installers
 
-`.github/workflows/package-installers.yml` builds the Windows EXE and macOS zip. It can be run manually from GitHub Actions. When a GitHub Release is published, the same workflow builds both packages and attaches them to that release automatically.
+`.github/workflows/package-installers.yml` builds the Windows EXE and macOS DMG. Open **Actions → Package installers → Run workflow** to start it manually from any machine.
+
+- Leave **release_tag** blank to build downloadable Actions artifacts only.
+- Enter a tag such as `v30.0` to create that GitHub Release if needed and upload/replace the Windows EXE and macOS DMG as permanent release assets.
+- Publishing a GitHub Release normally still triggers the same packaging workflow and attaches the installers automatically.
+
+The stable latest-release URLs used above always resolve to the installer files attached to the current latest GitHub Release.
 
 ## Tests
 
