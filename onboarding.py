@@ -148,6 +148,15 @@ def get_state(
     }
 
 
+def initial_refresh_required(state: dict) -> bool:
+    answers = dict(state.get("answers") or {})
+    return bool(
+        state.get("completed")
+        and answers.get("initial_refresh_required")
+        and not answers.get("initial_refresh_completed_at")
+    )
+
+
 def setup_required(
     db_path: Path | str,
     *,
@@ -157,7 +166,7 @@ def setup_required(
     return bool(
         onboarding_enabled()
         and state.get("required")
-        and not state.get("completed")
+        and (not state.get("completed") or initial_refresh_required(state))
     )
 
 
@@ -207,12 +216,17 @@ def mark_complete(
         ).fetchone()
         answers = _decode_answers(row["answers_json"] if row else "{}")
         already_completed = bool(row and row["completed"])
-        # Only the actual incomplete -> complete transition queues the one-shot
-        # refresh. Repeated complete requests must not resurrect it after the
-        # first main-screen load already claimed the work.
+        # New first-run completions remain behind the setup gate until the
+        # one-shot onboarding Master Update has cached the enabled public EPG
+        # and published the first Combined XMLTV guide. Older completed installs
+        # do not have initial_refresh_required and are left alone.
         if not already_completed:
+            answers["initial_refresh_required"] = True
             answers["initial_refresh_pending"] = True
+            answers["initial_refresh_in_progress"] = False
             answers.pop("initial_refresh_claimed_at", None)
+            answers.pop("initial_refresh_completed_at", None)
+            answers.pop("initial_refresh_error", None)
         completed_at = row["completed_at"] if row and row["completed_at"] else now
         conn.execute(
             """
@@ -242,10 +256,14 @@ def claim_initial_refresh(
         if not row or not bool(row["completed"]):
             return False
         answers = _decode_answers(row["answers_json"])
+        if not bool(answers.get("initial_refresh_required")):
+            return False
         if not bool(answers.get("initial_refresh_pending")):
             return False
         answers["initial_refresh_pending"] = False
+        answers["initial_refresh_in_progress"] = True
         answers["initial_refresh_claimed_at"] = now
+        answers.pop("initial_refresh_error", None)
         conn.execute(
             """
             UPDATE app_onboarding
@@ -256,3 +274,41 @@ def claim_initial_refresh(
         )
         conn.commit()
     return True
+
+
+def finish_initial_refresh(
+    db_path: Path | str,
+    *,
+    provider_configured: bool,
+    success: bool,
+    error: str = "",
+) -> dict:
+    """Release or re-arm the first-run guide gate after the onboarding update."""
+    _ensure_state(db_path, provider_configured=provider_configured)
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT answers_json FROM app_onboarding WHERE id = 1"
+        ).fetchone()
+        answers = _decode_answers(row["answers_json"] if row else "{}")
+        if not bool(answers.get("initial_refresh_required")):
+            return get_state(db_path, provider_configured=provider_configured)
+        answers["initial_refresh_in_progress"] = False
+        if success:
+            answers["initial_refresh_pending"] = False
+            answers["initial_refresh_completed_at"] = now
+            answers.pop("initial_refresh_error", None)
+        else:
+            answers["initial_refresh_pending"] = True
+            answers.pop("initial_refresh_completed_at", None)
+            answers["initial_refresh_error"] = str(error or "The first guide update did not complete.")
+        conn.execute(
+            """
+            UPDATE app_onboarding
+            SET answers_json = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (json.dumps(answers), now),
+        )
+        conn.commit()
+    return get_state(db_path, provider_configured=provider_configured)
