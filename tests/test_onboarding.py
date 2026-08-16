@@ -42,6 +42,20 @@ class OnboardingTests(unittest.TestCase):
                 provider_configured=True,
             )
             self.assertTrue(completed["completed"])
+            self.assertTrue(completed["answers"]["initial_refresh_required"])
+            self.assertTrue(
+                onboarding.setup_required(
+                    db_path,
+                    provider_configured=True,
+                )
+            )
+
+            self.assertTrue(onboarding.claim_initial_refresh(db_path, provider_configured=True))
+            onboarding.finish_initial_refresh(
+                db_path,
+                provider_configured=True,
+                success=True,
+            )
             self.assertFalse(
                 onboarding.setup_required(
                     db_path,
