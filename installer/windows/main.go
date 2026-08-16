@@ -39,6 +39,24 @@ func main() {
 	fmt.Println("This installer keeps its own private MinGit copy and does not modify your system Git or PATH.")
 	fmt.Println()
 
+	if enabled, known := virtualizationFirmwareEnabled(); known && !enabled {
+		fatalf("Hardware virtualization is disabled in BIOS/UEFI. Enable Intel VT-x/VT-d or AMD-V/SVM, restart Windows, and run this installer again.")
+	}
+
+	wslReady, err := ensureWSL()
+	if err != nil {
+		fatalf("Could not prepare WSL 2 for Docker Desktop: %v", err)
+	}
+	if !wslReady {
+		fmt.Println()
+		fmt.Println("WSL was installed, but Windows needs a restart before Docker Desktop can use it.")
+		fmt.Println("Restart Windows, then run this installer again. It will continue from here.")
+		fmt.Println()
+		fmt.Print("Press Enter to close...")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		return
+	}
+
 	installDir, err := installationDirectory()
 	if err != nil {
 		fatalf("Could not determine the installation directory: %v", err)
@@ -109,6 +127,62 @@ func installationDirectory() (string, error) {
 	return filepath.Join(base, "M3U-Web-Picker"), nil
 }
 
+func virtualizationFirmwareEnabled() (bool, bool) {
+	ps, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		return false, false
+	}
+	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty VirtualizationFirmwareEnabled)")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, false
+	}
+	value := strings.ToLower(strings.TrimSpace(string(out)))
+	if value == "true" {
+		return true, true
+	}
+	if value == "false" {
+		return false, true
+	}
+	return false, false
+}
+
+func ensureWSL() (bool, error) {
+	wsl := filepath.Join(os.Getenv("WINDIR"), "System32", "wsl.exe")
+	if !fileExists(wsl) {
+		if path, err := exec.LookPath("wsl.exe"); err == nil {
+			wsl = path
+		} else {
+			return false, errors.New("wsl.exe is not available on this Windows installation")
+		}
+	}
+
+	if commandOK("", wsl, "--status") {
+		fmt.Println("WSL 2: ready")
+		return true, nil
+	}
+
+	fmt.Println("WSL 2 is not installed or not enabled.")
+	if !askYesNo("Install the Windows WSL 2 components now? [Y/n]: ", true) {
+		return false, errors.New("WSL 2 installation was skipped")
+	}
+
+	powershell, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		return false, errors.New("PowerShell was not found")
+	}
+	command := `$p = Start-Process -FilePath "$env:WINDIR\System32\wsl.exe" -ArgumentList @('--install','--no-distribution') -Verb RunAs -Wait -PassThru; exit $p.ExitCode`
+	if err := runStreaming("", powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command); err != nil {
+		return false, fmt.Errorf("WSL installer failed: %w", err)
+	}
+
+	if commandOK("", wsl, "--status") {
+		fmt.Println("WSL 2: ready")
+		return true, nil
+	}
+	return false, nil
+}
+
 func ensureDockerInstalled() (string, error) {
 	if path := findDocker(); path != "" {
 		fmt.Printf("Docker: %s\n", path)
@@ -142,8 +216,23 @@ func findDocker() string {
 		return path
 	}
 	candidates := []string{
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "DockerDesktop", "resources", "bin", "docker.exe"),
 		filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "resources", "bin", "docker.exe"),
 		filepath.Join(os.Getenv("ProgramW6432"), "Docker", "Docker", "resources", "bin", "docker.exe"),
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func findDockerDesktop() string {
+	candidates := []string{
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "DockerDesktop", "Docker Desktop.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe"),
+		filepath.Join(os.Getenv("ProgramW6432"), "Docker", "Docker", "Docker Desktop.exe"),
 	}
 	for _, candidate := range candidates {
 		if candidate != "" && fileExists(candidate) {
@@ -159,17 +248,17 @@ func ensureDockerRunning(dockerPath string) error {
 		return nil
 	}
 
-	desktop := filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe")
-	if fileExists(desktop) {
+	if desktop := findDockerDesktop(); desktop != "" {
 		fmt.Println("Starting Docker Desktop...")
 		_ = exec.Command(desktop).Start()
 	} else {
 		fmt.Println("Docker daemon is not running. Start Docker Desktop now.")
 	}
 
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
 		if commandOK("", dockerPath, "info") {
+			fmt.Println()
 			fmt.Println("Docker daemon: ready")
 			return nil
 		}
@@ -222,6 +311,11 @@ func syncRepository(gitPath, repoDir string) error {
 	gitDir := filepath.Join(repoDir, ".git")
 	if !dirExists(gitDir) {
 		fmt.Println("Downloading M3U Web Picker main branch...")
+		if dirExists(repoDir) {
+			if err := os.RemoveAll(repoDir); err != nil {
+				return fmt.Errorf("could not clear incomplete managed checkout: %w", err)
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 			return err
 		}
@@ -267,9 +361,10 @@ func detectPrivateIPv4() string {
 	if err != nil {
 		return ""
 	}
-	var fallback string
+	var privateFallback string
+	var publicFallback string
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || isVirtualInterfaceName(iface.Name) {
 			continue
 		}
 		addrs, err := iface.Addrs()
@@ -290,14 +385,37 @@ func detectPrivateIPv4() string {
 			}
 			value := ipv4.String()
 			if isRFC1918(ipv4) {
-				return value
-			}
-			if fallback == "" {
-				fallback = value
+				if isLikelyPhysicalInterface(iface.Name) {
+					return value
+				}
+				if privateFallback == "" {
+					privateFallback = value
+				}
+			} else if publicFallback == "" {
+				publicFallback = value
 			}
 		}
 	}
-	return fallback
+	if privateFallback != "" {
+		return privateFallback
+	}
+	return publicFallback
+}
+
+func isVirtualInterfaceName(name string) bool {
+	value := strings.ToLower(name)
+	blocked := []string{"vethernet", "hyper-v", "docker", "wsl", "loopback", "tailscale", "zerotier", "vmware", "virtualbox"}
+	for _, marker := range blocked {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isLikelyPhysicalInterface(name string) bool {
+	value := strings.ToLower(name)
+	return strings.Contains(value, "wi-fi") || strings.Contains(value, "wifi") || strings.Contains(value, "ethernet")
 }
 
 func isRFC1918(ip net.IP) bool {
@@ -339,6 +457,7 @@ exit /b 1
 	if err := os.WriteFile(openCmd, []byte("@echo off\r\nstart \"\" \""+webURL+"\"\r\n"), 0o644); err != nil {
 		return err
 	}
+
 	return nil
 }
 
