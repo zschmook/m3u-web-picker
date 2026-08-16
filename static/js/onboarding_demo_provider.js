@@ -3,19 +3,19 @@
 
   const DEMO_PLAYLISTS = [
     {
-      id: "free-tv-us",
-      name: "Free-TV U.S. Demo",
-      label: "Free-TV U.S.",
-      detail: "Recommended • smaller curated U.S. list • quality over quantity",
-      url: "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_usa.m3u8",
-      recommended: true,
-    },
-    {
       id: "iptv-org-us",
       name: "iptv-org U.S. Demo",
       label: "iptv-org U.S.",
-      detail: "Larger U.S. public-stream catalog",
+      detail: "Recommended • larger U.S. public-stream catalog",
       url: "https://iptv-org.github.io/iptv/countries/us.m3u",
+      recommended: true,
+    },
+    {
+      id: "free-tv-us",
+      name: "Free-TV U.S. Demo",
+      label: "Free-TV U.S.",
+      detail: "Smaller alternate U.S. public-stream list",
+      url: "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_usa.m3u8",
     },
     {
       id: "iptv-org-categories",
