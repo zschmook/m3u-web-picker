@@ -9,6 +9,6 @@ For a manual build, open **Actions → Package installers → Run workflow**. Gi
 For a public download, publish a GitHub Release. The workflow automatically builds and attaches:
 
 - `M3U-Web-Picker-Windows-Setup.exe`
-- `M3U-Web-Picker-macOS.zip`
+- `M3U-Web-Picker-macOS.dmg`
 
-The Windows EXE packages the tested host-Python installer. The macOS zip contains user-scoped install/uninstall command files.
+The Windows EXE packages the tested host-Python installer. The macOS DMG contains user-scoped install/uninstall command files.
