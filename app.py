@@ -30,14 +30,30 @@ def disable_runtime_document_cache(response):
     return response
 
 
+def _provider_configured() -> bool:
+    return bool(core.primary_provider_source() or core.source_mode == "file")
+
+
 def _onboarding_required() -> bool:
     try:
         return onboarding.setup_required(
             core.DB_PATH,
-            provider_configured=bool(core.primary_provider_source() or core.source_mode == "file"),
+            provider_configured=_provider_configured(),
         )
     except Exception as exc:
         print(f"Could not determine onboarding state: {exc}")
+        return False
+
+
+def _onboarding_initial_refresh_required() -> bool:
+    try:
+        state = onboarding.get_state(
+            core.DB_PATH,
+            provider_configured=_provider_configured(),
+        )
+        return onboarding.initial_refresh_required(state)
+    except Exception as exc:
+        print(f"Could not determine onboarding guide gate state: {exc}")
         return False
 
 
@@ -45,14 +61,17 @@ def _onboarding_required() -> bool:
 def index():
     html = render_template("index.html")
     if _onboarding_required():
+        pending_classes = "onboarding-pending"
+        if _onboarding_initial_refresh_required():
+            pending_classes += " onboarding-initial-refresh-pending"
         html = html.replace(
             '<html lang="en">',
-            '<html lang="en" class="onboarding-pending">',
+            f'<html lang="en" class="{pending_classes}">',
             1,
         )
     html = html.replace(
         "</head>",
-        '<style>html.onboarding-pending body{visibility:hidden}</style>\n'
+        '<style>html.onboarding-pending body,html.onboarding-initial-refresh-pending body{visibility:hidden}</style>\n'
         '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-9">\n'
@@ -84,6 +103,7 @@ def index():
         '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
         '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
         '<script src="/static/js/onboarding.js?v=onboarding-1"></script>\n'
+        '<script src="/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1"></script>\n'
         '<script src="/static/js/onboarding_enhancements.js?v=onboarding-2"></script>\n'
         '<script src="/static/js/onboarding_provider_validation_v2.js?v=onboarding-4"></script>\n'
         '<script src="/static/js/onboarding_demo_provider.js?v=demo-provider-1"></script>\n'
