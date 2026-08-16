@@ -1,0 +1,44 @@
+name: Package installers once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Windows installer
+        run: python installer/windows-python/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-Windows-Setup
+          path: installer/windows-python/dist/M3U-Web-Picker-Windows-Setup.exe
+          retention-days: 30
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build macOS DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/dmg-root
+          cp installer/macos/install.command dist/dmg-root/Install\ M3U\ Web\ Picker.command
+          cp installer/macos/uninstall.command dist/dmg-root/Uninstall\ M3U\ Web\ Picker.command
+          cp installer/macos/README.md dist/dmg-root/README.md
+          chmod +x dist/dmg-root/*.command
+          hdiutil create -volname "M3U Web Picker" -srcfolder dist/dmg-root -ov -format UDZO dist/M3U-Web-Picker-macOS.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-macOS
+          path: dist/M3U-Web-Picker-macOS.dmg
+          retention-days: 30
