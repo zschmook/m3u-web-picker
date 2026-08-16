@@ -49,6 +49,32 @@ def payload() -> dict:
     return result
 
 
+def _redacted_exception_text(exc: BaseException) -> str:
+    try:
+        return core.redact_url_credentials(str(exc))
+    except Exception:
+        return str(exc)
+
+
+def _failure_detail(exc: BaseException) -> str:
+    """Return the browser-safe failure plus the deepest chained root cause."""
+    message = _redacted_exception_text(exc)
+    cause = exc.__cause__ or exc.__context__
+    seen: set[int] = {id(exc)}
+    deepest = cause
+    while deepest is not None and id(deepest) not in seen:
+        seen.add(id(deepest))
+        next_cause = deepest.__cause__ or deepest.__context__
+        if next_cause is None or id(next_cause) in seen:
+            break
+        deepest = next_cause
+
+    if deepest is None:
+        return message
+    detail = _redacted_exception_text(deepest)
+    return f"{message} Root cause: {type(deepest).__name__}: {detail}"
+
+
 def _run(trigger: str) -> None:
     global _thread, _trigger, _started_at, _started_monotonic
     try:
@@ -58,11 +84,7 @@ def _run(trigger: str) -> None:
         # in the background execution path.
         core.run_master_update(trigger=trigger)
     except Exception as exc:
-        try:
-            message = core.redact_url_credentials(str(exc))
-        except Exception:
-            message = str(exc)
-        print(f"Background Master Update failed: {message}")
+        print(f"Background Master Update failed: {_failure_detail(exc)}")
     finally:
         with _lock:
             if _thread is threading.current_thread():
