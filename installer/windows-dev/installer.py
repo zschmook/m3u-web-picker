@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -15,23 +14,29 @@ import winreg
 import zipfile
 from pathlib import Path
 
-APP_NAME = "M3U Web Picker"
-INSTALL_FOLDER = "M3U-Web-Picker"
-SOURCE_REF = "agent/windows-bare-python"
+APP_NAME = "M3U Web Picker Dev"
+INSTALL_FOLDER = "M3U-Web-Picker-Dev"
+SOURCE_REF = "agent/windows-python-dev-m3u"
 SOURCE_ARCHIVE_URL = (
     "https://codeload.github.com/zschmook/m3u-web-picker/zip/refs/heads/"
     + SOURCE_REF
 )
-WEB_URL = "http://localhost:9999"
+PORT = 9998
+WEB_URL = f"http://localhost:{PORT}"
 PYTHON_PACKAGE_ID = "Python.Python.3.12"
+
 FFMPEG_VERSION = "8.1.2"
 FFMPEG_URL = (
     "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/"
     "ffmpeg-8.1.2-full_build.zip"
 )
 FFMPEG_SHA256 = "b8cdefab5f50590a076c27c2b56b0294a0e6154faded28ba1ba05ebc4f801f57"
+
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\M3U Web Picker"
+UNINSTALL_KEY = (
+    r"Software\Microsoft\Windows\CurrentVersion\Uninstall\M3U Web Picker Dev"
+)
+
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -39,9 +44,7 @@ CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 def local_app_data() -> Path:
     value = os.environ.get("LOCALAPPDATA", "").strip()
-    if value:
-        return Path(value)
-    return Path.home() / "AppData" / "Local"
+    return Path(value) if value else Path.home() / "AppData" / "Local"
 
 
 ROOT = local_app_data() / INSTALL_FOLDER
@@ -54,8 +57,8 @@ FFMPEG_DIR = ROOT / "ffmpeg"
 FFMPEG_EXE = FFMPEG_DIR / "ffmpeg.exe"
 HOST_ENV = ROOT / "host.env"
 HOST_LOG = ROOT / "host.log"
-HOST_PID = ROOT / "host.pid"
-INSTALLED_EXE = ROOT / "M3U-Web-Picker.exe"
+HOST_PID = DATA_DIR / "host.pid"
+INSTALLED_EXE = ROOT / "M3U-Web-Picker-Dev.exe"
 STAGING_APP = ROOT / ".app-staging"
 
 
@@ -74,9 +77,13 @@ def pause() -> None:
 
 def download(url: str, destination: Path, *, timeout: int = 900) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "M3U-Web-Picker-Installer"})
-    with urllib.request.urlopen(request, timeout=timeout) as response, destination.open("wb") as out:
-        shutil.copyfileobj(response, out, length=1024 * 1024)
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "M3U-Web-Picker-Dev-Installer"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        with destination.open("wb") as output:
+            shutil.copyfileobj(response, output, length=1024 * 1024)
 
 
 def sha256(path: Path) -> str:
@@ -90,7 +97,9 @@ def sha256(path: Path) -> str:
 def verify_sha256(path: Path, expected: str) -> None:
     actual = sha256(path)
     if actual.lower() != expected.lower():
-        raise RuntimeError(f"SHA-256 mismatch for {path.name}: got {actual}")
+        raise RuntimeError(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
+        )
 
 
 def safe_target(base: Path, member: str) -> Path:
@@ -111,10 +120,9 @@ def extract_source_archive(archive: Path, destination: Path) -> None:
             raise RuntimeError("Unexpected GitHub source archive layout")
         root = next(iter(roots)) + "/"
         for info in zf.infolist():
-            name = info.filename
-            if not name.startswith(root):
+            if not info.filename.startswith(root):
                 continue
-            relative = name[len(root):]
+            relative = info.filename[len(root):]
             if not relative:
                 continue
             target = safe_target(destination, relative)
@@ -128,23 +136,34 @@ def extract_source_archive(archive: Path, destination: Path) -> None:
 
 def extract_named_file(archive: Path, filename: str, destination: Path) -> None:
     with zipfile.ZipFile(archive) as zf:
-        matches = [info for info in zf.infolist() if Path(info.filename).name.lower() == filename.lower()]
+        matches = [
+            info
+            for info in zf.infolist()
+            if Path(info.filename).name.lower() == filename.lower()
+        ]
         if not matches:
             raise RuntimeError(f"{filename} was not found in {archive.name}")
-        info = matches[0]
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info) as src, destination.open("wb") as dst:
+        with zf.open(matches[0]) as src, destination.open("wb") as dst:
             shutil.copyfileobj(src, dst)
 
 
-def run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(args, cwd=str(cwd) if cwd else None, check=check)
+def run(args: list[str], *, cwd: Path | None = None) -> None:
+    subprocess.run(
+        args,
+        cwd=str(cwd) if cwd else None,
+        check=True,
+    )
 
 
 def python_is_312(executable: Path) -> bool:
     try:
         result = subprocess.run(
-            [str(executable), "-c", "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            [
+                str(executable),
+                "-c",
+                "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+            ],
             capture_output=True,
             text=True,
             timeout=15,
@@ -158,7 +177,9 @@ def python_is_312(executable: Path) -> bool:
 def find_python312() -> Path | None:
     candidates = [
         local_app_data() / "Programs" / "Python" / "Python312" / "python.exe",
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Python312" / "python.exe",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Python312"
+        / "python.exe",
     ]
     for candidate in candidates:
         if candidate.is_file() and python_is_312(candidate):
@@ -175,7 +196,11 @@ def find_python312() -> Path | None:
                 creationflags=CREATE_NO_WINDOW,
             )
             candidate = Path(result.stdout.strip())
-            if result.returncode == 0 and candidate.is_file() and python_is_312(candidate):
+            if (
+                result.returncode == 0
+                and candidate.is_file()
+                and python_is_312(candidate)
+            ):
                 return candidate
         except (OSError, subprocess.SubprocessError):
             pass
@@ -195,20 +220,30 @@ def ensure_python312() -> Path:
 
     winget = shutil.which("winget.exe")
     if not winget:
-        raise RuntimeError("Python 3.12 is not installed and winget.exe is unavailable")
+        raise RuntimeError(
+            "Python 3.12 is not installed and winget.exe is unavailable."
+        )
 
     print("Python 3.12 was not found. Installing it for the current user...")
-    run([
-        winget,
-        "install", "-e", "--id", PYTHON_PACKAGE_ID,
-        "--scope", "user", "--silent",
-        "--accept-source-agreements", "--accept-package-agreements",
-    ])
+    run(
+        [
+            winget,
+            "install",
+            "-e",
+            "--id",
+            PYTHON_PACKAGE_ID,
+            "--scope",
+            "user",
+            "--silent",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+        ]
+    )
     found = find_python312()
     if not found:
         raise RuntimeError(
-            "Python installation completed but python.exe could not be located; "
-            "sign out/restart Windows and rerun the installer"
+            "Python installation finished but Python 3.12 could not be found. "
+            "Restart Windows and rerun the installer."
         )
     return found
 
@@ -217,7 +252,7 @@ def ensure_ffmpeg() -> None:
     if FFMPEG_EXE.is_file():
         return
     print(f"Downloading private FFmpeg {FFMPEG_VERSION}...")
-    temp_zip = Path(tempfile.gettempdir()) / "m3u-web-picker-ffmpeg.zip"
+    temp_zip = Path(tempfile.gettempdir()) / "m3u-web-picker-dev-ffmpeg.zip"
     try:
         download(FFMPEG_URL, temp_zip)
         verify_sha256(temp_zip, FFMPEG_SHA256)
@@ -228,8 +263,8 @@ def ensure_ffmpeg() -> None:
 
 
 def install_source() -> None:
-    print(f"Downloading M3U Web Picker source ({SOURCE_REF})...")
-    temp_zip = Path(tempfile.gettempdir()) / "m3u-web-picker-source.zip"
+    print(f"Downloading dev source ({SOURCE_REF})...")
+    temp_zip = Path(tempfile.gettempdir()) / "m3u-web-picker-dev-source.zip"
     try:
         download(SOURCE_ARCHIVE_URL, temp_zip, timeout=300)
         extract_source_archive(temp_zip, STAGING_APP)
@@ -253,6 +288,34 @@ def install_source() -> None:
     shutil.rmtree(old, ignore_errors=True)
 
 
+def install_requirements(python: Path) -> None:
+    print("Installing Python dependencies...")
+    run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--upgrade",
+            "pip",
+        ],
+        cwd=APP_DIR,
+    )
+    run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            str(APP_DIR / "requirements.txt"),
+        ],
+        cwd=APP_DIR,
+    )
+
+
 def prepare_venv(base_python: Path) -> Path:
     python = VENV_DIR / "Scripts" / "python.exe"
     if not python.is_file():
@@ -261,15 +324,6 @@ def prepare_venv(base_python: Path) -> Path:
         run([str(base_python), "-m", "venv", str(VENV_DIR)])
     install_requirements(python)
     return python
-
-
-def install_requirements(python: Path) -> None:
-    print("Installing Python dependencies...")
-    run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pip"], cwd=APP_DIR)
-    run([
-        str(python), "-m", "pip", "install", "--disable-pip-version-check",
-        "-r", str(APP_DIR / "requirements.txt"),
-    ], cwd=APP_DIR)
 
 
 def detect_lan_ipv4() -> str:
@@ -283,6 +337,7 @@ def detect_lan_ipv4() -> str:
         pass
     finally:
         sock.close()
+
     try:
         for value in socket.gethostbyname_ex(socket.gethostname())[2]:
             if value and not value.startswith("127.") and value != "0.0.0.0":
@@ -294,24 +349,25 @@ def detect_lan_ipv4() -> str:
 
 def write_host_env() -> None:
     lan = detect_lan_ipv4()
-    print(f"LAN address: {lan}" if lan else "LAN address could not be detected automatically.")
+    print(f"LAN address: {lan}" if lan else "LAN address not detected.")
     values = {
         "PYTHONUNBUFFERED": "1",
         "M3U_ONBOARDING_ENABLED": "true",
         "M3U_BACKUP_ENABLED": "true",
+        "M3U_DEBUG_TOOLS": "true",
         "M3U_DATA_DIR": str(DATA_DIR),
         "M3U_CAST_HLS_DIR": str(CAST_DIR),
         "M3U_BACKUP_CONTAINER_DIR": str(BACKUP_DIR),
         "M3U_FFMPEG": str(FFMPEG_EXE),
-        "M3U_PORT": "9999",
-        "M3U_EXTERNAL_PORT": "9999",
+        "M3U_PORT": str(PORT),
+        "M3U_EXTERNAL_PORT": str(PORT),
         "M3U_LAN_HOST": lan,
         "BACKUP_RETENTION_DAYS": "30",
         "MASTER_REFRESH_HOUR": "3",
         "MASTER_REFRESH_MINUTE": "0",
     }
     HOST_ENV.write_text(
-        "# Managed by the M3U Web Picker bare Windows installer\n"
+        "# Managed by the M3U Web Picker Python dev installer\n"
         + "\n".join(f"{key}={value}" for key, value in values.items())
         + "\n",
         encoding="utf-8",
@@ -327,6 +383,7 @@ def load_host_env() -> dict[str, str]:
                 continue
             key, value = line.split("=", 1)
             env[key.strip()] = value.strip()
+    env["M3U_HOST_ENV"] = str(HOST_ENV)
     env["PATH"] = str(FFMPEG_DIR) + os.pathsep + env.get("PATH", "")
     return env
 
@@ -335,6 +392,10 @@ def copy_self() -> None:
     current = Path(sys.executable).resolve()
     if current == INSTALLED_EXE.resolve():
         return
+    if not getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "The installer must be run from the packaged Windows EXE."
+        )
     shutil.copy2(current, INSTALLED_EXE)
 
 
@@ -352,28 +413,45 @@ def desktop_folder() -> Path:
 
 def install_shell_integration() -> None:
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-        winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{INSTALLED_EXE}" --run')
+        winreg.SetValueEx(
+            key,
+            APP_NAME,
+            0,
+            winreg.REG_SZ,
+            f'"{INSTALLED_EXE}" --run',
+        )
 
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, APP_NAME)
-        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "30")
+        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "dev")
         winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "M3U Web Picker")
         winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(ROOT))
-        winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, f'"{INSTALLED_EXE}" --uninstall')
+        winreg.SetValueEx(
+            key,
+            "UninstallString",
+            0,
+            winreg.REG_SZ,
+            f'"{INSTALLED_EXE}" --uninstall',
+        )
         winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
         winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
 
     desktop = desktop_folder()
     if desktop.is_dir():
-        (desktop / "M3U Web Picker.url").write_text(
-            "[InternetShortcut]\r\nURL=" + WEB_URL + "\r\n",
+        (desktop / "M3U Web Picker Dev.url").write_text(
+            f"[InternetShortcut]\r\nURL={WEB_URL}\r\n",
             encoding="ascii",
         )
 
 
 def remove_shell_integration() -> None:
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            RUN_KEY,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
             winreg.DeleteValue(key, APP_NAME)
     except OSError:
         pass
@@ -382,24 +460,23 @@ def remove_shell_integration() -> None:
     except OSError:
         pass
     try:
-        (desktop_folder() / "M3U Web Picker.url").unlink(missing_ok=True)
+        (desktop_folder() / "M3U Web Picker Dev.url").unlink(missing_ok=True)
     except OSError:
         pass
 
 
 def app_reachable() -> bool:
     try:
-        with urllib.request.urlopen(WEB_URL + "/api/guide/ping", timeout=2) as response:
+        with urllib.request.urlopen(
+            WEB_URL + "/api/guide/ping",
+            timeout=2,
+        ) as response:
             return response.status == 200
     except Exception:
-        try:
-            with urllib.request.urlopen(WEB_URL, timeout=2) as response:
-                return response.status < 500
-        except Exception:
-            return False
+        return False
 
 
-def wait_for_app(seconds: int = 45) -> bool:
+def wait_for_app(seconds: int = 60) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
         if app_reachable():
@@ -423,10 +500,12 @@ def stop_host() -> None:
             ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
             creationflags=CREATE_NO_WINDOW,
         )
     HOST_PID.unlink(missing_ok=True)
-    deadline = time.time() + 8
+
+    deadline = time.time() + 12
     while time.time() < deadline and app_reachable():
         time.sleep(0.25)
 
@@ -449,16 +528,15 @@ def run_host() -> int:
     python = VENV_DIR / "Scripts" / "python.exe"
     if not python.is_file() or not APP_DIR.is_dir():
         return 2
+
     ROOT.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     env = load_host_env()
     with HOST_LOG.open("a", encoding="utf-8", errors="replace") as log:
         log.write(f"\n--- starting {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
         log.flush()
         process = subprocess.Popen(
-            [
-                str(python), "-m", "waitress",
-                "--threads=8", "--host=0.0.0.0", "--port=9999", "app:app",
-            ],
+            [str(python), str(APP_DIR / "host_runtime.py")],
             cwd=str(APP_DIR),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -466,7 +544,6 @@ def run_host() -> int:
             stderr=subprocess.STDOUT,
             creationflags=CREATE_NEW_PROCESS_GROUP,
         )
-        HOST_PID.write_text(str(process.pid), encoding="ascii")
         try:
             return process.wait()
         finally:
@@ -482,8 +559,8 @@ def open_browser() -> None:
 
 
 def install() -> None:
-    banner("M3U Web Picker Bare Windows Installer")
-    print("Python only. No Docker. No WSL. No Git.\n")
+    banner("M3U Web Picker Python Dev Installer")
+    print("Python host only. No Docker. No WSL. Dev port 9998.\n")
     for directory in (ROOT, DATA_DIR, BACKUP_DIR, CAST_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -496,32 +573,43 @@ def install() -> None:
     write_host_env()
     copy_self()
     install_shell_integration()
+
     stop_host()
     launch_installed()
     if not wait_for_app():
-        raise RuntimeError("The Python host did not become reachable on port 9999; check host.log")
-    print(f"\nM3U Web Picker is running at {WEB_URL}")
+        raise RuntimeError(
+            "The Python dev host did not become reachable on port 9998; "
+            f"check {HOST_LOG}."
+        )
+
+    print(f"\nM3U Web Picker Dev is running at {WEB_URL}")
     print(f"Installed under: {ROOT}")
-    print("Opening the setup wizard...")
+    print("Guide debug M3U/TS links are enabled.")
     open_browser()
     print("\nSetup complete.")
     pause()
 
 
 def update_install() -> None:
-    banner("M3U Web Picker Update")
+    banner("M3U Web Picker Dev Update")
     if not INSTALLED_EXE.is_file():
-        raise RuntimeError("M3U Web Picker is not installed")
+        raise RuntimeError("M3U Web Picker Dev is not installed.")
+
     python = VENV_DIR / "Scripts" / "python.exe"
     if not python.is_file():
-        raise RuntimeError("Managed Python environment is missing; rerun the installer")
+        raise RuntimeError(
+            "Managed Python environment is missing; rerun the installer."
+        )
+
     stop_host()
     install_source()
     install_requirements(python)
     write_host_env()
     launch_installed()
     if not wait_for_app():
-        raise RuntimeError("Updated host did not become reachable; check host.log")
+        raise RuntimeError(
+            "Updated dev host did not become reachable; check host.log."
+        )
     print("Update complete.")
     open_browser()
     pause()
@@ -530,35 +618,37 @@ def update_install() -> None:
 def schedule_cleanup(*, keep_data: bool) -> None:
     python = find_python312()
     if not python:
-        raise RuntimeError("Could not locate the base Python installation for final cleanup")
-    parent = os.getpid()
-    keep = "1" if keep_data else "0"
-    script = r'''
-import os, shutil, sys, time
-parent = int(sys.argv[1])
-root = sys.argv[2]
-keep = sys.argv[3] == "1"
+        raise RuntimeError(
+            "Could not locate Python 3.12 for final uninstall cleanup."
+        )
+
+    script = r'''import os, shutil, sys, time
+root = sys.argv[1]
+keep = sys.argv[2] == "1"
 time.sleep(2)
-for _ in range(30):
-    try:
-        if keep:
-            for name in os.listdir(root):
-                if name in {"data", "backups"}:
-                    continue
-                path = os.path.join(root, name)
-                if os.path.isdir(path) and not os.path.islink(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    try: os.remove(path)
-                    except OSError: pass
+if keep:
+    for name in os.listdir(root):
+        if name in {"data", "backups"}:
+            continue
+        path = os.path.join(root, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
         else:
-            shutil.rmtree(root, ignore_errors=True)
-        break
-    except OSError:
-        time.sleep(1)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+else:
+    shutil.rmtree(root, ignore_errors=True)
 '''
     subprocess.Popen(
-        [str(python), "-c", script, str(parent), str(ROOT), keep],
+        [
+            str(python),
+            "-c",
+            script,
+            str(ROOT),
+            "1" if keep_data else "0",
+        ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -568,16 +658,18 @@ for _ in range(30):
 
 
 def uninstall() -> None:
-    banner("M3U Web Picker Uninstaller")
-    answer = input("Keep database and backups? [Y/n]: ").strip().lower()
+    banner("M3U Web Picker Dev Uninstaller")
+    answer = input("Keep dev database and backups? [Y/n]: ").strip().lower()
     keep_data = answer not in {"n", "no"}
+
     stop_host()
     remove_shell_integration()
     schedule_cleanup(keep_data=keep_data)
+
     if keep_data:
-        print(f"Application removed. Data/backups will remain under {ROOT}.")
+        print(f"Dev app removed. Data/backups remain under {ROOT}.")
     else:
-        print("Application, data, and backups will be removed.")
+        print("Dev app, data, and backups will be removed.")
     print("Uninstall complete.")
 
 
@@ -586,7 +678,9 @@ def main() -> int:
         print("ERROR: This installer is intended for Windows.")
         return 1
 
-    parser = argparse.ArgumentParser(description="M3U Web Picker bare Windows installer")
+    parser = argparse.ArgumentParser(
+        description="M3U Web Picker Python dev Windows installer"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--install", action="store_true")
     group.add_argument("--run", action="store_true")
