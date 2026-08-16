@@ -1,8 +1,8 @@
 # macOS installer
 
-The macOS package is a small zip containing `install.command` and `uninstall.command`.
+The macOS package is a DMG containing `Install M3U Web Picker.command`, `Uninstall M3U Web Picker.command`, and this README.
 
-`install.command` installs the host-Python edition under:
+The installer installs the host-Python edition under:
 
 ```text
 ~/Library/Application Support/M3U-Web-Picker
@@ -17,8 +17,8 @@ Requirements:
 
 If Homebrew is available, the installer can install missing `python@3.12` and `ffmpeg`. Otherwise it tells the user what is missing and exits without modifying the app install.
 
-Running `install.command` again updates the application source and Python dependencies while preserving data/backups.
+Running the installer again updates the application source and Python dependencies while preserving data/backups.
 
-`uninstall.command` removes the LaunchAgent and application runtime, and asks whether the database/backups should be preserved.
+The uninstall command removes the LaunchAgent and application runtime, and asks whether the database/backups should be preserved.
 
 This package is intentionally user-scoped and does not require Docker.
