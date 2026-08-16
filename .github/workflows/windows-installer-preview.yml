@@ -8,6 +8,8 @@ on:
       - installer/windows-python/**
       - host_runtime.py
       - app.py
+      - core.py
+      - sports/**
       - api/guide_debug.py
       - jellyfin_cache.py
       - static/js/onboarding_navigation_fix.js
