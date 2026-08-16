@@ -77,40 +77,67 @@ def register_onboarding_routes(app):
         if not _provider_configured():
             return jsonify(error="Primary provider is not configured."), 409
 
-        # If something is already updating, that work satisfies the first-load
-        # requirement; claim the flag so a second full refresh is not stacked on
-        # top of it.
+        current_state = onboarding.get_state(
+            core.DB_PATH,
+            provider_configured=True,
+        )
+        answers = current_state.get("answers") or {}
+        if answers.get("initial_refresh_completed_at"):
+            return jsonify(started=False, pending=False, ready=True, state=current_state), 200
+
+        # Do not claim the one-shot while some unrelated Master Update already
+        # owns the worker. The finishing-setup gate will wait for that work to
+        # become idle and then start its own onboarding-triggered update, whose
+        # completion explicitly verifies the public EPG and Combined XMLTV.
         if master_update_worker.payload().get("running"):
-            claimed = onboarding.claim_initial_refresh(
-                core.DB_PATH,
-                provider_configured=True,
-            )
-            return jsonify(started=False, already_running=True, claimed=claimed), 202
+            return jsonify(
+                started=False,
+                already_running=True,
+                pending=bool(answers.get("initial_refresh_pending")),
+                in_progress=bool(answers.get("initial_refresh_in_progress")),
+                state=current_state,
+            ), 202
 
         claimed = onboarding.claim_initial_refresh(
             core.DB_PATH,
             provider_configured=True,
         )
         if not claimed:
-            return jsonify(started=False, pending=False), 200
+            current_state = onboarding.get_state(
+                core.DB_PATH,
+                provider_configured=True,
+            )
+            return jsonify(started=False, pending=False, state=current_state), 200
 
         try:
             started, master = master_update_worker.start(trigger="onboarding")
         except Exception as exc:
+            onboarding.finish_initial_refresh(
+                core.DB_PATH,
+                provider_configured=True,
+                success=False,
+                error="Could not start the initial Master Update.",
+            )
             print(f"Could not start initial post-onboarding Master Update: {exc}")
             return jsonify(
                 error="Could not start the initial Master Update.",
                 started=False,
-                pending=False,
+                pending=True,
             ), 500
 
         if not started:
-            # A job won the race after the check above. That active job still
-            # satisfies the one-shot first-load refresh requirement.
+            # A job won the race after the pre-check. Re-arm the onboarding
+            # request so the finishing gate can try again once that job is idle.
+            onboarding.finish_initial_refresh(
+                core.DB_PATH,
+                provider_configured=True,
+                success=False,
+                error="Another Master Update started first. Retry when it finishes.",
+            )
             return jsonify(
                 started=False,
                 already_running=True,
-                claimed=True,
+                pending=True,
                 master_update=master,
             ), 202
 
@@ -118,6 +145,7 @@ def register_onboarding_routes(app):
             started=True,
             pending=False,
             master_update=master,
+            state=onboarding.get_state(core.DB_PATH, provider_configured=True),
         ), 202
 
     @app.get("/api/jellyfin-cache")
