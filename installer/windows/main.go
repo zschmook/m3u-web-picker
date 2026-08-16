@@ -71,7 +71,7 @@ func main() {
 		fatalf("Could not configure LAN settings: %v", err)
 	}
 
-	if err := writeHelpers(installDir, repoDir, gitPath); err != nil {
+	if err := writeHelpers(installDir, repoDir, gitPath, dockerPath); err != nil {
 		fmt.Printf("Warning: could not create helper shortcuts: %v\n", err)
 	}
 
@@ -220,7 +220,7 @@ func ensureMinGit(minGitDir string) (string, error) {
 
 func syncRepository(gitPath, repoDir string) error {
 	gitDir := filepath.Join(repoDir, ".git")
-	if !fileExists(gitDir) {
+	if !dirExists(gitDir) {
 		fmt.Println("Downloading M3U Web Picker main branch...")
 		if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 			return err
@@ -308,7 +308,7 @@ func isRFC1918(ip net.IP) bool {
 	return v[0] == 10 || (v[0] == 172 && v[1] >= 16 && v[1] <= 31) || (v[0] == 192 && v[1] == 168)
 }
 
-func writeHelpers(installDir, repoDir, gitPath string) error {
+func writeHelpers(installDir, repoDir, gitPath, dockerPath string) error {
 	updateCmd := filepath.Join(installDir, "Update M3U Web Picker.cmd")
 	updateBody := fmt.Sprintf(`@echo off
 setlocal
@@ -319,7 +319,7 @@ if errorlevel 1 goto :fail
 if errorlevel 1 goto :fail
 "%s" reset --hard origin/main
 if errorlevel 1 goto :fail
-docker compose up -d --build
+"%s" compose up -d --build
 if errorlevel 1 goto :fail
 echo.
 echo M3U Web Picker updated successfully.
@@ -330,7 +330,7 @@ echo.
 echo Update failed. Review the error above.
 pause
 exit /b 1
-`, repoDir, gitPath, gitPath, gitPath)
+`, repoDir, gitPath, gitPath, gitPath, dockerPath)
 	if err := os.WriteFile(updateCmd, []byte(updateBody), 0o644); err != nil {
 		return err
 	}
