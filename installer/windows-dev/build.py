@@ -41,7 +41,7 @@ def main() -> int:
         "--onefile",
         "--name",
         NAME,
-        str(ROOT / "installer.py"),
+        str(ROOT / "release_installer.py"),
     ])
 
     output = DIST / f"{NAME}.exe"
