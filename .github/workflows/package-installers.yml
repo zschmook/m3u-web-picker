@@ -1,0 +1,65 @@
+name: Package installers
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Windows installer
+        run: python installer/windows-python/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-Windows-Setup
+          path: installer/windows-python/dist/M3U-Web-Picker-Windows-Setup.exe
+          retention-days: 30
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package macOS installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/M3U-Web-Picker-macOS
+          cp installer/macos/install.command dist/M3U-Web-Picker-macOS/
+          cp installer/macos/uninstall.command dist/M3U-Web-Picker-macOS/
+          cp installer/macos/README.md dist/M3U-Web-Picker-macOS/
+          chmod +x dist/M3U-Web-Picker-macOS/*.command
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/M3U-Web-Picker-macOS \
+            dist/M3U-Web-Picker-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-macOS
+          path: dist/M3U-Web-Picker-macOS.zip
+          retention-days: 30
+
+  attach-to-release:
+    if: github.event_name == 'release'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach packaged downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          find dist -maxdepth 1 -type f -print
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

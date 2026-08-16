@@ -12,3 +12,7 @@ data/
 .env
 .vscode/
 .idea/
+
+installer/**/build/
+installer/**/dist/
+installer/**/*.spec

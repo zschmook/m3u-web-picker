@@ -2,11 +2,33 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v30** and is intended to run in Docker on Windows, macOS, or Linux.
+The current main line is **v30**. Windows has a packaged Python-host installer, macOS has a convenience host installer, and Docker remains available for source-based installs.
 
-## Quick start
+## Downloads
 
-Docker is the application runtime. Git is used by the source-checkout workflow below; users without Git can download/extract the repository source and run the same Compose command from that directory.
+Packaged installers are published through **GitHub Releases**:
+
+- **Windows:** `M3U-Web-Picker-Windows-Setup.exe` — Python/Waitress host runtime, private venv and FFmpeg, no Docker/WSL/Git required.
+- **macOS:** `M3U-Web-Picker-macOS.zip` — contains `install.command` and `uninstall.command` for the host-Python runtime.
+- **Linux:** you're on your own. The Docker/source path is there if you want it.
+
+The installer packaging workflow is manual/release-triggered only; it does not run on every push.
+
+## Windows Python installer
+
+The Windows installer runs M3U Web Picker directly on the host with Python 3.12 + Waitress. Application state lives below `%LOCALAPPDATA%\M3U-Web-Picker`, outside the downloaded source tree. The installer can install Python 3.12 when needed, downloads a pinned FFmpeg build, creates a private virtual environment, registers startup/uninstall integration, and opens the setup wizard at `http://localhost:9999`.
+
+The implementation and build files live under `installer/windows-python/`.
+
+## macOS installer
+
+The macOS package installs the same host-Python runtime below `~/Library/Application Support/M3U-Web-Picker`, registers a per-user LaunchAgent, and opens the setup wizard on port 9999. If Homebrew is available it can install missing Python 3.12 and FFmpeg; otherwise it tells you which prerequisite is missing and exits.
+
+The implementation lives under `installer/macos/`.
+
+## Docker quick start
+
+Docker remains supported for people who prefer the containerized runtime. Git is used by the source-checkout workflow below; users without Git can download/extract the repository source and run the same Compose command from that directory.
 
 ```bash
 git clone https://github.com/zschmook/m3u-web-picker.git
@@ -29,7 +51,7 @@ The setup flow can configure:
 - the automatic Master Update schedule;
 - optional Jellyfin cache cleanup.
 
-Provider credentials and application state are stored in the persistent Docker data volume, not in the repository.
+Provider credentials and application state are stored in the runtime data directory, not in the repository.
 
 ## Main outputs
 
@@ -52,7 +74,7 @@ Sports channel numbers are organized into stable league blocks. Generated channe
 
 The built-in TV Guide uses the curated lineup and Combined XMLTV output. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 
-For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. On macOS, `scripts/detect-lan-host.sh` prints the address on the default route.
+For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. The host installers attempt to detect this automatically. On macOS source/Docker installs, `scripts/detect-lan-host.sh` prints the address on the default route.
 
 ## Roku receiver
 
@@ -95,13 +117,15 @@ More detailed Roku troubleshooting is in `USER-GUIDE.md`.
 
 Jellyfin cache cleanup is optional and experimental. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
 
-The cache directory must be explicitly mounted into the container with `M3U_JELLYFIN_CACHE_DIR`. The wizard requires an acknowledgement before enabling deletion because clearing Jellyfin cache data may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
+For Docker, the cache directory must be explicitly mounted into the container with `M3U_JELLYFIN_CACHE_DIR`. The wizard requires an acknowledgement before enabling deletion because clearing Jellyfin cache data may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
 
 ## Persistent data and backups
 
+For the Windows host installer, data and backups live under `%LOCALAPPDATA%\M3U-Web-Picker`. For the macOS host installer they live under `~/Library/Application Support/M3U-Web-Picker`.
+
 The normal Compose project is `m3u-picker` and stores application state in the `m3u-picker-data` Docker volume. `docker compose down` preserves the volume. `docker compose down -v` deletes it.
 
-Backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
+Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
 
 ## Clean first-run testing
 
@@ -116,7 +140,9 @@ That stack uses host port `9998` and a separate `m3u-picker-dev-data` volume. Us
 
 ## Updating
 
-For a normal source checkout:
+The Windows installer has an `--update` path. Re-running the macOS installer updates the source/dependencies while preserving its data directory.
+
+For a normal Docker/source checkout:
 
 ```bash
 git pull --ff-only origin main
@@ -124,6 +150,10 @@ docker compose up -d --build
 ```
 
 Do not remove the data volume during a normal update.
+
+## Packaging installers
+
+`.github/workflows/package-installers.yml` builds the Windows EXE and macOS zip. It can be run manually from GitHub Actions. When a GitHub Release is published, the same workflow builds both packages and attaches them to that release automatically.
 
 ## Tests
 
