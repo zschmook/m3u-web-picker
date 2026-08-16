@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import master_update_worker
@@ -69,6 +71,62 @@ class MasterUpdateWorkerTests(unittest.TestCase):
         self.assertTrue(payload["running"])
         self.assertEqual(payload["trigger"], "scheduled")
         self.assertEqual(payload["phase"], "running")
+
+    def test_onboarding_guide_ready_requires_public_epg_cache_and_combined_xmltv(self):
+        with TemporaryDirectory() as temp_dir:
+            combined = Path(temp_dir) / "epg.xml"
+            combined.write_text("<tv></tv>\n", encoding="utf-8")
+            public_payload = {
+                "countries": [
+                    {
+                        "code": "US",
+                        "enabled": True,
+                        "cached": True,
+                        "filtered_bytes": 1234,
+                    }
+                ]
+            }
+            with patch.object(
+                master_update_worker.core,
+                "public_epg_payload",
+                return_value=public_payload,
+            ), patch.object(
+                master_update_worker.core,
+                "COMBINED_EPG_PATH",
+                combined,
+            ):
+                ready, error = master_update_worker._onboarding_guide_ready()
+
+            self.assertTrue(ready)
+            self.assertEqual(error, "")
+
+    def test_onboarding_guide_ready_rejects_uncached_enabled_public_epg(self):
+        with TemporaryDirectory() as temp_dir:
+            combined = Path(temp_dir) / "epg.xml"
+            combined.write_text("<tv></tv>\n", encoding="utf-8")
+            public_payload = {
+                "countries": [
+                    {
+                        "code": "US",
+                        "enabled": True,
+                        "cached": False,
+                        "filtered_bytes": 0,
+                    }
+                ]
+            }
+            with patch.object(
+                master_update_worker.core,
+                "public_epg_payload",
+                return_value=public_payload,
+            ), patch.object(
+                master_update_worker.core,
+                "COMBINED_EPG_PATH",
+                combined,
+            ):
+                ready, error = master_update_worker._onboarding_guide_ready()
+
+            self.assertFalse(ready)
+            self.assertIn("US", error)
 
 
 if __name__ == "__main__":
