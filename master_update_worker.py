@@ -49,20 +49,71 @@ def payload() -> dict:
     return result
 
 
+def _finish_onboarding_refresh(*, success: bool, error: str = "") -> None:
+    """Persist whether the first-run guide is safe to expose to the user."""
+    try:
+        import onboarding
+
+        onboarding.finish_initial_refresh(
+            core.DB_PATH,
+            provider_configured=True,
+            success=success,
+            error=error,
+        )
+    except Exception as exc:
+        print(f"Could not finalize onboarding guide gate: {exc}")
+
+
+def _onboarding_guide_ready() -> tuple[bool, str]:
+    """Require cached/filtered public EPG plus a published Combined XMLTV."""
+    try:
+        public_epg = core.public_epg_payload()
+    except Exception as exc:
+        return False, f"Could not inspect public EPG state: {exc}"
+
+    enabled = [
+        item
+        for item in (public_epg.get("countries") or [])
+        if item.get("enabled")
+    ]
+    missing = [
+        str(item.get("code") or "public EPG")
+        for item in enabled
+        if not item.get("cached") or int(item.get("filtered_bytes") or 0) <= 0
+    ]
+    if missing:
+        return False, f"Public EPG data was not ready for: {', '.join(missing)}."
+
+    try:
+        combined_ready = core.COMBINED_EPG_PATH.exists() and core.COMBINED_EPG_PATH.stat().st_size > 0
+    except Exception:
+        combined_ready = False
+    if not combined_ready:
+        return False, "Combined XMLTV was not published by the first update."
+
+    return True, ""
+
+
 def _run(trigger: str) -> None:
     global _thread, _trigger, _started_at, _started_monotonic
+    onboarding_trigger = trigger == "onboarding"
     try:
         # Resolve the function through the core module at execution time.  The
         # dev runtime wraps core.run_master_update with Jellyfin cleanup and
         # update-reporting after modules are imported; this keeps those wrappers
         # in the background execution path.
         core.run_master_update(trigger=trigger)
+        if onboarding_trigger:
+            ready, error = _onboarding_guide_ready()
+            _finish_onboarding_refresh(success=ready, error=error)
     except Exception as exc:
         try:
             message = core.redact_url_credentials(str(exc))
         except Exception:
             message = str(exc)
         print(f"Background Master Update failed: {message}")
+        if onboarding_trigger:
+            _finish_onboarding_refresh(success=False, error=message)
     finally:
         with _lock:
             if _thread is threading.current_thread():
