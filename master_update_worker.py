@@ -64,6 +64,16 @@ def _finish_onboarding_refresh(*, success: bool, error: str = "") -> None:
         print(f"Could not finalize onboarding guide gate: {exc}")
 
 
+def _demo_provider_requires_guide_matches() -> bool:
+    """Demo onboarding promises a working guide, not merely a downloaded file."""
+    try:
+        primary = core.primary_provider_source() or {}
+        name = str(primary.get("name", "") or "").strip()
+        return bool(core.selected_ids) and name.endswith(" Demo")
+    except Exception:
+        return False
+
+
 def _onboarding_guide_ready() -> tuple[bool, str]:
     """Require cached/filtered public EPG plus a published Combined XMLTV."""
     try:
@@ -83,6 +93,19 @@ def _onboarding_guide_ready() -> tuple[bool, str]:
     ]
     if missing:
         return False, f"Public EPG data was not ready for: {', '.join(missing)}."
+
+    if _demo_provider_requires_guide_matches():
+        empty = [
+            str(item.get("code") or "public EPG")
+            for item in enabled
+            if int(item.get("filtered_channels") or 0) <= 0
+            or int(item.get("filtered_programmes") or 0) <= 0
+        ]
+        if empty:
+            return False, (
+                "Public EPG downloaded, but no usable demo-channel guide data "
+                f"matched for: {', '.join(empty)}."
+            )
 
     try:
         combined_ready = core.COMBINED_EPG_PATH.exists() and core.COMBINED_EPG_PATH.stat().st_size > 0
