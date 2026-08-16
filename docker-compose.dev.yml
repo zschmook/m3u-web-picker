@@ -20,6 +20,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       M3U_ONBOARDING_ENABLED: "true"
+      M3U_DEBUG_TOOLS: "true"
       M3U_BACKUP_ENABLED: "true"
       M3U_DATA_DIR: /app/data
       M3U_LAN_HOST: "${M3U_LAN_HOST:-}"
