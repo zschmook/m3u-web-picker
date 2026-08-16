@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 
@@ -70,10 +71,30 @@ def _stop_dev_host() -> None:
     )
 
 
+def _reset_dev_state() -> None:
+    # Preview installer behavior intentionally mirrors `docker compose down -v`:
+    # reinstalling starts the app with fresh state while retaining expensive
+    # runtime dependencies (Python venv and FFmpeg).
+    print("Resetting existing dev data (-v style)...")
+    for directory in (
+        _installer.DATA_DIR,
+        _installer.BACKUP_DIR,
+        _installer.CAST_DIR,
+    ):
+        shutil.rmtree(directory, ignore_errors=True)
+
+    for path in (
+        _installer.HOST_LOG,
+        _installer.HOST_ENV,
+    ):
+        path.unlink(missing_ok=True)
+
+
 def _install_with_host_stopped() -> None:
     if _installer.read_pid() or _listener_pids(_installer.PORT):
         print("Stopping existing M3U Web Picker Dev host...")
     _stop_dev_host()
+    _reset_dev_state()
     _original_install()
 
 
