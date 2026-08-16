@@ -2,7 +2,7 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v30**. Windows has a packaged Python-host installer, macOS has a convenience host installer, and Docker remains available for source-based installs.
+The current main line is **v31**. Windows has a packaged Python-host installer, macOS has a convenience host installer, and Docker remains available for source-based installs.
 
 ## Downloads
 
