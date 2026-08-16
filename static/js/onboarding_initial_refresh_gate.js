@@ -179,6 +179,7 @@
   }
 
   async function start() {
+    const serverGate = document.documentElement.classList.contains("onboarding-initial-refresh-pending");
     try {
       const payload = await api("/api/onboarding");
       if (!gateRequired(payload)) {
@@ -197,8 +198,11 @@
         void startRefresh(false);
       }
     } catch (error) {
-      document.documentElement.classList.remove("onboarding-initial-refresh-pending");
-      console.error("Could not initialize onboarding guide gate:", error);
+      if (serverGate) {
+        renderGate("Could not initialize the first guide update.", error.message || "Unknown onboarding refresh error.");
+      } else {
+        console.error("Could not initialize onboarding guide gate:", error);
+      }
     }
   }
 
