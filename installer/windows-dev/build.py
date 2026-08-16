@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
-SPEC = ROOT / "M3U-Web-Picker-Bare-Setup.spec"
-NAME = "M3U-Web-Picker-Bare-Setup"
+SPEC = ROOT / "M3U-Web-Picker-Python-Dev-Setup.spec"
+NAME = "M3U-Web-Picker-Python-Dev-Setup"
 
 
 def run(args: list[str]) -> None:
@@ -20,7 +20,15 @@ def main() -> int:
     if sys.platform != "win32":
         raise SystemExit("Build the Windows installer on Windows.")
 
-    run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pyinstaller"])
+    run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--upgrade",
+        "pyinstaller",
+    ])
     shutil.rmtree(DIST, ignore_errors=True)
     shutil.rmtree(BUILD, ignore_errors=True)
     SPEC.unlink(missing_ok=True)
