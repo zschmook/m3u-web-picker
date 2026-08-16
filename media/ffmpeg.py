@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 
 def executable() -> str:
+    configured = str(os.environ.get("M3U_FFMPEG", "") or "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file():
+            return str(candidate)
+        raise RuntimeError(f"Configured ffmpeg executable does not exist: {candidate}")
+
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg is not installed.")
