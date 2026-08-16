@@ -7,10 +7,13 @@ from flask import Flask, redirect, render_template, request, send_from_directory
 import core
 import hdhr_config
 import onboarding
+import public_epg_compat
 from api import register_routes
 from api.hdhr_discovery import start_hdhr_discovery, stop_hdhr_discovery
 from core import DEV_PORT, PORT
 from settings import SETTINGS
+
+public_epg_compat.install(core)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
