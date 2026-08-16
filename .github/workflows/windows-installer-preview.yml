@@ -1,0 +1,36 @@
+name: Windows Installer Preview
+
+on:
+  push:
+    branches:
+      - installer
+    paths:
+      - installer/windows-python/**
+      - host_runtime.py
+      - app.py
+      - api/guide_debug.py
+      - jellyfin_cache.py
+      - static/js/onboarding_navigation_fix.js
+      - .github/workflows/windows-installer-preview.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Windows installer
+        run: python installer/windows-python/build.py
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-Windows-Setup
+          path: installer/windows-python/dist/M3U-Web-Picker-Windows-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
