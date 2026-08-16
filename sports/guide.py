@@ -289,7 +289,7 @@ def _add_provider_programme_guide(
     upcoming_stop = min(primary_start, coverage_end)
     if coverage_start < upcoming_stop:
         primary_title = str(retained_airings[0].get("title") or event_title).strip()
-        scheduled = primary_start.strftime("%A, %B %-d at %-I:%M %p %Z")
+        scheduled = primary_start.strftime("%A, %B %d at %I:%M %p %Z").replace(" 0", " ")
         _add_programme(
             root,
             channel_id=channel_id,
@@ -340,7 +340,7 @@ def _add_synthetic_event_guide(
         live_end = (end or (start + _event_duration(league_id))).astimezone(timezone)
         if live_end <= local_start:
             live_end = local_start + _event_duration(league_id)
-        scheduled = local_start.strftime("%A, %B %-d at %-I:%M %p %Z")
+        scheduled = local_start.strftime("%A, %B %d at %I:%M %p %Z").replace(" 0", " ")
 
         if live_end + timedelta(hours=_s.GUIDE_POSTGAME_HOURS) <= coverage_start:
             _add_programme(

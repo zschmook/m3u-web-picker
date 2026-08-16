@@ -289,7 +289,7 @@ def _build_generated_channels(ctx: ScanContext) -> None:
             if event.get("start"):
                 start_text = event["start"].astimezone(
                     ZoneInfo(str(ctx.settings.get("timezone", "America/New_York")))
-                ).strftime("%-I:%M %p")
+                ).strftime("%I:%M %p").lstrip("0")
                 subtitle = f"{subtitle} • {start_text}"
             display_name = (
                 f"{_s._classification_label(classification_id)} • "
