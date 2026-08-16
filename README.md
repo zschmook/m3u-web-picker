@@ -49,7 +49,7 @@ The setup flow can configure:
 - Sports Automation and team/league rules;
 - optional API-SPORTS schedule support for supported leagues;
 - the automatic Master Update schedule;
-- optional Jellyfin cache cleanup.
+- optional Jellyfin cache cleanup (**use with extreme care: the configured cleanup path is not safety-checked, so an incorrect path or mount can delete data outside the Jellyfin cache**).
 
 Provider credentials and application state are stored in the runtime data directory, not in the repository.
 
@@ -116,6 +116,8 @@ More detailed Roku troubleshooting is in `USER-GUIDE.md`.
 ## Jellyfin cache integration
 
 Jellyfin cache cleanup is optional and experimental. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
+
+**WARNING: the Jellyfin cleanup path is trusted exactly as configured. There is currently no path-safety validation to prove that it points only at a Jellyfin cache directory. A wrong host path, container mount, or configuration could cause recursive deletion of unrelated data — in the worst case, potentially an entire mounted drive/filesystem. Use this feature only after manually verifying the path and mount.**
 
 For Docker, the cache directory must be explicitly mounted into the container with `M3U_JELLYFIN_CACHE_DIR`. The wizard requires an acknowledgement before enabling deletion because clearing Jellyfin cache data may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
 
