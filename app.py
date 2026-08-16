@@ -84,6 +84,7 @@ def index():
         '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
         '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
+        '<link rel="stylesheet" href="/static/css/ui_sidebar_brand_links.css?v=sidebar-brand-links-1">\n'
         '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n'
         '<link rel="stylesheet" href="/static/css/update_lifecycle.css?v=update-lifecycle-1">\n'
         '<link rel="stylesheet" href="/static/css/onboarding.css?v=onboarding-1">\n</head>',
@@ -100,6 +101,7 @@ def index():
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
+        '<script src="/static/js/ui_sidebar_brand_links.js?v=sidebar-brand-links-1"></script>\n'
         '<script src="/static/js/update_lifecycle.js?v=update-lifecycle-1"></script>\n'
         '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'
         '<script src="/static/js/ui_epg_static.js?v=output-lan-1"></script>\n'
