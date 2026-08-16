@@ -86,7 +86,8 @@ def index():
         '<script src="/static/js/onboarding.js?v=onboarding-1"></script>\n'
         '<script src="/static/js/onboarding_enhancements.js?v=onboarding-2"></script>\n'
         '<script src="/static/js/onboarding_provider_validation_v2.js?v=onboarding-4"></script>\n'
-        '<script src="/static/js/onboarding_manual_channels.js?v=onboarding-5"></script>\n</body>',
+        '<script src="/static/js/onboarding_manual_channels.js?v=onboarding-5"></script>\n'
+        '<script src="/static/js/onboarding_navigation_fix.js?v=onboarding-6"></script>\n</body>',
     )
 
 
