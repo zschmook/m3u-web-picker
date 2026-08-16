@@ -28,22 +28,26 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package macOS installer
+      - name: Package macOS installer DMG
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist/M3U-Web-Picker-macOS
-          cp installer/macos/install.command dist/M3U-Web-Picker-macOS/
-          cp installer/macos/uninstall.command dist/M3U-Web-Picker-macOS/
-          cp installer/macos/README.md dist/M3U-Web-Picker-macOS/
-          chmod +x dist/M3U-Web-Picker-macOS/*.command
-          ditto -c -k --sequesterRsrc --keepParent \
-            dist/M3U-Web-Picker-macOS \
-            dist/M3U-Web-Picker-macOS.zip
+          rm -rf dist
+          mkdir -p dist/dmg-root
+          cp installer/macos/install.command dist/dmg-root/Install\ M3U\ Web\ Picker.command
+          cp installer/macos/uninstall.command dist/dmg-root/Uninstall\ M3U\ Web\ Picker.command
+          cp installer/macos/README.md dist/dmg-root/README.md
+          chmod +x dist/dmg-root/*.command
+          hdiutil create \
+            -volname "M3U Web Picker" \
+            -srcfolder dist/dmg-root \
+            -ov \
+            -format UDZO \
+            dist/M3U-Web-Picker-macOS.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: M3U-Web-Picker-macOS
-          path: dist/M3U-Web-Picker-macOS.zip
+          path: dist/M3U-Web-Picker-macOS.dmg
           retention-days: 30
 
   attach-to-release:
