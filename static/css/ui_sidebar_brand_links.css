@@ -1,0 +1,19 @@
+.ui-sidebar-brand[data-ui-home-link="true"] {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 10px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.ui-sidebar-brand[data-ui-home-link="true"]:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+body[data-ui-theme] .ui-sidebar-brand[data-ui-home-link="true"]:hover {
+  background: var(--ui-panel-soft);
+}
+
+.ui-sidebar-brand[data-ui-home-link="true"]:focus-visible {
+  outline: 2px solid rgba(105, 161, 255, 0.95);
+  outline-offset: 2px;
+}
