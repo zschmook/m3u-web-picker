@@ -44,7 +44,7 @@ A fresh data volume opens the first-run setup wizard. Existing configured instal
 
 The setup flow can configure:
 
-- a primary M3U or Xtream provider;
+- a primary M3U or Xtream provider, or the built-in free public M3U demo option for testing without an IPTV service;
 - manual channels to keep in the curated lineup;
 - Sports Automation and team/league rules;
 - optional API-SPORTS schedule support for supported leagues;
