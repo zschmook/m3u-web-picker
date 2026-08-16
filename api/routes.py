@@ -14,6 +14,7 @@ from .epg import register_epg_routes
 from .event_images import register_event_image_routes
 from .groups import register_group_routes
 from .guide import register_guide_routes
+from .guide_debug import register_guide_debug_routes
 from .hdhr import register_hdhr_routes
 from .images import register_image_routes
 from .logo_cache_status import register_logo_cache_status_routes
@@ -32,6 +33,7 @@ def register_routes(app):
     register_group_routes(app)
     register_sports_routes(app)
     register_guide_routes(app)
+    register_guide_debug_routes(app)
     register_hdhr_routes(app)
     register_image_routes(app)
     register_event_image_routes(app)
