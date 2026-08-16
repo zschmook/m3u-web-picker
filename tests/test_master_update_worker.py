@@ -94,6 +94,10 @@ class MasterUpdateWorkerTests(unittest.TestCase):
                 master_update_worker.core,
                 "COMBINED_EPG_PATH",
                 combined,
+            ), patch.object(
+                master_update_worker,
+                "_demo_provider_requires_guide_matches",
+                return_value=False,
             ):
                 ready, error = master_update_worker._onboarding_guide_ready()
 
@@ -122,11 +126,49 @@ class MasterUpdateWorkerTests(unittest.TestCase):
                 master_update_worker.core,
                 "COMBINED_EPG_PATH",
                 combined,
+            ), patch.object(
+                master_update_worker,
+                "_demo_provider_requires_guide_matches",
+                return_value=False,
             ):
                 ready, error = master_update_worker._onboarding_guide_ready()
 
             self.assertFalse(ready)
             self.assertIn("US", error)
+
+    def test_onboarding_demo_rejects_nonempty_but_zero_match_public_epg(self):
+        with TemporaryDirectory() as temp_dir:
+            combined = Path(temp_dir) / "epg.xml"
+            combined.write_text("<tv></tv>\n", encoding="utf-8")
+            public_payload = {
+                "countries": [
+                    {
+                        "code": "US",
+                        "enabled": True,
+                        "cached": True,
+                        "filtered_bytes": 184,
+                        "filtered_channels": 0,
+                        "filtered_programmes": 0,
+                    }
+                ]
+            }
+            with patch.object(
+                master_update_worker.core,
+                "public_epg_payload",
+                return_value=public_payload,
+            ), patch.object(
+                master_update_worker.core,
+                "COMBINED_EPG_PATH",
+                combined,
+            ), patch.object(
+                master_update_worker,
+                "_demo_provider_requires_guide_matches",
+                return_value=True,
+            ):
+                ready, error = master_update_worker._onboarding_guide_ready()
+
+            self.assertFalse(ready)
+            self.assertIn("no usable demo-channel guide data", error)
 
 
 if __name__ == "__main__":
