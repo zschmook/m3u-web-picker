@@ -9,9 +9,9 @@ This installer is for the isolated Windows development build.
 - port `9998`
 - separate install/data directory: `%LOCALAPPDATA%\M3U-Web-Picker-Dev`
 - `M3U_DEBUG_TOOLS=true`
-- Guide exposes per-channel M3U and MPEG-TS debug links
+- Guide exposes per-channel M3U debug links; the MPEG-TS relay stays internal and is not exposed as a copy link in the UI
 
-Each Guide M3U URL returns a one-channel playlist whose stream target is the app's debug MPEG-TS relay. The URL can be opened directly in VLC to verify the selected channel independently of browser/Cast/Roku playback.
+Each Guide M3U URL returns a one-channel playlist whose stream target is the app's internal debug MPEG-TS relay. The M3U URL can be opened directly in VLC to verify the selected channel independently of browser/Cast/Roku playback.
 
 The installer downloads source from:
 
