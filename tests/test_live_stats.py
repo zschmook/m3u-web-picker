@@ -2,8 +2,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from xml.etree import ElementTree
 
 from sports import live_stats
+from sports import live_stats_transport
+from sports import mlb_stats_companions
+
+
+live_stats_transport.install(live_stats)
 
 
 class LiveStatsTests(unittest.TestCase):
@@ -104,20 +110,69 @@ class LiveStatsTests(unittest.TestCase):
             "assigned_number": 1000,
             "league_id": "mlb",
             "event_key": "mlb:phi@lad",
-            "event_title": "Philadelphia Phillies @ Los Angeles Dodgers",
-            "display_name": "MLB · Phillies @ Dodgers",
+            "event_title": "Philadelphia Phillies at Los Angeles Dodgers",
+            "display_name": "MLB · Phillies at Dodgers",
             "group_title": "Sports Today",
             "tvg_logo": "",
         }
         playlist = "#EXTM3U\n#EXTINF:-1 tvg-chno=\"1000\",MLB Game\nhttp://picker:9999/sports/stream/1000\n"
-        with mock.patch.object(live_stats, "mlb_stats_rows", return_value=[row]):
+        with mock.patch.object(live_stats._s, "generated_rows", return_value=[row]):
             output = live_stats.inject_stats_channels(playlist, Path("unused.db"), "http://picker:9999")
         self.assertIn('tvg-chno="1000.1"', output)
+        self.assertIn("Philadelphia Phillies at Los Angeles Dodgers — Live Stats", output)
         self.assertIn("/sports/stats/1000/stream.m3u8", output)
         self.assertLess(output.index("/sports/stream/1000"), output.index("/sports/stats/1000/stream.m3u8"))
 
+    def test_mlb_companion_uses_lowest_feed_for_one_logical_event(self):
+        rows = [
+            {"assigned_number": 1002, "league_id": "mlb", "event_key": "mlb:phi@was", "event_title": "Phillies at Nationals"},
+            {"assigned_number": 1000, "league_id": "mlb", "event_key": "mlb:phi@was", "event_title": "Phillies at Nationals"},
+            {"assigned_number": 1001, "league_id": "mlb", "event_key": "mlb:phi@was", "event_title": "Phillies at Nationals"},
+            {"assigned_number": 1010, "league_id": "mlb", "event_key": "mlb:nym@atl", "event_title": "Mets at Braves"},
+            {"assigned_number": 2000, "league_id": "nfl", "event_key": "nfl:phi@bal", "event_title": "Eagles at Ravens"},
+        ]
+        companions = mlb_stats_companions.primary_mlb_rows(rows)
+        self.assertEqual([row["assigned_number"] for row in companions], [1000, 1010])
+        self.assertEqual(mlb_stats_companions.stats_number(companions[0]), "1000.1")
+
+    def test_mlb_companion_xmltv_mirrors_parent_event_window(self):
+        row = {
+            "assigned_number": 1000,
+            "league_id": "mlb",
+            "event_key": "mlb:phi@was:2026-08-17",
+            "event_title": "Phillies at Nationals",
+            "event_start": "2026-08-17T19:05:00-04:00",
+            "event_end": "2026-08-17T22:30:00-04:00",
+            "group_title": "Sports Today",
+            "epg_programme": {"categories": ["Baseball"]},
+        }
+        root = ElementTree.Element("tv")
+        parent_channel = ElementTree.SubElement(root, "channel", {"id": "parent"})
+        ElementTree.SubElement(parent_channel, "display-name").text = "1000"
+        ElementTree.SubElement(
+            root,
+            "programme",
+            {
+                "start": "20260817190500 -0400",
+                "stop": "20260817223000 -0400",
+                "channel": "parent",
+            },
+        )
+
+        mlb_stats_companions.append_xmltv(root, [row], "America/New_York")
+        companion_id = mlb_stats_companions.stats_tvg_id(row)
+        children = list(root)
+        first_programme = next(index for index, child in enumerate(children) if child.tag == "programme")
+        companion_channel = next(child for child in children if child.tag == "channel" and child.attrib.get("id") == companion_id)
+        self.assertLess(children.index(companion_channel), first_programme)
+
+        programme = next(child for child in children if child.tag == "programme" and child.attrib.get("channel") == companion_id)
+        self.assertEqual(programme.attrib["start"], "20260817190500 -0400")
+        self.assertEqual(programme.attrib["stop"], "20260817223000 -0400")
+        self.assertEqual(programme.findtext("title"), "Phillies at Nationals — Live Stats")
+
     def test_espn_event_match_requires_both_teams(self):
-        row = {"event_title": "Philadelphia Phillies @ Los Angeles Dodgers"}
+        row = {"event_title": "Philadelphia Phillies at Los Angeles Dodgers"}
         event = {
             "competitions": [
                 {
