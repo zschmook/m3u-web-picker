@@ -145,15 +145,30 @@ def append_xmltv(root: ElementTree.Element, generated: Iterable[dict], timezone_
     """Append one synthetic XMLTV channel/programme per logical MLB game."""
     timezone = ZoneInfo(str(timezone_name or "America/New_York"))
     rows = primary_mlb_rows(generated)
+    if not rows:
+        return
 
+    companion_channels: list[ElementTree.Element] = []
     for row in rows:
-        channel = ElementTree.SubElement(root, "channel", {"id": stats_tvg_id(row)})
+        channel = ElementTree.Element("channel", {"id": stats_tvg_id(row)})
         _add_text(channel, "display-name", stats_title(row), lang="en")
         _add_text(channel, "display-name", stats_number(row), lang="en")
         _add_text(channel, "display-name", f"CH {stats_number(row)}", lang="en")
         logo = _value(row.get("tvg_logo"))
         if logo:
             ElementTree.SubElement(channel, "icon", {"src": logo})
+        companion_channels.append(channel)
+
+    # XMLTV's normal ordering is all <channel> elements before <programme>.
+    # Insert the synthetic channels at that boundary instead of appending them
+    # after the parent's existing programme records.
+    channel_insert_at = len(root)
+    for index, child in enumerate(list(root)):
+        if str(child.tag or "").rsplit("}", 1)[-1] == "programme":
+            channel_insert_at = index
+            break
+    for offset, channel in enumerate(companion_channels):
+        root.insert(channel_insert_at + offset, channel)
 
     for row in rows:
         start, stop = event_window(row, timezone)
