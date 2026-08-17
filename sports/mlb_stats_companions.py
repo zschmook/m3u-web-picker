@@ -82,9 +82,10 @@ def stats_play_path(row: dict) -> str:
 
 
 def guide_item(row: dict) -> dict:
+    title = stats_title(row)
     return {
         "number": stats_number(row),
-        "name": stats_title(row),
+        "name": title,
         "group": _value(row.get("group_title")) or "Sports Today",
         "logo": _value(row.get("tvg_logo")),
         "tvg_id": stats_tvg_id(row),
@@ -94,6 +95,13 @@ def guide_item(row: dict) -> dict:
         "stats_companion": True,
         "stats_parent": int(row.get("assigned_number") or 0),
         "sports_event_key": logical_event_key(row),
+        # The Picker guide should always display the exact same programme window
+        # as the parent game. guide_epg uses this explicit relationship instead
+        # of depending on the synthetic .1 XMLTV record having been refreshed.
+        "epg_mirror_tvg_id": _value(row.get("tvg_id")),
+        "epg_mirror_title": title,
+        "epg_mirror_subtitle": "Live Stats",
+        "epg_mirror_description": f"Live statistics companion for {event_title(row)}.",
     }
 
 
