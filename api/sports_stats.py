@@ -5,6 +5,7 @@ from flask import Response, jsonify, request, send_file
 import core
 from sports import live_stats
 from sports import live_stats_transport
+from sports import nfl_demo_stats
 from .http import no_cache
 
 
@@ -32,6 +33,14 @@ def _media_response(path, filename: str):
     return response
 
 
+def _options_response():
+    response = Response(status=204)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Accept-Encoding, Content-Type, Range"
+    return response
+
+
 def register_sports_stats_routes(app):
     @app.get("/api/sports/stats/<int:assigned_number>")
     def sports_stats_state(assigned_number: int):
@@ -46,11 +55,7 @@ def register_sports_stats_routes(app):
     @app.route("/sports/stats/<int:assigned_number>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
     def sports_stats_media(assigned_number: int, filename: str):
         if request.method == "OPTIONS":
-            response = Response(status=204)
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Accept-Encoding, Content-Type, Range"
-            return response
+            return _options_response()
         try:
             path = live_stats.safe_media_file(core.DB_PATH, assigned_number, filename)
         except RuntimeError as exc:
@@ -59,6 +64,29 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start MLB stats stream: {exc}", 502)
         if path is None:
             return _media_response_error("MLB stats stream not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/stats-demo/1")
+    def sports_stats_demo_state():
+        try:
+            return no_cache(jsonify(nfl_demo_stats.state_payload()))
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not load ESPN NFL demo stats: {exc}")), 502
+
+    @app.route("/sports/stats-demo/<int:demo_number>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_stats_demo_media(demo_number: int, filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        if demo_number != nfl_demo_stats.DEMO_NUMBER:
+            return _media_response_error("NFL stats demo channel not found.", 404)
+        try:
+            path = nfl_demo_stats.safe_media_file(filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start NFL stats demo stream: {exc}", 502)
+        if path is None:
+            return _media_response_error("NFL stats demo stream not found.", 404)
         return _media_response(path, filename)
 
 
