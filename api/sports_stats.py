@@ -4,7 +4,14 @@ from flask import Response, jsonify, request, send_file
 
 import core
 from sports import live_stats
+from sports import live_stats_transport
 from .http import no_cache
+
+
+# ESPN's rich MLB summary/Gamecast endpoint occasionally rejects non-browser
+# clients. Install the resilient transport once at route import time so the
+# synthetic .1 stream falls back to the scoreboard feed instead of failing.
+live_stats_transport.install(live_stats)
 
 
 def _media_response(path, filename: str):
