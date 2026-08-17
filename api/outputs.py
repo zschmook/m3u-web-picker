@@ -4,6 +4,7 @@ import core
 import public_epg_logos
 import sports
 from sports import live_stats
+from sports import mlb_fake_stats
 from sports import nfl_demo_stats
 
 
@@ -115,15 +116,16 @@ def register_output_routes(app):
             ]
             text = "\n".join(lines) + "\n"
 
-        # Always expose one deterministic completed-game channel while this
-        # experiment is under development. It proves decimal channel numbering,
-        # ESPN data -> rendered frames -> ffmpeg -> HLS independently of Sports
-        # Picker event lifecycle or whether anything happens to be live tonight.
+        # Permanent lab channels for this experiment branch. 1.1 proves the
+        # ESPN -> renderer -> HLS path using a completed NFL game; 1.2 proves
+        # that a single synthetic channel can keep changing game state without
+        # any external sports feed at all.
         text = nfl_demo_stats.inject_demo_channel(text, base_url)
+        text = mlb_fake_stats.inject_demo_channel(text, base_url)
 
-        # Experimental second-screen companion channels. Every generated MLB
-        # channel N receives a synthetic N.1 HLS stats channel backed by ESPN
-        # game data. The synthetic stream starts only when a client tunes it.
+        # Experimental second-screen companion channels. Every logical MLB game
+        # gets one N.1 HLS stats channel backed by ESPN game data. The synthetic
+        # stream starts only when a client tunes it.
         text = live_stats.inject_stats_channels(text, core.DB_PATH, base_url)
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
