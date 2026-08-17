@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -10,6 +11,9 @@ from datetime import datetime
 from typing import Any
 
 from PIL import Image, ImageDraw
+
+import espn_known_logos
+from settings import load_settings
 
 
 STANDINGS_URL = "https://statsapi.mlb.com/api/v1/standings"
@@ -169,6 +173,15 @@ def _batting_abbr(state: dict) -> str:
     return ""
 
 
+def _out_dot_count(state: dict) -> int:
+    """Map MLB's transitional 3-out value onto the two-dot scoreboard display."""
+    try:
+        outs = int(state.get("outs", 0) or 0)
+    except (TypeError, ValueError):
+        outs = 0
+    return max(0, min(2, outs))
+
+
 def enrich_state(state: dict) -> dict:
     if not isinstance(state, dict):
         return state
@@ -185,21 +198,105 @@ def enrich_state(state: dict) -> dict:
     return state
 
 
-def _draw_games_back(draw: ImageDraw.ImageDraw, live_stats, state: dict, width: int) -> None:
+def _cached_team_logo(team: dict) -> Image.Image | None:
+    """Read an already-cached MLB team logo without making a network request."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        url = str(value or "").strip()
+        try:
+            parsed = urllib.parse.urlsplit(url)
+        except ValueError:
+            return
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or url in seen:
+            return
+        seen.add(url)
+        candidates.append(url)
+
+    # ESPN fallback states already carry a logo URL. MLB StatsAPI states do not,
+    # so use our canonical MLB taxonomy to derive the same ordinary ESPN mark
+    # used by the sports artwork pipeline. This does not contact ESPN.
+    add(team.get("logo"))
+    try:
+        add(
+            espn_known_logos.direct_full_default_url(
+                "mlb",
+                team.get("name") or team.get("abbr"),
+            )
+        )
+    except Exception:
+        pass
+
+    cache_dir = load_settings().data_dir / "logo_cache"
+    for url in candidates:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        path = cache_dir / f"{digest}.bin"
+        try:
+            payload = path.read_bytes()
+            logo = Image.open(io.BytesIO(payload)).convert("RGBA")
+            logo.load()
+            return logo
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
+
+
+def _paste_team_logo(image: Image.Image, logo: Image.Image | None, box: tuple[int, int, int, int]) -> bool:
+    if logo is None:
+        return False
+    left, top, right, bottom = box
+    max_width = max(1, right - left)
+    max_height = max(1, bottom - top)
+    rendered = logo.copy()
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    rendered.thumbnail((max_width, max_height), resample)
+    x = left + (max_width - rendered.width) // 2
+    y = top + (max_height - rendered.height) // 2
+    image.paste(rendered, (x, y), rendered)
+    return True
+
+
+def _draw_team_headers(image: Image.Image, draw: ImageDraw.ImageDraw, live_stats, state: dict, width: int) -> None:
+    panel = (17, 27, 41)
     muted = (112, 132, 158)
     away = state.get("away") if isinstance(state.get("away"), dict) else {}
     home = state.get("home") if isinstance(state.get("home"), dict) else {}
 
+    # Clear only the team-label portions of the top panel; scores and centered
+    # game status are left exactly where the base renderer put them.
+    draw.rectangle((48, 38, 350, 151), fill=panel)
+    draw.rectangle((930, 38, width - 48, 151), fill=panel)
+
+    away_logo = _cached_team_logo(away)
+    away_has_logo = _paste_team_logo(image, away_logo, (56, 43, 114, 101))
+    away_x = 130 if away_has_logo else 60
+    away_label = str(away.get("abbr") or away.get("name") or "AWAY")
+    live_stats._text(draw, (away_x, 46), away_label, size=38, bold=True)
+    live_stats._text(draw, (away_x, 92), away.get("record"), size=20, fill=muted)
     away_gb = str(away.get("games_back") or "").strip()
     if away_gb:
-        live_stats._text(draw, (60, 121), f"GB {away_gb}", size=16, fill=muted)
+        live_stats._text(draw, (away_x, 121), f"GB {away_gb}", size=16, fill=muted)
 
+    home_logo = _cached_team_logo(home)
+    home_has_logo = _paste_team_logo(image, home_logo, (width - 116, 43, width - 58, 101))
+    right_edge = width - 132 if home_has_logo else width - 60
+    home_label = str(home.get("abbr") or home.get("name") or "HOME")
+    home_font = live_stats._font(38, bold=True)
+    home_box = draw.textbbox((0, 0), home_label, font=home_font)
+    live_stats._text(draw, (right_edge - (home_box[2] - home_box[0]), 46), home_label, size=38, bold=True)
+
+    record = str(home.get("record", "") or "")
+    record_box = draw.textbbox((0, 0), record, font=live_stats._font(20))
+    live_stats._text(draw, (right_edge - (record_box[2] - record_box[0]), 92), record, size=20, fill=muted)
     home_gb = str(home.get("games_back") or "").strip()
     if home_gb:
         label = f"GB {home_gb}"
-        font = live_stats._font(16)
-        bbox = draw.textbbox((0, 0), label, font=font)
-        live_stats._text(draw, (width - 60 - (bbox[2] - bbox[0]), 121), label, size=16, fill=muted)
+        gb_box = draw.textbbox((0, 0), label, font=live_stats._font(16))
+        live_stats._text(draw, (right_edge - (gb_box[2] - gb_box[0]), 121), label, size=16, fill=muted)
 
 
 def _draw_at_bat_team(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
@@ -211,6 +308,29 @@ def _draw_at_bat_team(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> Non
     # disturbing the surrounding panel border or the base diamond below it.
     draw.rectangle((802, 198, 1045, 232), fill=panel)
     live_stats._text(draw, (808, 205), label, size=20, bold=True, fill=muted)
+
+
+def _draw_outs_indicator(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
+    panel = (17, 27, 41)
+    muted = (144, 160, 180)
+    active = (79, 140, 255)
+    inactive = (34, 47, 65)
+    outline = (120, 143, 170)
+
+    # Remove the old numeric "O  n" row, leaving B/S as the only numeric count.
+    # Keep clear of the left-most edge of the base diamond at roughly x=932.
+    draw.rectangle((800, 334, 920, 382), fill=panel)
+
+    live_stats._text(draw, (1090, 207), "OUTS", size=14, bold=True, fill=muted)
+    outs = _out_dot_count(state)
+    for index, center_x in enumerate((1185, 1217)):
+        fill = active if index < outs else inactive
+        draw.ellipse(
+            (center_x - 8, 218 - 8, center_x + 8, 218 + 8),
+            fill=fill,
+            outline=outline,
+            width=2,
+        )
 
 
 def _redraw_team_stats(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
@@ -252,8 +372,9 @@ def install(live_stats) -> None:
         payload = original_render(state, width=width, height=height)
         image = Image.open(io.BytesIO(payload)).convert("RGB")
         draw = ImageDraw.Draw(image)
-        _draw_games_back(draw, live_stats, state, width)
+        _draw_team_headers(image, draw, live_stats, state, width)
         _draw_at_bat_team(draw, live_stats, state)
+        _draw_outs_indicator(draw, live_stats, state)
         _redraw_team_stats(draw, live_stats, state)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=False)
