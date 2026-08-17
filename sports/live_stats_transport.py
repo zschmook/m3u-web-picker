@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+
+from . import mlb_stats_companions
 
 
 SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary"
@@ -102,15 +105,12 @@ def _scoreboard_state(live_stats, event_id: str, event: dict) -> dict:
     }
 
 
-def install(live_stats) -> None:
-    """Install a resilient ESPN fetcher into ``sports.live_stats``.
+def _escape_m3u(value: object) -> str:
+    return str(value or "").replace('"', "'")
 
-    ESPN's undocumented rich summary endpoint occasionally returns HTTP 403 to
-    non-browser clients. Try it with browser-like headers first. If ESPN still
-    rejects it, fall back to the public scoreboard payload so score, inning,
-    line score and available team statistics keep updating instead of making
-    the synthetic .1 channel disappear.
-    """
+
+def install(live_stats) -> None:
+    """Install resilient ESPN transport plus event-driven MLB companions."""
     if getattr(live_stats, "_resilient_transport_installed", False):
         return
 
@@ -130,5 +130,67 @@ def install(live_stats) -> None:
         event = _scoreboard_event(str(event_id))
         return _scoreboard_state(live_stats, str(event_id), event)
 
+    def mlb_stats_rows(db_path) -> list[dict]:
+        # Home/away/national feeds may all represent one logical game. Only the
+        # lowest-numbered generated feed owns the decimal .1 stats companion.
+        return mlb_stats_companions.primary_mlb_rows(live_stats._s.generated_rows(db_path))
+
+    def inject_stats_channels(text: str, db_path, base_url: str) -> str:
+        rows = {
+            int(row.get("assigned_number") or 0): row
+            for row in mlb_stats_rows(db_path)
+        }
+        if not rows:
+            return text
+
+        output: list[str] = []
+        for line in str(text or "").splitlines():
+            output.append(line)
+            match = re.search(r"/sports/stream/(\d+)(?:\?.*)?$", line.strip())
+            if not match:
+                continue
+            number = int(match.group(1))
+            row = rows.get(number)
+            if row is None:
+                continue
+
+            display_name = mlb_stats_companions.stats_title(row)
+            attrs = [
+                f'tvg-id="{_escape_m3u(mlb_stats_companions.stats_tvg_id(row))}"',
+                f'tvg-chno="{mlb_stats_companions.stats_number(row)}"',
+                f'tvg-name="{_escape_m3u(display_name)}"',
+                f'group-title="{_escape_m3u(row.get("group_title") or "Sports Today")}"',
+                'x-sports-stats="mlb"',
+                f'x-sports-parent="{number}"',
+                f'x-sports-event="{_escape_m3u(mlb_stats_companions.logical_event_key(row))}"',
+            ]
+            logo = str(row.get("tvg_logo", "") or "").strip()
+            if logo:
+                attrs.append(f'tvg-logo="{_escape_m3u(logo)}"')
+            output.append(f"#EXTINF:-1 {' '.join(attrs)},{display_name}")
+            output.append(
+                f"{base_url.rstrip('/')}{mlb_stats_companions.stats_stream_path(row)}"
+            )
+        return "\n".join(output) + "\n"
+
+    # The original prototype used x264's still-image tune and waited exactly 14
+    # seconds for two HLS segments. At 2 fps that could land on the same boundary
+    # as the timeout. Keep the lightweight encoder but make startup deterministic.
+    original_ffmpeg_command = live_stats._ffmpeg_command
+
+    def low_latency_ffmpeg_command(directory):
+        command = list(original_ffmpeg_command(directory))
+        try:
+            tune_index = command.index("-tune")
+            if tune_index + 1 < len(command):
+                command[tune_index + 1] = "zerolatency"
+        except ValueError:
+            pass
+        return command
+
     live_stats.fetch_mlb_state = fetch_mlb_state
+    live_stats.mlb_stats_rows = mlb_stats_rows
+    live_stats.inject_stats_channels = inject_stats_channels
+    live_stats._ffmpeg_command = low_latency_ffmpeg_command
+    live_stats.STARTUP_TIMEOUT = max(float(getattr(live_stats, "STARTUP_TIMEOUT", 14.0)), 24.0)
     live_stats._resilient_transport_installed = True
