@@ -135,16 +135,20 @@ class LiveStatsTests(unittest.TestCase):
         self.assertEqual([row["assigned_number"] for row in companions], [1000, 1010])
         self.assertEqual(mlb_stats_companions.stats_number(companions[0]), "1000.1")
 
-    def test_mlb_companion_xmltv_mirrors_parent_event_window(self):
+    def test_mlb_companion_xmltv_mirrors_parent_programme_window(self):
         row = {
             "assigned_number": 1000,
             "league_id": "mlb",
             "event_key": "mlb:phi@was:2026-08-17",
             "event_title": "Phillies at Nationals",
             "event_start": "2026-08-17T19:05:00-04:00",
-            "event_end": "2026-08-17T22:30:00-04:00",
+            "event_end": "2026-08-17T23:05:00-04:00",
             "group_title": "Sports Today",
-            "epg_programme": {"categories": ["Baseball"]},
+            "epg_programme": {
+                "start": "2026-08-17T20:05:00-04:00",
+                "stop": "2026-08-17T22:45:00-04:00",
+                "categories": ["Baseball"],
+            },
         }
         root = ElementTree.Element("tv")
         parent_channel = ElementTree.SubElement(root, "channel", {"id": "parent"})
@@ -153,8 +157,8 @@ class LiveStatsTests(unittest.TestCase):
             root,
             "programme",
             {
-                "start": "20260817190500 -0400",
-                "stop": "20260817223000 -0400",
+                "start": "20260817200500 -0400",
+                "stop": "20260817224500 -0400",
                 "channel": "parent",
             },
         )
@@ -167,8 +171,8 @@ class LiveStatsTests(unittest.TestCase):
         self.assertLess(children.index(companion_channel), first_programme)
 
         programme = next(child for child in children if child.tag == "programme" and child.attrib.get("channel") == companion_id)
-        self.assertEqual(programme.attrib["start"], "20260817190500 -0400")
-        self.assertEqual(programme.attrib["stop"], "20260817223000 -0400")
+        self.assertEqual(programme.attrib["start"], "20260817200500 -0400")
+        self.assertEqual(programme.attrib["stop"], "20260817224500 -0400")
         self.assertEqual(programme.findtext("title"), "Phillies at Nationals — Live Stats")
 
     def test_espn_event_match_requires_both_teams(self):
