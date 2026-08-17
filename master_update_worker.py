@@ -117,6 +117,25 @@ def _onboarding_guide_ready() -> tuple[bool, str]:
     return True, ""
 
 
+def _refresh_daily_mlb_standings() -> None:
+    """Prime cold MLB standings context once per calendar day.
+
+    This rides along with the normal Master Update (typically the overnight
+    update), but the standings module itself is date-cached so manual updates on
+    the same day do not create another request. Failures are informational only;
+    live sports generation must not fail because games-back data is unavailable.
+    """
+    try:
+        from sports import mlb_stats_enrichment
+
+        result = mlb_stats_enrichment.refresh_standings()
+        error = str(result.get("error", "") or "").strip()
+        if error:
+            print(f"MLB standings refresh skipped: {error}")
+    except Exception as exc:
+        print(f"MLB standings refresh skipped: {exc}")
+
+
 def _run(trigger: str) -> None:
     global _thread, _trigger, _started_at, _started_monotonic
     onboarding_trigger = trigger == "onboarding"
@@ -126,6 +145,7 @@ def _run(trigger: str) -> None:
         # update-reporting after modules are imported; this keeps those wrappers
         # in the background execution path.
         core.run_master_update(trigger=trigger)
+        _refresh_daily_mlb_standings()
         if onboarding_trigger:
             ready, error = _onboarding_guide_ready()
             _finish_onboarding_refresh(success=ready, error=error)
