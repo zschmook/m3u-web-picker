@@ -5,6 +5,7 @@ from flask import Response, jsonify, request, send_file
 import core
 from sports import live_stats
 from sports import live_stats_transport
+from sports import mlb_fake_stats
 from sports import nfl_demo_stats
 from .http import no_cache
 
@@ -39,6 +40,7 @@ def _install_low_latency_stats_hls() -> None:
     live_stats._ffmpeg_command = low_latency_command
     live_stats.STARTUP_TIMEOUT = 24.0
     nfl_demo_stats.STARTUP_TIMEOUT = 24.0
+    mlb_fake_stats.STARTUP_TIMEOUT = 24.0
     live_stats._low_latency_stats_hls_installed = True
 
 
@@ -117,6 +119,24 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start NFL stats demo stream: {exc}", 502)
         if path is None:
             return _media_response_error("NFL stats demo stream not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/stats-fake/1.2")
+    def sports_stats_fake_state():
+        return no_cache(jsonify(mlb_fake_stats.state_payload()))
+
+    @app.route("/sports/stats-fake/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_stats_fake_media(filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = mlb_fake_stats.safe_media_file(filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start fake MLB stats stream: {exc}", 502)
+        if path is None:
+            return _media_response_error("Fake MLB stats stream not found.", 404)
         return _media_response(path, filename)
 
 
