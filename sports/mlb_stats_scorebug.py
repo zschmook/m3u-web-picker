@@ -228,7 +228,8 @@ def _draw_count_row(
 def _redraw_at_bat_details(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
     # Clear the old numeric B/S rows and old left-anchored batter/pitcher block.
     draw.rectangle((800, 246, 930, 336), fill=_PANEL)
-    draw.rectangle((800, 392, 1230, 468), fill=_PANEL)
+    # Start below home plate (bottom is ~394) so the cleanup never clips it.
+    draw.rectangle((800, 398, 1230, 480), fill=_PANEL)
 
     _draw_count_row(
         draw,
@@ -263,7 +264,7 @@ def _redraw_at_bat_details(draw: ImageDraw.ImageDraw, live_stats, state: dict) -
         measured.append(box[2] - box[0])
     block_width = max(measured)
     block_x = 1016 - block_width // 2
-    start_y = 404 if len(lines) == 2 else 420
+    start_y = 426 if len(lines) == 2 else 442
 
     for index, (text, bold) in enumerate(lines):
         live_stats._text(
