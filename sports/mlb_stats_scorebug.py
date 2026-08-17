@@ -60,6 +60,7 @@ _MUTED = (144, 160, 180)
 _ACCENT = (79, 140, 255)
 _INACTIVE = (34, 47, 65)
 _OUTLINE = (120, 143, 170)
+_TEXT = (238, 243, 249)
 
 
 def _blend(base: tuple[int, int, int], accent: tuple[int, int, int], weight: float) -> tuple[int, int, int]:
@@ -77,9 +78,6 @@ def _canonical_team_accent(team: dict, _logo=None) -> tuple[int, int, int] | Non
     if accent is None:
         return None
 
-    # Black/navy/brown are legitimate primary colors, but the gradient still
-    # needs to be visible on the dark stats panel. Preserve the canonical hue
-    # while lifting very dark colors only for the rendered tint.
     luminance = 0.2126 * accent[0] + 0.7152 * accent[1] + 0.0722 * accent[2]
     if luminance < 70:
         accent = _blend(accent, (255, 255, 255), 0.18)
@@ -96,11 +94,7 @@ def _ordinal(number: int) -> str:
 
 
 def _inning_marker(state: dict) -> tuple[str, str, bool]:
-    """Return (direction, label, show_outs) for the compact center scorebug.
-
-    Top/Bottom become graphical up/down triangles. During a half-inning break,
-    point at the side that bats next: Middle N -> down N, End N -> up N+1.
-    """
+    """Return (direction, label, show_outs) for the compact center scorebug."""
     status = str(state.get("status") or "MLB").strip()
     match = re.match(r"^(top|bottom|middle|mid|end)\s+(.+)$", status, re.IGNORECASE)
     if not match:
@@ -116,9 +110,6 @@ def _inning_marker(state: dict) -> tuple[str, str, bool]:
         return "down", label, True
     if phase in {"middle", "mid"}:
         return "down", label, True
-
-    # End of an inning: present the upcoming top half instead of retaining the
-    # just-completed bottom-half label.
     return "up", _ordinal(period + 1 if period > 0 else 1), True
 
 
@@ -141,7 +132,6 @@ def _draw_triangle(draw: ImageDraw.ImageDraw, *, direction: str, center_x: int, 
 
 
 def _draw_center_status(draw: ImageDraw.ImageDraw, live_stats, state: dict, width: int) -> None:
-    # Scores live outside this center region; do not move or repaint them here.
     center_x = width // 2
     draw.rectangle((500, 40, width - 500, 148), fill=_PANEL)
 
@@ -184,28 +174,127 @@ def _draw_center_status(draw: ImageDraw.ImageDraw, live_stats, state: dict, widt
         )
 
 
+def _draw_centered_score(
+    draw: ImageDraw.ImageDraw,
+    live_stats,
+    value: object,
+    *,
+    center_x: int,
+) -> None:
+    text = str(value if value is not None else "0")
+    font = live_stats._font(72, bold=True)
+    box = draw.textbbox((0, 0), text, font=font)
+    text_width = box[2] - box[0]
+    live_stats._text(draw, (center_x - text_width // 2, 48), text, size=72, bold=True)
+
+
+def _redraw_scores(draw: ImageDraw.ImageDraw, live_stats, state: dict, width: int) -> None:
+    away = state.get("away") if isinstance(state.get("away"), dict) else {}
+    home = state.get("home") if isinstance(state.get("home"), dict) else {}
+
+    away_center = 420
+    home_center = width - 420
+    draw.rectangle((350, 40, 490, 148), fill=_PANEL)
+    draw.rectangle((width - 490, 40, width - 350, 148), fill=_PANEL)
+    _draw_centered_score(draw, live_stats, away.get("score", "0"), center_x=away_center)
+    _draw_centered_score(draw, live_stats, home.get("score", "0"), center_x=home_center)
+
+
+def _draw_count_row(
+    draw: ImageDraw.ImageDraw,
+    live_stats,
+    *,
+    label: str,
+    count: int,
+    maximum: int,
+    y: int,
+) -> None:
+    live_stats._text(draw, (808, y - 13), label, size=21, bold=True, fill=_MUTED)
+    first_x = 854
+    spacing = 26
+    radius = 7
+    count = max(0, min(maximum, int(count or 0)))
+    for index in range(maximum):
+        x = first_x + index * spacing
+        fill = _ACCENT if index < count else _INACTIVE
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=fill,
+            outline=_OUTLINE,
+            width=2,
+        )
+
+
+def _redraw_at_bat_details(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
+    # Clear the old numeric B/S rows and old left-anchored batter/pitcher block.
+    draw.rectangle((800, 246, 930, 336), fill=_PANEL)
+    draw.rectangle((800, 392, 1230, 468), fill=_PANEL)
+
+    _draw_count_row(
+        draw,
+        live_stats,
+        label="B",
+        count=int(state.get("balls", 0) or 0),
+        maximum=3,
+        y=276,
+    )
+    _draw_count_row(
+        draw,
+        live_stats,
+        label="S",
+        count=int(state.get("strikes", 0) or 0),
+        maximum=2,
+        y=322,
+    )
+
+    batter = str(state.get("batter") or "").strip()
+    pitcher = str(state.get("pitcher") or "").strip()
+    lines: list[tuple[str, bool]] = []
+    if batter:
+        lines.append((f"Batter: {batter}", True))
+    if pitcher:
+        lines.append((f"Pitcher: {pitcher}", False))
+    if not lines:
+        return
+
+    measured: list[int] = []
+    for text, bold in lines:
+        box = draw.textbbox((0, 0), text, font=live_stats._font(18, bold=bold))
+        measured.append(box[2] - box[0])
+    block_width = max(measured)
+    block_x = 1016 - block_width // 2
+    start_y = 404 if len(lines) == 2 else 420
+
+    for index, (text, bold) in enumerate(lines):
+        live_stats._text(
+            draw,
+            (block_x, start_y + index * 31),
+            text,
+            size=18,
+            bold=bold,
+            fill=_TEXT,
+        )
+
+
 def _clear_at_bat_outs(draw: ImageDraw.ImageDraw, width: int) -> None:
-    # mlb_stats_enrichment previously put OUTS + two dots in the AT BAT header.
-    # The compact scorebug owns outs now, so erase only that header patch.
     draw.rectangle((1090, 198, width - 40, 238), fill=_PANEL)
 
 
 def install(live_stats) -> None:
-    """Install canonical team colors and the compact MLB inning/out scorebug."""
+    """Install canonical team colors and compact MLB scorebug presentation."""
     if getattr(live_stats, "_mlb_stats_scorebug_installed", False):
         return
 
-    # The enrichment renderer calls this helper at frame-render time, so swap
-    # the old logo-sampling heuristic for the static 30-team color table.
     mlb_stats_enrichment._team_accent = _canonical_team_accent
-
     original_render = live_stats.render_mlb_frame
 
     def render_mlb_frame(state: dict, *, width: int = 1280, height: int = 720) -> bytes:
         payload = original_render(state, width=width, height=height)
         image = Image.open(io.BytesIO(payload)).convert("RGB")
         draw = ImageDraw.Draw(image)
+        _redraw_scores(draw, live_stats, state, width)
         _clear_at_bat_outs(draw, width)
+        _redraw_at_bat_details(draw, live_stats, state)
         _draw_center_status(draw, live_stats, state, width)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=False)
