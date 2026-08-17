@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 
 from sports import live_stats
 from sports import live_stats_transport
+from sports import mlb_live_source
 from sports import mlb_stats_companions
 
 
@@ -84,6 +85,131 @@ class LiveStatsTests(unittest.TestCase):
         self.assertEqual(state["batter"], "B. Harper")
         self.assertIn("singled", state["last_play"])
 
+    def test_mlb_statsapi_event_match_requires_both_teams(self):
+        row = {"event_title": "Philadelphia Phillies at Los Angeles Dodgers"}
+        game = {
+            "gamePk": 123,
+            "teams": {
+                "away": {"team": {"name": "Philadelphia Phillies", "abbreviation": "PHI"}},
+                "home": {"team": {"name": "Los Angeles Dodgers", "abbreviation": "LAD"}},
+            },
+        }
+        self.assertGreater(mlb_live_source.event_match_score(row, game), 0)
+        game["teams"]["home"]["team"] = {"name": "New York Mets", "abbreviation": "NYM"}
+        self.assertEqual(mlb_live_source.event_match_score(row, game), -1)
+
+    def test_mlb_statsapi_normalizes_rich_live_state(self):
+        feed = {
+            "gamePk": 123456,
+            "gameData": {
+                "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+                "teams": {
+                    "away": {
+                        "name": "Philadelphia Phillies",
+                        "abbreviation": "PHI",
+                        "record": {"wins": 70, "losses": 52},
+                    },
+                    "home": {
+                        "name": "Houston Astros",
+                        "abbreviation": "HOU",
+                        "record": {"wins": 67, "losses": 55},
+                    },
+                },
+            },
+            "liveData": {
+                "linescore": {
+                    "currentInning": 8,
+                    "currentInningOrdinal": "8th",
+                    "inningState": "Top",
+                    "balls": 3,
+                    "strikes": 2,
+                    "outs": 2,
+                    "offense": {
+                        "batter": {"fullName": "Bryce Harper"},
+                        "first": {"fullName": "Alec Bohm"},
+                        "third": {"fullName": "Trea Turner"},
+                    },
+                    "defense": {"pitcher": {"fullName": "Josh Hader"}},
+                    "teams": {
+                        "away": {"runs": 5, "hits": 9, "errors": 0},
+                        "home": {"runs": 4, "hits": 8, "errors": 1},
+                    },
+                    "innings": [
+                        {"num": 1, "away": {"runs": 1}, "home": {"runs": 2}},
+                        {"num": 2, "away": {"runs": 0}, "home": {"runs": 0}},
+                        {"num": 3, "away": {"runs": 2}, "home": {"runs": 0}},
+                        {"num": 4, "away": {"runs": 0}, "home": {"runs": 0}},
+                        {"num": 5, "away": {"runs": 0}, "home": {"runs": 2}},
+                        {"num": 6, "away": {"runs": 0}, "home": {"runs": 0}},
+                        {"num": 7, "away": {"runs": 0}, "home": {"runs": 0}},
+                        {"num": 8, "away": {"runs": 2}, "home": {"runs": None}},
+                    ],
+                },
+                "boxscore": {
+                    "teams": {
+                        "away": {"teamStats": {"batting": {"baseOnBalls": 3, "strikeOuts": 7}}},
+                        "home": {"teamStats": {"batting": {"baseOnBalls": 2, "strikeOuts": 8}}},
+                    }
+                },
+                "plays": {
+                    "currentPlay": {
+                        "result": {"description": "Harper fouled off a 3-2 fastball."},
+                        "matchup": {
+                            "batter": {"fullName": "Bryce Harper"},
+                            "pitcher": {"fullName": "Josh Hader"},
+                        },
+                        "playEvents": [
+                            {
+                                "isPitch": True,
+                                "pitchNumber": 5,
+                                "details": {
+                                    "description": "Foul",
+                                    "type": {"code": "FF", "description": "Four-Seam Fastball"},
+                                },
+                                "pitchData": {
+                                    "startSpeed": 96.2,
+                                    "endSpeed": 87.1,
+                                    "zone": 5,
+                                    "coordinates": {"pX": 0.12, "pZ": 2.55},
+                                    "breaks": {"spinRate": 2388},
+                                },
+                            },
+                            {
+                                "isPitch": False,
+                                "hitData": {
+                                    "launchSpeed": 102.4,
+                                    "launchAngle": 23.0,
+                                    "totalDistance": 388.0,
+                                    "trajectory": "fly_ball",
+                                },
+                            },
+                        ],
+                    }
+                },
+            },
+        }
+        state = mlb_live_source.normalize_live_feed(feed, game_pk="123456")
+        self.assertEqual(state["data_source"], "mlb-statsapi")
+        self.assertEqual(state["mlb_game_pk"], "123456")
+        self.assertEqual(state["away"]["abbr"], "PHI")
+        self.assertEqual(state["home"]["abbr"], "HOU")
+        self.assertEqual(state["away"]["score"], "5")
+        self.assertEqual(state["home"]["stats"]["errors"], "1")
+        self.assertEqual(state["status"], "Top 8th")
+        self.assertEqual(state["balls"], 3)
+        self.assertEqual(state["strikes"], 2)
+        self.assertEqual(state["outs"], 2)
+        self.assertTrue(state["on_first"])
+        self.assertFalse(state["on_second"])
+        self.assertTrue(state["on_third"])
+        self.assertEqual(state["batter"], "Bryce Harper")
+        self.assertEqual(state["pitcher"], "Josh Hader")
+        self.assertEqual(state["pitch"]["type"], "Four-Seam Fastball")
+        self.assertEqual(state["pitch"]["start_speed"], 96.2)
+        self.assertEqual(state["pitch"]["spin_rate"], 2388)
+        self.assertEqual(state["batted_ball"]["launch_speed"], 102.4)
+        self.assertEqual(state["batted_ball"]["distance"], 388.0)
+
     def test_render_mlb_frame_returns_png(self):
         payload = live_stats.render_mlb_frame(
             {
@@ -99,7 +225,8 @@ class LiveStatsTests(unittest.TestCase):
                 "batter": "B. Harper",
                 "pitcher": "S. Ohtani",
                 "last_play": "Harper singled to right, runner advanced to third.",
-                "espn_event_id": "123",
+                "source_event_id": "123",
+                "data_source_label": "MLB StatsAPI",
                 "updated_at": "2026-08-16T22:40:00-04:00",
             }
         )
