@@ -88,13 +88,39 @@ def _row_thinks_live(row: dict, now: datetime) -> bool:
 
 
 def enabled_rows(db_path: Path | str) -> list[dict]:
-    """Return one generated MLB parent per enabled logical event.
-
-    Generated sports rows already represent Sports Automation's enabled rule
-    output, so a Phillies-only setup naturally limits this carousel to Phillies
-    games without duplicating rule matching here.
-    """
+    """Return one generated MLB parent per logical event admitted by Sports Automation."""
     return mlb_stats_companions.primary_mlb_rows(_s.generated_rows(db_path))
+
+
+def _has_enabled_mlb_rule(db_path: Path | str) -> bool:
+    rules = [rule for rule in _s.get_rules(db_path) if bool(rule.get("enabled"))]
+    if not rules:
+        return False
+
+    mlb_sport_id = str(_s.LEAGUE_SPORTS.get("mlb", "") or "")
+    for rule in rules:
+        scope_type = str(rule.get("scope_type") or "").strip().lower()
+        scope_id = str(rule.get("scope_id") or "").strip().lower()
+        if scope_type == "league" and scope_id == "mlb":
+            return True
+        if scope_type == "sport" and mlb_sport_id and scope_id == mlb_sport_id:
+            return True
+        # Team ids discovered by the sports catalog are namespaced by league.
+        if scope_type == "team" and scope_id.startswith("mlb:"):
+            return True
+
+    # Static/API catalog rows carry league_id, which covers team rules even if a
+    # future catalog changes its scope-id naming convention.
+    catalog = {
+        (str(item.get("scope_type") or ""), str(item.get("id") or "")): item
+        for item in _s.catalog_payload(db_path)
+    }
+    for rule in rules:
+        key = (str(rule.get("scope_type") or ""), str(rule.get("scope_id") or ""))
+        item = catalog.get(key)
+        if item and str(item.get("league_id") or "").strip().lower() == "mlb":
+            return True
+    return False
 
 
 def candidate_rows(db_path: Path | str, *, now: datetime | None = None) -> list[dict]:
@@ -105,7 +131,7 @@ def candidate_rows(db_path: Path | str, *, now: datetime | None = None) -> list[
 
 
 def is_enabled(db_path: Path | str) -> bool:
-    return bool(enabled_rows(db_path))
+    return _has_enabled_mlb_rule(db_path)
 
 
 def guide_item() -> dict:
@@ -410,14 +436,14 @@ def safe_media_file(db_path: Path | str, filename: str) -> Path | None:
 
 
 def state_payload(db_path: Path | str) -> dict:
-    enabled = enabled_rows(db_path)
+    generated = enabled_rows(db_path)
     candidates = candidate_rows(db_path)
     session = get_session()
     return {
         "channel_number": CHANNEL_NUMBER,
         "name": DISPLAY_NAME,
-        "enabled": bool(enabled),
-        "enabled_event_count": len(enabled),
+        "enabled": is_enabled(db_path),
+        "generated_event_count": len(generated),
         "live_candidate_count": len(candidates),
         "rotation_seconds": ROTATE_SECONDS,
         "active": session is not None,
