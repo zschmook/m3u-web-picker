@@ -11,6 +11,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw
 
 from . import mlb_live_source
+from . import mlb_stats_carousel
 from . import mlb_stats_companions
 
 
@@ -208,9 +209,15 @@ def install(live_stats) -> None:
         if not rows:
             return text
 
+        carousel_lines = mlb_stats_carousel.m3u_lines(base_url)
         output: list[str] = []
+        carousel_inserted = False
         for line in str(text or "").splitlines():
             output.append(line)
+            if not carousel_inserted and line.strip().startswith("#EXTM3U"):
+                output.extend(carousel_lines)
+                carousel_inserted = True
+
             match = re.search(r"/sports/stream/(\d+)(?:\?.*)?$", line.strip())
             if not match:
                 continue
@@ -236,6 +243,9 @@ def install(live_stats) -> None:
             output.append(
                 f"{base_url.rstrip('/')}{mlb_stats_companions.stats_stream_path(row)}"
             )
+
+        if not carousel_inserted:
+            output = [*carousel_lines, *output]
         return "\n".join(output) + "\n"
 
     # Keep the legacy renderer body for now, but make its footer source-agnostic.
