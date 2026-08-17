@@ -206,15 +206,16 @@ def install(live_stats) -> None:
             int(row.get("assigned_number") or 0): row
             for row in mlb_stats_rows(db_path)
         }
-        if not rows:
+        carousel_enabled = mlb_stats_carousel.is_enabled(db_path)
+        if not rows and not carousel_enabled:
             return text
 
-        carousel_lines = mlb_stats_carousel.m3u_lines(base_url)
+        carousel_lines = mlb_stats_carousel.m3u_lines(base_url) if carousel_enabled else []
         output: list[str] = []
         carousel_inserted = False
         for line in str(text or "").splitlines():
             output.append(line)
-            if not carousel_inserted and line.strip().startswith("#EXTM3U"):
+            if carousel_lines and not carousel_inserted and line.strip().startswith("#EXTM3U"):
                 output.extend(carousel_lines)
                 carousel_inserted = True
 
@@ -244,7 +245,7 @@ def install(live_stats) -> None:
                 f"{base_url.rstrip('/')}{mlb_stats_companions.stats_stream_path(row)}"
             )
 
-        if not carousel_inserted:
+        if carousel_lines and not carousel_inserted:
             output = [*carousel_lines, *output]
         return "\n".join(output) + "\n"
 
