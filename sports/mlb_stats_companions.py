@@ -114,20 +114,30 @@ def _datetime(value: object, timezone: ZoneInfo) -> datetime | None:
 
 
 def event_window(row: dict, timezone: ZoneInfo) -> tuple[datetime | None, datetime | None]:
-    """Return the logical game window used by the parent generated event."""
-    start = _datetime(row.get("event_start"), timezone)
-    stop = _datetime(row.get("event_end"), timezone)
-
+    """Return the same primary game window the parent sports guide prefers."""
+    # Parent generated channels prefer a valid provider programme over the
+    # logical event estimate. The .1 companion must make the same choice so its
+    # guide block lines up exactly with the game feed instead of merely using a
+    # nearby schedule/API anchor.
     programme = row.get("epg_programme")
     if isinstance(programme, dict):
-        if start is None:
-            start = _datetime(programme.get("start"), timezone)
-        if stop is None:
-            stop = _datetime(programme.get("stop"), timezone)
+        programme_start = _datetime(programme.get("start"), timezone)
+        programme_stop = _datetime(programme.get("stop"), timezone)
+        if (
+            programme_start is not None
+            and programme_stop is not None
+            and programme_stop > programme_start
+        ):
+            return programme_start, programme_stop
 
-    if start is not None and (stop is None or stop <= start):
-        stop = start + timedelta(hours=4)
-    return start, stop
+    start = _datetime(row.get("event_start"), timezone)
+    stop = _datetime(row.get("event_end"), timezone)
+    if start is not None and stop is not None and stop > start:
+        return start, stop
+
+    if start is not None:
+        return start, start + timedelta(hours=4)
+    return None, None
 
 
 def _xmltv_time(value: datetime) -> str:
