@@ -194,6 +194,27 @@ def _upcoming_programmes(
     return upcoming
 
 
+def _mirror_programme(record: dict | None, channel: dict) -> dict | None:
+    """Clone a parent programme while relabeling it for a companion channel."""
+    if not record:
+        return None
+    mirrored = dict(record)
+    title = str(channel.get("epg_mirror_title", "") or "").strip()
+    subtitle = str(channel.get("epg_mirror_subtitle", "") or "").strip()
+    description = str(channel.get("epg_mirror_description", "") or "").strip()
+    if title:
+        mirrored["title"] = title
+    if subtitle:
+        mirrored["subtitle"] = subtitle
+    if description:
+        mirrored["description"] = description
+    categories = list(mirrored.get("categories") or [])
+    if "Live Stats" not in categories:
+        categories.append("Live Stats")
+    mirrored["categories"] = categories
+    return mirrored
+
+
 def enrich_guide_channels(
     channels: list[dict],
     epg_path: Path,
@@ -227,9 +248,19 @@ def enrich_guide_channels(
     for raw in channels:
         channel = dict(raw)
         tvg_id = str(channel.get("tvg_id", "") or "").strip()
-        records = index.get(tvg_id, []) if tvg_id else []
+        mirror_tvg_id = str(channel.get("epg_mirror_tvg_id", "") or "").strip()
+        lookup_tvg_id = mirror_tvg_id or tvg_id
+        records = index.get(lookup_tvg_id, []) if lookup_tvg_id else []
         current, upcoming = _now_and_next(records, anchor)
         schedule = _upcoming_programmes(records, anchor, current)
+        if mirror_tvg_id:
+            current = _mirror_programme(current, channel)
+            upcoming = _mirror_programme(upcoming, channel)
+            schedule = [
+                mirrored
+                for record in schedule
+                if (mirrored := _mirror_programme(record, channel)) is not None
+            ]
         channel["now"] = _serialize_programme(current)
         channel["next"] = _serialize_programme(upcoming)
         channel["upcoming"] = [
