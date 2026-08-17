@@ -26,6 +26,7 @@ _LOCK = threading.RLock()
 _CACHE_DATE = ""
 _CACHE_BY_ABBR: dict[str, str] = {}
 _CACHE_BY_NAME: dict[str, str] = {}
+_ACCENT_BY_TEAM: dict[str, tuple[int, int, int] | None] = {}
 _LAST_ERROR = ""
 
 
@@ -242,6 +243,98 @@ def _cached_team_logo(team: dict) -> Image.Image | None:
     return None
 
 
+def _team_key(team: dict) -> str:
+    abbreviation = str(team.get("abbr") or team.get("abbreviation") or "").strip().upper()
+    if abbreviation:
+        return abbreviation
+    return _norm(team.get("name") or "")
+
+
+def _blend_color(base: tuple[int, int, int], accent: tuple[int, int, int], weight: float) -> tuple[int, int, int]:
+    weight = max(0.0, min(1.0, float(weight)))
+    return tuple(
+        int(round(base[index] * (1.0 - weight) + accent[index] * weight))
+        for index in range(3)
+    )
+
+
+def _logo_accent(logo: Image.Image | None) -> tuple[int, int, int] | None:
+    """Pick a saturated team-ish color from a transparent cached logo."""
+    if logo is None:
+        return None
+
+    sample = logo.copy().convert("RGBA")
+    sample.thumbnail((64, 64))
+    buckets: dict[tuple[int, int, int], int] = {}
+    for red, green, blue, alpha in sample.getdata():
+        if alpha < 96:
+            continue
+        high = max(red, green, blue)
+        low = min(red, green, blue)
+        brightness = (red + green + blue) / 3.0
+        chroma = high - low
+        # Ignore transparent edges plus black/white/gray logo furniture. The
+        # remaining saturated pixels are much more likely to be the team mark.
+        if brightness < 32 or brightness > 238 or chroma < 30:
+            continue
+        bucket = (
+            min(255, (red // 32) * 32 + 16),
+            min(255, (green // 32) * 32 + 16),
+            min(255, (blue // 32) * 32 + 16),
+        )
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+
+    if not buckets:
+        return None
+
+    def score(color: tuple[int, int, int]) -> float:
+        population = buckets[color]
+        chroma = max(color) - min(color)
+        return population * (1.0 + chroma / 96.0)
+
+    accent = max(buckets, key=score)
+    # Very dark navy marks can disappear into our dark panel. Lighten those a
+    # touch while retaining the actual hue before using them as a gradient.
+    luminance = 0.2126 * accent[0] + 0.7152 * accent[1] + 0.0722 * accent[2]
+    if luminance < 70:
+        accent = _blend_color(accent, (255, 255, 255), 0.18)
+    return accent
+
+
+def _team_accent(team: dict, logo: Image.Image | None) -> tuple[int, int, int] | None:
+    key = _team_key(team)
+    if key:
+        with _LOCK:
+            if key in _ACCENT_BY_TEAM:
+                return _ACCENT_BY_TEAM[key]
+    accent = _logo_accent(logo)
+    if key:
+        with _LOCK:
+            _ACCENT_BY_TEAM[key] = accent
+    return accent
+
+
+def _draw_team_gradient(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    accent: tuple[int, int, int] | None,
+    *,
+    strong_at_left: bool,
+) -> None:
+    if accent is None:
+        return
+    panel = (17, 27, 41)
+    left, top, right, bottom = box
+    span = max(1, right - left)
+    for x in range(left, right + 1):
+        progress = (x - left) / span
+        edge_strength = (1.0 - progress) if strong_at_left else progress
+        # Keep it subtle in the dark UI: roughly 36% team color at the outside
+        # edge, fading all the way back to the stock panel near the score.
+        fill = _blend_color(panel, accent, 0.36 * edge_strength)
+        draw.line((x, top, x, bottom), fill=fill)
+
+
 def _paste_team_logo(image: Image.Image, logo: Image.Image | None, box: tuple[int, int, int, int]) -> bool:
     if logo is None:
         return False
@@ -266,12 +359,19 @@ def _draw_team_headers(image: Image.Image, draw: ImageDraw.ImageDraw, live_stats
     away = state.get("away") if isinstance(state.get("away"), dict) else {}
     home = state.get("home") if isinstance(state.get("home"), dict) else {}
 
-    # Clear only the team-label portions of the top panel; scores and centered
-    # game status are left exactly where the base renderer put them.
-    draw.rectangle((48, 38, 350, 151), fill=panel)
-    draw.rectangle((930, 38, width - 48, 151), fill=panel)
-
     away_logo = _cached_team_logo(away)
+    home_logo = _cached_team_logo(home)
+
+    # Clear only the team-identity portions of the top panel, then lay a soft
+    # team-color wash behind each logo/record/GB. The gradient stops before the
+    # score/status zone so the center remains the original dark scoreboard.
+    away_box = (48, 38, 350, 151)
+    home_box = (930, 38, width - 48, 151)
+    draw.rectangle(away_box, fill=panel)
+    draw.rectangle(home_box, fill=panel)
+    _draw_team_gradient(draw, away_box, _team_accent(away, away_logo), strong_at_left=True)
+    _draw_team_gradient(draw, home_box, _team_accent(home, home_logo), strong_at_left=False)
+
     away_has_logo = _paste_team_logo(image, away_logo, (56, 43, 114, 101))
     away_x = 130 if away_has_logo else 60
     away_label = str(away.get("abbr") or away.get("name") or "AWAY")
@@ -281,13 +381,12 @@ def _draw_team_headers(image: Image.Image, draw: ImageDraw.ImageDraw, live_stats
     if away_gb:
         live_stats._text(draw, (away_x, 121), f"GB {away_gb}", size=16, fill=muted)
 
-    home_logo = _cached_team_logo(home)
     home_has_logo = _paste_team_logo(image, home_logo, (width - 116, 43, width - 58, 101))
     right_edge = width - 132 if home_has_logo else width - 60
     home_label = str(home.get("abbr") or home.get("name") or "HOME")
     home_font = live_stats._font(38, bold=True)
-    home_box = draw.textbbox((0, 0), home_label, font=home_font)
-    live_stats._text(draw, (right_edge - (home_box[2] - home_box[0]), 46), home_label, size=38, bold=True)
+    home_box_text = draw.textbbox((0, 0), home_label, font=home_font)
+    live_stats._text(draw, (right_edge - (home_box_text[2] - home_box_text[0]), 46), home_label, size=38, bold=True)
 
     record = str(home.get("record", "") or "")
     record_box = draw.textbbox((0, 0), record, font=live_stats._font(20))
