@@ -145,6 +145,30 @@ def _games_back(team: dict) -> str:
     return ""
 
 
+def _batting_abbr(state: dict) -> str:
+    """Return the batting/up-next team abbreviation from MLB inning state."""
+    explicit = str(state.get("batting_team") or "").strip().upper()
+    if explicit:
+        return explicit
+
+    away = state.get("away") if isinstance(state.get("away"), dict) else {}
+    home = state.get("home") if isinstance(state.get("home"), dict) else {}
+    away_abbr = str(away.get("abbr") or "").strip().upper()
+    home_abbr = str(home.get("abbr") or "").strip().upper()
+    status = str(state.get("status") or "").strip().lower()
+
+    if status.startswith("top"):
+        return away_abbr
+    if status.startswith("bottom"):
+        return home_abbr
+    # During the half-inning break, show the team that is about to hit.
+    if status.startswith("middle") or status.startswith("mid "):
+        return home_abbr
+    if status.startswith("end"):
+        return away_abbr
+    return ""
+
+
 def enrich_state(state: dict) -> dict:
     if not isinstance(state, dict):
         return state
@@ -155,6 +179,9 @@ def enrich_state(state: dict) -> dict:
         games_back = _games_back(team)
         if games_back:
             team["games_back"] = games_back
+    batting_team = _batting_abbr(state)
+    if batting_team:
+        state["batting_team"] = batting_team
     return state
 
 
@@ -173,6 +200,17 @@ def _draw_games_back(draw: ImageDraw.ImageDraw, live_stats, state: dict, width: 
         font = live_stats._font(16)
         bbox = draw.textbbox((0, 0), label, font=font)
         live_stats._text(draw, (width - 60 - (bbox[2] - bbox[0]), 121), label, size=16, fill=muted)
+
+
+def _draw_at_bat_team(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
+    panel = (17, 27, 41)
+    muted = (144, 160, 180)
+    batting_team = _batting_abbr(state)
+    label = "AT BAT" if not batting_team else f"AT BAT: {batting_team}"
+    # Cover the prototype's shorter header and redraw the richer label without
+    # disturbing the surrounding panel border or the base diamond below it.
+    draw.rectangle((802, 198, 1045, 232), fill=panel)
+    live_stats._text(draw, (808, 205), label, size=20, bold=True, fill=muted)
 
 
 def _redraw_team_stats(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
@@ -215,6 +253,7 @@ def install(live_stats) -> None:
         image = Image.open(io.BytesIO(payload)).convert("RGB")
         draw = ImageDraw.Draw(image)
         _draw_games_back(draw, live_stats, state, width)
+        _draw_at_bat_team(draw, live_stats, state)
         _redraw_team_stats(draw, live_stats, state)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=False)
