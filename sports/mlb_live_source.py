@@ -96,7 +96,6 @@ def _schedule_games(date_value: datetime) -> list[dict]:
         {
             "sportId": "1",
             "date": date_value.strftime("%Y-%m-%d"),
-            "hydrate": "team",
         }
     )
     payload = _json(f"{SCHEDULE_URL}?{query}")
@@ -111,6 +110,32 @@ def _schedule_games(date_value: datetime) -> list[dict]:
     return games
 
 
+def _time_bonus(row: dict, game: dict) -> int:
+    """Prefer the matching game closest to the provider event start.
+
+    Usually the team match alone is unique. This mainly keeps doubleheaders from
+    binding both provider events to the first MLB schedule entry.
+    """
+    row_start = _event_date(row)
+    game_date = str(game.get("gameDate", "") or "").strip()
+    if not game_date:
+        return 0
+    try:
+        scheduled = datetime.fromisoformat(game_date.replace("Z", "+00:00"))
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.astimezone()
+        hours = abs((scheduled - row_start).total_seconds()) / 3600.0
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    if hours <= 0.5:
+        return 6
+    if hours <= 1.5:
+        return 4
+    if hours <= 3.0:
+        return 2
+    return 0
+
+
 def resolve_game(row: dict) -> tuple[str, dict]:
     """Resolve a generated MLB event to MLB's stable gamePk."""
     anchor = _event_date(row)
@@ -122,7 +147,10 @@ def resolve_game(row: dict) -> tuple[str, dict]:
             if game_pk <= 0 or game_pk in seen:
                 continue
             seen.add(game_pk)
-            ranked.append((event_match_score(row, game), game))
+            match_score = event_match_score(row, game)
+            if match_score >= 0:
+                match_score += _time_bonus(row, game)
+            ranked.append((match_score, game))
         if ranked and max(score for score, _game in ranked) >= 0:
             break
 
@@ -162,7 +190,7 @@ def _team_record(team: dict) -> str:
     losses = record.get("losses")
     if wins is not None and losses is not None:
         return f"{wins}-{losses}"
-    return str(record.get("leagueRecord", "") or "")
+    return ""
 
 
 def _box_team_stats(live_data: dict, side: str) -> dict[str, str]:
@@ -171,9 +199,11 @@ def _box_team_stats(live_data: dict, side: str) -> dict[str, str]:
     team_box = teams.get(side) if isinstance(teams.get(side), dict) else {}
     team_stats = team_box.get("teamStats") if isinstance(team_box.get("teamStats"), dict) else {}
     batting = team_stats.get("batting") if isinstance(team_stats.get("batting"), dict) else {}
+    walks = batting.get("baseOnBalls")
+    strikeouts = batting.get("strikeOuts")
     return {
-        "walks": str(batting.get("baseOnBalls", "") or ""),
-        "strikeouts": str(batting.get("strikeOuts", "") or ""),
+        "walks": "" if walks is None else str(walks),
+        "strikeouts": "" if strikeouts is None else str(strikeouts),
     }
 
 
