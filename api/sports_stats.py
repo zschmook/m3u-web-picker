@@ -6,6 +6,7 @@ import core
 from sports import live_stats
 from sports import live_stats_transport
 from sports import mlb_fake_stats
+from sports import mlb_stats_carousel
 from sports import mlb_stats_enrichment
 from sports import mlb_stats_scorebug
 from sports import nfl_demo_stats
@@ -100,6 +101,27 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start MLB stats stream: {exc}", 502)
         if path is None:
             return _media_response_error("MLB stats stream not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/stats-carousel/mlb")
+    def sports_stats_carousel_mlb_state():
+        try:
+            return no_cache(jsonify(mlb_stats_carousel.state_payload(core.DB_PATH)))
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not load MLB live-score carousel: {exc}")), 502
+
+    @app.route("/sports/stats-carousel/mlb/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_stats_carousel_mlb_media(filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = mlb_stats_carousel.safe_media_file(core.DB_PATH, filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start MLB live-score carousel: {exc}", 502)
+        if path is None:
+            return _media_response_error("MLB live-score carousel not found.", 404)
         return _media_response(path, filename)
 
     @app.get("/api/sports/stats-demo/1")
