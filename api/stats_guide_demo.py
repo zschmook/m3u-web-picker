@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
 from flask import Flask, Response
 
@@ -115,6 +117,68 @@ def _inject_guide_companions(items: list[dict]) -> list[dict]:
     return output
 
 
+def _xmltv_time(value: datetime) -> str:
+    return value.strftime("%Y%m%d%H%M%S %z")
+
+
+def _append_fake_mlb_xmltv(
+    root: ElementTree.Element,
+    timezone_name: str,
+    *,
+    generated_at: datetime | None = None,
+) -> None:
+    """Give lab channel 1.2 deterministic guide data for the experiment."""
+    if any(
+        child.tag.rsplit("}", 1)[-1] == "channel"
+        and child.attrib.get("id") == mlb_fake_stats.TVG_ID
+        for child in root
+    ):
+        return
+
+    timezone = ZoneInfo(str(timezone_name or "America/New_York"))
+    anchor = generated_at if isinstance(generated_at, datetime) else datetime.now(timezone)
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone)
+    else:
+        anchor = anchor.astimezone(timezone)
+
+    # The simulator is intentionally always available. Give it a broad lab-only
+    # programme window so it cannot sit in the Picker/Jellyfin guide as an empty
+    # channel while the fake stream itself remains playable.
+    start = anchor - timedelta(hours=12)
+    stop = anchor + timedelta(days=7)
+
+    channel = ElementTree.Element("channel", {"id": mlb_fake_stats.TVG_ID})
+    ElementTree.SubElement(channel, "display-name", {"lang": "en"}).text = mlb_fake_stats.DISPLAY_NAME
+    ElementTree.SubElement(channel, "display-name", {"lang": "en"}).text = mlb_fake_stats.GUIDE_NUMBER
+
+    channel_insert_at = len(root)
+    for index, child in enumerate(list(root)):
+        if child.tag.rsplit("}", 1)[-1] == "programme":
+            channel_insert_at = index
+            break
+    root.insert(channel_insert_at, channel)
+
+    programme = ElementTree.SubElement(
+        root,
+        "programme",
+        {
+            "start": _xmltv_time(start),
+            "stop": _xmltv_time(stop),
+            "channel": mlb_fake_stats.TVG_ID,
+        },
+    )
+    ElementTree.SubElement(programme, "title", {"lang": "en"}).text = (
+        f"{mlb_fake_stats.DISPLAY_NAME} — Live Stats"
+    )
+    ElementTree.SubElement(programme, "sub-title", {"lang": "en"}).text = "Simulated Live Stats"
+    ElementTree.SubElement(programme, "desc", {"lang": "en"}).text = (
+        "Continuously changing simulated MLB statistics for testing the companion-channel guide and playback pipeline."
+    )
+    for category in ("Sports", "Baseball", "MLB", "Live Stats", "Simulation"):
+        ElementTree.SubElement(programme, "category", {"lang": "en"}).text = category
+
+
 def _install_xmltv_companions() -> None:
     global _original_build_sports_xmltv
     if _original_build_sports_xmltv is not None:
@@ -129,10 +193,16 @@ def _install_xmltv_companions() -> None:
             generated_at=generated_at,
         )
         root = ElementTree.fromstring(payload)
+        timezone_name = str(settings.get("timezone", "America/New_York"))
         mlb_stats_companions.append_xmltv(
             root,
             generated,
-            str(settings.get("timezone", "America/New_York")),
+            timezone_name,
+        )
+        _append_fake_mlb_xmltv(
+            root,
+            timezone_name,
+            generated_at=generated_at,
         )
         if hasattr(ElementTree, "indent"):
             ElementTree.indent(root, space="  ")
