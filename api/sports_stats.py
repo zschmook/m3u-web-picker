@@ -15,6 +15,36 @@ from .http import no_cache
 live_stats_transport.install(live_stats)
 
 
+def _install_low_latency_stats_hls() -> None:
+    """Tune the experimental synthetic stats streams for fast HLS startup.
+
+    The first prototype reused x264's ``stillimage`` tune. At two frames per
+    second that can delay the HLS muxer long enough that the old 14-second
+    readiness timeout races the second segment. ``zerolatency`` keeps the same
+    simple image2pipe -> H.264 -> HLS path but publishes segments much sooner.
+    """
+    if getattr(live_stats, "_low_latency_stats_hls_installed", False):
+        return
+
+    original_command = live_stats._ffmpeg_command
+
+    def low_latency_command(directory):
+        command = list(original_command(directory))
+        for index, value in enumerate(command[:-1]):
+            if value == "-tune":
+                command[index + 1] = "zerolatency"
+                break
+        return command
+
+    live_stats._ffmpeg_command = low_latency_command
+    live_stats.STARTUP_TIMEOUT = 24.0
+    nfl_demo_stats.STARTUP_TIMEOUT = 24.0
+    live_stats._low_latency_stats_hls_installed = True
+
+
+_install_low_latency_stats_hls()
+
+
 def _media_response(path, filename: str):
     if filename == "stream.m3u8":
         response = send_file(path, mimetype="application/x-mpegurl", conditional=True)
