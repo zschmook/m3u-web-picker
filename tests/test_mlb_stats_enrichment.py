@@ -43,6 +43,13 @@ class MlbStatsEnrichmentTests(unittest.TestCase):
         state["status"] = "End 1st"
         self.assertEqual(mlb_stats_enrichment._batting_abbr(state), "BAL")
 
+    def test_out_dot_count_clamps_transition_to_two_dots(self):
+        self.assertEqual(mlb_stats_enrichment._out_dot_count({"outs": 0}), 0)
+        self.assertEqual(mlb_stats_enrichment._out_dot_count({"outs": 1}), 1)
+        self.assertEqual(mlb_stats_enrichment._out_dot_count({"outs": 2}), 2)
+        self.assertEqual(mlb_stats_enrichment._out_dot_count({"outs": 3}), 2)
+        self.assertEqual(mlb_stats_enrichment._out_dot_count({"outs": -1}), 0)
+
     def test_enrich_state_exposes_batting_team(self):
         state = {
             "away": {"abbr": "BAL", "name": "Baltimore Orioles"},
