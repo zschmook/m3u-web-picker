@@ -311,8 +311,20 @@ def normalize_live_feed(feed: dict, *, game_pk: str = "") -> dict:
 
     offense = linescore.get("offense") if isinstance(linescore.get("offense"), dict) else {}
     defense = linescore.get("defense") if isinstance(linescore.get("defense"), dict) else {}
-    batter = offense.get("batter") if isinstance(offense.get("batter"), dict) else matchup.get("batter")
-    pitcher = defense.get("pitcher") if isinstance(defense.get("pitcher"), dict) else matchup.get("pitcher")
+
+    # MLB can leave currentPlay pointing at the just-completed plate appearance
+    # for a poll or two while linescore is transitioning to the next batter.
+    # Never resurrect that stale matchup once MLB marks the play complete.
+    # The linescore batter/pitcher remain authoritative whenever present.
+    about = current_play.get("about") if isinstance(current_play.get("about"), dict) else {}
+    current_play_complete = about.get("isComplete") is True
+
+    batter = offense.get("batter") if isinstance(offense.get("batter"), dict) else {}
+    pitcher = defense.get("pitcher") if isinstance(defense.get("pitcher"), dict) else {}
+    if not batter and not current_play_complete and isinstance(matchup.get("batter"), dict):
+        batter = matchup.get("batter")
+    if not pitcher and not current_play_complete and isinstance(matchup.get("pitcher"), dict):
+        pitcher = matchup.get("pitcher")
 
     status_data = game_data.get("status") if isinstance(game_data.get("status"), dict) else {}
     inning_state = str(linescore.get("inningState") or "").strip()
