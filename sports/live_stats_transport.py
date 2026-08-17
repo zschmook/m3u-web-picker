@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import re
 import urllib.error
@@ -7,6 +8,9 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 
+from PIL import Image, ImageDraw
+
+from . import mlb_live_source
 from . import mlb_stats_companions
 
 
@@ -23,6 +27,8 @@ _BROWSER_HEADERS = {
         "Chrome/151.0.0.0 Safari/537.36"
     ),
 }
+
+_ESPN_FALLBACK_BY_MLB_GAME: dict[str, str] = {}
 
 
 def _json(url: str, *, timeout: float = 8.0) -> dict:
@@ -66,7 +72,7 @@ def _scoreboard_event(event_id: str) -> dict:
     raise RuntimeError(f"ESPN scoreboard no longer contains event {event_id}.")
 
 
-def _scoreboard_state(live_stats, event_id: str, event: dict) -> dict:
+def _scoreboard_state(live_stats, event_id: str, event: dict, *, mlb_game_pk: str) -> dict:
     competitions = event.get("competitions") if isinstance(event.get("competitions"), list) else []
     competition = competitions[0] if competitions and isinstance(competitions[0], dict) else {}
     competitors = live_stats._competitor_map(competition)
@@ -77,6 +83,8 @@ def _scoreboard_state(live_stats, event_id: str, event: dict) -> dict:
     status_type = status.get("type") if isinstance(status.get("type"), dict) else {}
     return {
         "espn_event_id": str(event_id),
+        "source_event_id": str(mlb_game_pk),
+        "mlb_game_pk": str(mlb_game_pk),
         "away": away,
         "home": home,
         "status": str(
@@ -90,7 +98,7 @@ def _scoreboard_state(live_stats, event_id: str, event: dict) -> dict:
         "clock": str(status.get("displayClock", "") or ""),
         # The scoreboard endpoint does not always expose pitch/base situation.
         # Keep those fields stable so the renderer continues to run rather than
-        # failing the entire synthetic channel when ESPN blocks summary data.
+        # failing the entire synthetic channel when detailed feeds are blocked.
         "balls": 0,
         "strikes": 0,
         "outs": 0,
@@ -99,10 +107,56 @@ def _scoreboard_state(live_stats, event_id: str, event: dict) -> dict:
         "on_third": False,
         "batter": "",
         "pitcher": "",
-        "last_play": "Live ESPN scoreboard data (detailed Gamecast feed unavailable)",
+        "last_play": "Live ESPN scoreboard fallback (detailed MLB feed unavailable)",
+        "pitch": {},
+        "batted_ball": {},
         "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "data_source": "scoreboard-fallback",
+        "data_source": "espn-scoreboard-fallback",
+        "data_source_label": "ESPN fallback",
     }
+
+
+def _resolve_espn_fallback(live_stats, row: dict) -> str:
+    query = urllib.parse.urlencode({"dates": live_stats._event_date(row), "limit": "100"})
+    data = _json(f"{SCOREBOARD_URL}?{query}")
+    events = data.get("events") if isinstance(data.get("events"), list) else []
+    ranked = sorted(
+        (
+            (live_stats._event_match_score(row, event), event)
+            for event in events
+            if isinstance(event, dict)
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    if not ranked or ranked[0][0] < 0:
+        return ""
+    return str(ranked[0][1].get("id", "") or "").strip()
+
+
+def _espn_state(live_stats, mlb_game_pk: str, espn_event_id: str) -> dict:
+    query = urllib.parse.urlencode({"event": str(espn_event_id)})
+    try:
+        summary = _json(f"{SUMMARY_URL}?{query}")
+        state = live_stats.normalize_mlb_summary(summary, espn_event_id=str(espn_event_id))
+        state["source_event_id"] = str(mlb_game_pk)
+        state["mlb_game_pk"] = str(mlb_game_pk)
+        state["data_source"] = "espn-summary-fallback"
+        state["data_source_label"] = "ESPN fallback"
+        return state
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {403, 429}:
+            raise
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        pass
+
+    event = _scoreboard_event(str(espn_event_id))
+    return _scoreboard_state(
+        live_stats,
+        str(espn_event_id),
+        event,
+        mlb_game_pk=str(mlb_game_pk),
+    )
 
 
 def _escape_m3u(value: object) -> str:
@@ -110,25 +164,36 @@ def _escape_m3u(value: object) -> str:
 
 
 def install(live_stats) -> None:
-    """Install resilient ESPN transport plus event-driven MLB companions."""
+    """Install MLB StatsAPI primary source plus ESPN fallback and companions."""
     if getattr(live_stats, "_resilient_transport_installed", False):
         return
 
-    def fetch_mlb_state(event_id: str) -> dict:
-        query = urllib.parse.urlencode({"event": str(event_id)})
+    def resolve_event(row: dict) -> tuple[str, dict]:
+        game_pk, schedule_game = mlb_live_source.resolve_game(row)
         try:
-            summary = _json(f"{SUMMARY_URL}?{query}")
-            state = live_stats.normalize_mlb_summary(summary, espn_event_id=str(event_id))
-            state["data_source"] = "summary"
-            return state
-        except urllib.error.HTTPError as exc:
-            if exc.code not in {403, 429}:
-                raise
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            pass
+            espn_event_id = _resolve_espn_fallback(live_stats, row)
+        except Exception:
+            espn_event_id = ""
+        if espn_event_id:
+            _ESPN_FALLBACK_BY_MLB_GAME[str(game_pk)] = espn_event_id
+        return str(game_pk), schedule_game
 
-        event = _scoreboard_event(str(event_id))
-        return _scoreboard_state(live_stats, str(event_id), event)
+    def fetch_mlb_state(source_event_id: str) -> dict:
+        game_pk = str(source_event_id or "").strip()
+        try:
+            return mlb_live_source.fetch_live_state(game_pk)
+        except Exception as mlb_exc:
+            espn_event_id = _ESPN_FALLBACK_BY_MLB_GAME.get(game_pk, "")
+            if espn_event_id:
+                try:
+                    state = _espn_state(live_stats, game_pk, espn_event_id)
+                    state["fallback_reason"] = str(mlb_exc)
+                    return state
+                except Exception as espn_exc:
+                    raise RuntimeError(
+                        f"MLB StatsAPI failed ({mlb_exc}); ESPN fallback also failed ({espn_exc})."
+                    ) from mlb_exc
+            raise RuntimeError(f"MLB StatsAPI failed: {mlb_exc}") from mlb_exc
 
     def mlb_stats_rows(db_path) -> list[dict]:
         # Home/away/national feeds may all represent one logical game. Only the
@@ -173,6 +238,69 @@ def install(live_stats) -> None:
             )
         return "\n".join(output) + "\n"
 
+    # Keep the legacy renderer body for now, but make its footer source-agnostic.
+    # 1.2 covers this footer with its SIMULATED label after rendering.
+    original_render = live_stats.render_mlb_frame
+
+    def render_mlb_frame(state: dict, *, width: int = 1280, height: int = 720) -> bytes:
+        payload = original_render(state, width=width, height=height)
+        image = Image.open(io.BytesIO(payload)).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, height - 52, width, height), fill=(8, 14, 24))
+        source_label = str(state.get("data_source_label") or "Live baseball data")
+        event_id = str(
+            state.get("source_event_id")
+            or state.get("mlb_game_pk")
+            or state.get("espn_event_id")
+            or ""
+        )
+        updated = str(state.get("updated_at") or "")
+        updated_clock = updated[11:19] if len(updated) >= 19 else updated
+        footer = f"{source_label} • game {event_id} • updated {updated_clock}"
+        draw.text((42, height - 38), footer, font=live_stats._font(15), fill=(144, 160, 180))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=False)
+        return buffer.getvalue()
+
+    def state_payload(db_path, assigned_number: int) -> dict:
+        number = int(assigned_number)
+        row = live_stats._generated_mlb_row(db_path, number)
+        if row is None:
+            raise RuntimeError("MLB stats channel was not found.")
+        session = live_stats.get_session(number)
+        if session is not None and session.last_state:
+            state = session.last_state
+            game_pk = str(session.espn_event_id or "")
+            active = True
+            error = session.last_error
+        else:
+            game_pk, _game = resolve_event(row)
+            state = fetch_mlb_state(game_pk)
+            active = False
+            error = ""
+        return {
+            "assigned_number": number,
+            "stats_number": f"{number}.1",
+            "event_key": str(row.get("event_key", "") or ""),
+            "source_event_id": game_pk,
+            "mlb_game_pk": game_pk,
+            "espn_event_id": _ESPN_FALLBACK_BY_MLB_GAME.get(game_pk, ""),
+            "data_source": str(state.get("data_source") or ""),
+            "active": active,
+            "error": error,
+            "state": state,
+        }
+
+    # live_stats still uses these historic function/field names internally.
+    # Patch their behavior now; a later multi-sport refactor can rename them to
+    # generic source_event_id / fetch_state without touching the renderer/HLS path.
+    live_stats.resolve_espn_event = resolve_event
+    live_stats.fetch_mlb_state = fetch_mlb_state
+    live_stats.mlb_stats_rows = mlb_stats_rows
+    live_stats.inject_stats_channels = inject_stats_channels
+    live_stats.render_mlb_frame = render_mlb_frame
+    live_stats.state_payload = state_payload
+
     # The original prototype used x264's still-image tune and waited exactly 14
     # seconds for two HLS segments. At 2 fps that could land on the same boundary
     # as the timeout. Keep the lightweight encoder but make startup deterministic.
@@ -188,9 +316,6 @@ def install(live_stats) -> None:
             pass
         return command
 
-    live_stats.fetch_mlb_state = fetch_mlb_state
-    live_stats.mlb_stats_rows = mlb_stats_rows
-    live_stats.inject_stats_channels = inject_stats_channels
     live_stats._ffmpeg_command = low_latency_ffmpeg_command
     live_stats.STARTUP_TIMEOUT = max(float(getattr(live_stats, "STARTUP_TIMEOUT", 14.0)), 24.0)
     live_stats._resilient_transport_installed = True
