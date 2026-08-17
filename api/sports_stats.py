@@ -6,14 +6,16 @@ import core
 from sports import live_stats
 from sports import live_stats_transport
 from sports import mlb_fake_stats
+from sports import mlb_stats_enrichment
 from sports import nfl_demo_stats
 from .http import no_cache
 
 
-# ESPN's rich MLB summary/Gamecast endpoint occasionally rejects non-browser
-# clients. Install the resilient transport once at route import time so the
-# synthetic .1 stream falls back to the scoreboard feed instead of failing.
+# MLB StatsAPI is the primary live-game source. The transport layer keeps ESPN
+# available as a fallback, then the enrichment layer adds cold daily standings
+# context (GB) plus the small presentation cleanup used by the MLB renderer.
 live_stats_transport.install(live_stats)
+mlb_stats_enrichment.install(live_stats)
 
 
 def _install_low_latency_stats_hls() -> None:
@@ -81,7 +83,7 @@ def register_sports_stats_routes(app):
         except RuntimeError as exc:
             return no_cache(jsonify(error=str(exc))), 404
         except Exception as exc:
-            return no_cache(jsonify(error=f"Could not load ESPN MLB stats: {exc}")), 502
+            return no_cache(jsonify(error=f"Could not load MLB live stats: {exc}")), 502
         return no_cache(jsonify(payload))
 
     @app.route("/sports/stats/<int:assigned_number>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
