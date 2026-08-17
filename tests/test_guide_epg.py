@@ -78,6 +78,44 @@ class GuideEpgTests(unittest.TestCase):
         self.assertEqual(status["current_channels"], 1)
         self.assertEqual(status["programme_count"], 3)
 
+    def test_companion_channel_can_mirror_parent_programme_with_live_stats_label(self):
+        self._write_epg()
+        channels = [
+            {
+                "number": "10.1",
+                "name": "Dateline NBC — Live Stats",
+                "tvg_id": "stats-station-1",
+                "epg_mirror_tvg_id": "station-1",
+                "epg_mirror_title": "Dateline NBC — Live Stats",
+                "epg_mirror_subtitle": "Live Stats",
+                "epg_mirror_description": "Live statistics companion for Dateline NBC.",
+                "play_url": "/guide/play/stats/10",
+            }
+        ]
+
+        enriched, status = enrich_guide_channels(
+            channels,
+            self.epg_path,
+            timezone_name="America/New_York",
+            now=self.now,
+        )
+
+        current = enriched[0]["now"]
+        self.assertIsNotNone(current)
+        self.assertEqual(current["title"], "Dateline NBC — Live Stats")
+        self.assertEqual(current["subtitle"], "Live Stats")
+        self.assertEqual(
+            current["description"],
+            "Live statistics companion for Dateline NBC.",
+        )
+        self.assertEqual(current["start"], "2026-08-10T14:00:00-04:00")
+        self.assertEqual(current["stop"], "2026-08-10T15:00:00-04:00")
+        self.assertIn("News", current["categories"])
+        self.assertIn("Live Stats", current["categories"])
+        self.assertEqual(enriched[0]["next"]["title"], "Dateline NBC — Live Stats")
+        self.assertEqual(status["matched_channels"], 1)
+        self.assertEqual(status["current_channels"], 1)
+
     def test_unmatched_tvg_id_does_not_guess_by_name(self):
         self._write_epg()
         channels = [
