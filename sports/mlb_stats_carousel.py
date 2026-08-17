@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import threading
 import time
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,6 +24,8 @@ GROUP_TITLE = "Sports Stats"
 PLAY_URL = "/guide/play/stats-carousel/mlb"
 STREAM_PATH = "/sports/stats-carousel/mlb/stream.m3u8"
 ROTATE_SECONDS = 45.0
+ROTATION_OPTIONS = (10, 15, 30, 45, 60)
+ROTATION_SETTING_KEY = "__mlb_stats_carousel_rotation_seconds"
 CANDIDATE_REFRESH_SECONDS = 15.0
 POSTGAME_WINDOW = timedelta(minutes=90)
 
@@ -43,6 +47,43 @@ class CarouselSession:
     current_event_key: str = ""
     current_parent_number: int = 0
     current_source_event_id: str = ""
+
+
+def rotation_seconds(db_path: Path | str) -> float:
+    _s.init_db(db_path)
+    with closing(_s.connect(db_path)) as conn:
+        row = conn.execute(
+            "SELECT value FROM sports_settings WHERE key = ?",
+            (ROTATION_SETTING_KEY,),
+        ).fetchone()
+    if not row:
+        return ROTATE_SECONDS
+    raw = row["value"]
+    try:
+        value = int(json.loads(raw))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return ROTATE_SECONDS
+    return float(value) if value in ROTATION_OPTIONS else ROTATE_SECONDS
+
+
+def set_rotation_seconds(db_path: Path | str, value: object) -> float:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Live-score rotation must be 10, 15, 30, 45, or 60 seconds.") from exc
+    if seconds not in ROTATION_OPTIONS:
+        raise ValueError("Live-score rotation must be 10, 15, 30, 45, or 60 seconds.")
+    _s.init_db(db_path)
+    with closing(_s.connect(db_path)) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",
+            (ROTATION_SETTING_KEY, json.dumps(seconds)),
+        )
+        conn.commit()
+    return float(seconds)
 
 
 def _datetime(value: object) -> datetime | None:
@@ -290,6 +331,7 @@ def _worker(session: CarouselSession, db_path: Path | str) -> None:
 
             if current_row is None or now_mono >= switch_at:
                 current_row = _next_row(candidates, current_key)
+                current_rotation_seconds = rotation_seconds(db_path)
                 if current_row is None:
                     current_key = ""
                     current_game_id = ""
@@ -298,7 +340,7 @@ def _worker(session: CarouselSession, db_path: Path | str) -> None:
                     session.current_source_event_id = ""
                     session.last_state = _idle_state()
                     frame = live_stats.render_mlb_frame(session.last_state)
-                    switch_at = now_mono + ROTATE_SECONDS
+                    switch_at = now_mono + current_rotation_seconds
                     next_poll = now_mono + float(live_stats.POLL_SECONDS)
                 else:
                     current_key = mlb_stats_companions.logical_event_key(current_row)
@@ -307,7 +349,7 @@ def _worker(session: CarouselSession, db_path: Path | str) -> None:
                     session.current_parent_number = int(current_row.get("assigned_number") or 0)
                     session.current_source_event_id = ""
                     session.last_state = {}
-                    switch_at = now_mono + ROTATE_SECONDS
+                    switch_at = now_mono + current_rotation_seconds
                     next_poll = 0.0
 
             if current_row is not None and now_mono >= next_poll:
@@ -445,7 +487,8 @@ def state_payload(db_path: Path | str) -> dict:
         "enabled": is_enabled(db_path),
         "generated_event_count": len(generated),
         "live_candidate_count": len(candidates),
-        "rotation_seconds": ROTATE_SECONDS,
+        "rotation_seconds": rotation_seconds(db_path),
+        "rotation_options": list(ROTATION_OPTIONS),
         "active": session is not None,
         "current_event_key": session.current_event_key if session else "",
         "current_parent_number": session.current_parent_number if session else 0,
