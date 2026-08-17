@@ -103,10 +103,18 @@ def register_sports_stats_routes(app):
             return _media_response_error("MLB stats stream not found.", 404)
         return _media_response(path, filename)
 
-    @app.get("/api/sports/stats-carousel/mlb")
+    @app.route("/api/sports/stats-carousel/mlb", methods=["GET", "PATCH"])
     def sports_stats_carousel_mlb_state():
         try:
+            if request.method == "PATCH":
+                data = request.get_json(force=True, silent=True) or {}
+                mlb_stats_carousel.set_rotation_seconds(
+                    core.DB_PATH,
+                    data.get("rotation_seconds"),
+                )
             return no_cache(jsonify(mlb_stats_carousel.state_payload(core.DB_PATH)))
+        except ValueError as exc:
+            return no_cache(jsonify(error=str(exc))), 400
         except Exception as exc:
             return no_cache(jsonify(error=f"Could not load MLB live-score carousel: {exc}")), 502
 
