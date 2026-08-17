@@ -321,12 +321,32 @@ def _draw_outs_indicator(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> 
     # Keep clear of the left-most edge of the base diamond at roughly x=932.
     draw.rectangle((800, 334, 920, 382), fill=panel)
 
-    live_stats._text(draw, (1090, 207), "OUTS", size=14, bold=True, fill=muted)
+    # Treat OUTS + the dots as one horizontal indicator. The label is the same
+    # 20px bold size as AT BAT and vertically centered against the two dots.
+    center_y = 218
+    first_dot_x = 1192
+    second_dot_x = 1224
+    label_font = live_stats._font(20, bold=True)
+    label_box = draw.textbbox((0, 0), "OUTS", font=label_font)
+    label_width = label_box[2] - label_box[0]
+    label_height = label_box[3] - label_box[1]
+    label_right = first_dot_x - 16
+    label_x = label_right - label_width
+    label_y = center_y - label_height // 2 - label_box[1]
+    live_stats._text(
+        draw,
+        (label_x, label_y),
+        "OUTS",
+        size=20,
+        bold=True,
+        fill=muted,
+    )
+
     outs = _out_dot_count(state)
-    for index, center_x in enumerate((1185, 1217)):
+    for index, center_x in enumerate((first_dot_x, second_dot_x)):
         fill = active if index < outs else inactive
         draw.ellipse(
-            (center_x - 8, 218 - 8, center_x + 8, 218 + 8),
+            (center_x - 8, center_y - 8, center_x + 8, center_y + 8),
             fill=fill,
             outline=outline,
             width=2,
@@ -335,13 +355,20 @@ def _draw_outs_indicator(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> 
 
 def _redraw_team_stats(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> None:
     panel = (17, 27, 41)
+    canvas = (8, 14, 24)
+    border = (42, 58, 78)
     muted = (144, 160, 180)
     away = state.get("away") if isinstance(state.get("away"), dict) else {}
     home = state.get("home") if isinstance(state.get("home"), dict) else {}
 
-    # The prototype values were sitting on the panel's bottom border. Clear the
-    # interior and redraw this small section with an actual lower margin.
-    draw.rectangle((48, 392, 744, 480), fill=panel)
+    # The original 18px values were drawn at y=468, so their descenders could
+    # survive below the old y=480 cleanup rectangle and even cross the panel's
+    # bottom border. Repaint both the lower panel interior and the gap beneath
+    # it, then restore the bottom edge before drawing the compact stats rows.
+    draw.rectangle((48, 392, 744, 483), fill=panel)
+    draw.rectangle((48, 484, 744, 502), fill=canvas)
+    draw.line((48, 484, 744, 484), fill=border, width=2)
+
     live_stats._text(draw, (58, 397), "TEAM STATS", size=18, bold=True, fill=muted)
 
     stat_rows = [
@@ -352,8 +379,8 @@ def _redraw_team_stats(draw: ImageDraw.ImageDraw, live_stats, state: dict) -> No
     ]
     x_positions = (190, 326, 462, 598)
     for x, (label, away_value, home_value) in zip(x_positions, stat_rows):
-        live_stats._text(draw, (x, 427), label, size=14, fill=muted)
-        live_stats._text(draw, (x, 450), f"{away_value}  /  {home_value}", size=17, bold=True)
+        live_stats._text(draw, (x, 426), label, size=14, fill=muted)
+        live_stats._text(draw, (x, 449), f"{away_value}  /  {home_value}", size=17, bold=True)
 
 
 def install(live_stats) -> None:
