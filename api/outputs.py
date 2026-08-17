@@ -3,6 +3,7 @@ from flask import Response, redirect, request, send_file
 import core
 import public_epg_logos
 import sports
+from sports import live_stats
 
 
 def register_output_routes(app):
@@ -96,6 +97,7 @@ def register_output_routes(app):
     @app.get("/playlist/custom.m3u")
     def playlist():
         guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
+        base_url = request.url_root.rstrip("/")
         if not core.PLAYLIST_PATH.exists():
             text = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"\n'
         else:
@@ -106,12 +108,15 @@ def register_output_routes(app):
                 lines[0] = header
             else:
                 lines.insert(0, header)
-            base_url = request.url_root.rstrip("/")
             lines = [
                 f"{base_url}{line}" if line.startswith("/sports/stream/") else line
                 for line in lines
             ]
             text = "\n".join(lines) + "\n"
+        # Experimental second-screen companion channels. Every generated MLB
+        # channel N receives a synthetic N.1 HLS stats channel backed by ESPN
+        # live game data. The synthetic stream starts only when a client tunes it.
+        text = live_stats.inject_stats_channels(text, core.DB_PATH, base_url)
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
