@@ -13,6 +13,7 @@ import sports.guide as sports_guide
 from media import browser
 from settings import load_settings
 from sports import mlb_fake_stats
+from sports import mlb_stats_carousel
 from sports import mlb_stats_companions
 from sports import nfl_demo_stats
 from . import guide as guide_api
@@ -40,6 +41,11 @@ def _internal_fake_hls_url() -> str:
 def _internal_mlb_hls_url(assigned_number: int) -> str:
     settings = load_settings()
     return f"http://127.0.0.1:{settings.port}/sports/stats/{int(assigned_number)}/stream.m3u8"
+
+
+def _internal_mlb_carousel_hls_url() -> str:
+    settings = load_settings()
+    return f"http://127.0.0.1:{settings.port}{mlb_stats_carousel.STREAM_PATH}"
 
 
 def _demo_channel() -> dict:
@@ -97,6 +103,15 @@ def _inject_guide_companions(items: list[dict]) -> list[dict]:
         if number not in inserted:
             output.append(mlb_stats_companions.guide_item(row))
 
+    # 0.1 is a permanent MLB scoreboard carousel whenever an enabled Sports
+    # Automation rule can produce MLB games. The rotation itself only consumes
+    # generated MLB rows, so a Phillies-only rule stays Phillies-only.
+    if mlb_stats_carousel.is_enabled(core.DB_PATH) and not any(
+        str(item.get("play_url", "") or "") == mlb_stats_carousel.PLAY_URL
+        for item in output
+    ):
+        output.insert(0, mlb_stats_carousel.guide_item())
+
     # Permanent experiment channels: 1.1 is completed ESPN data; 1.2 is a fake
     # live MLB state machine that changes continuously without external input.
     if not any(str(item.get("play_url", "") or "") == _DEMO_PLAY_URL for item in output):
@@ -119,6 +134,59 @@ def _inject_guide_companions(items: list[dict]) -> list[dict]:
 
 def _xmltv_time(value: datetime) -> str:
     return value.strftime("%Y%m%d%H%M%S %z")
+
+
+def _append_mlb_carousel_xmltv(
+    root: ElementTree.Element,
+    timezone_name: str,
+    *,
+    generated_at: datetime | None = None,
+) -> None:
+    if not mlb_stats_carousel.is_enabled(core.DB_PATH):
+        return
+    if any(
+        child.tag.rsplit("}", 1)[-1] == "channel"
+        and child.attrib.get("id") == mlb_stats_carousel.TVG_ID
+        for child in root
+    ):
+        return
+
+    timezone = ZoneInfo(str(timezone_name or "America/New_York"))
+    anchor = generated_at if isinstance(generated_at, datetime) else datetime.now(timezone)
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone)
+    else:
+        anchor = anchor.astimezone(timezone)
+    start = anchor - timedelta(hours=12)
+    stop = anchor + timedelta(days=7)
+
+    channel = ElementTree.Element("channel", {"id": mlb_stats_carousel.TVG_ID})
+    ElementTree.SubElement(channel, "display-name", {"lang": "en"}).text = mlb_stats_carousel.DISPLAY_NAME
+    ElementTree.SubElement(channel, "display-name", {"lang": "en"}).text = mlb_stats_carousel.CHANNEL_NUMBER
+
+    channel_insert_at = len(root)
+    for index, child in enumerate(list(root)):
+        if child.tag.rsplit("}", 1)[-1] == "programme":
+            channel_insert_at = index
+            break
+    root.insert(channel_insert_at, channel)
+
+    programme = ElementTree.SubElement(
+        root,
+        "programme",
+        {
+            "start": _xmltv_time(start),
+            "stop": _xmltv_time(stop),
+            "channel": mlb_stats_carousel.TVG_ID,
+        },
+    )
+    ElementTree.SubElement(programme, "title", {"lang": "en"}).text = mlb_stats_carousel.DISPLAY_NAME
+    ElementTree.SubElement(programme, "sub-title", {"lang": "en"}).text = "Rotating Live Scores"
+    ElementTree.SubElement(programme, "desc", {"lang": "en"}).text = (
+        "Rotating live MLB scoreboards for games admitted by the enabled Sports Automation rules."
+    )
+    for category in ("Sports", "Baseball", "MLB", "Live Scores"):
+        ElementTree.SubElement(programme, "category", {"lang": "en"}).text = category
 
 
 def _append_fake_mlb_xmltv(
@@ -199,6 +267,11 @@ def _install_xmltv_companions() -> None:
             generated,
             timezone_name,
         )
+        _append_mlb_carousel_xmltv(
+            root,
+            timezone_name,
+            generated_at=generated_at,
+        )
         _append_fake_mlb_xmltv(
             root,
             timezone_name,
@@ -229,6 +302,10 @@ def install() -> None:
 
     def resolve_guide_play_target(play_url: str) -> str:
         value = str(play_url or "").split("?", 1)[0].strip()
+        if value == mlb_stats_carousel.PLAY_URL:
+            if mlb_stats_carousel.is_enabled(core.DB_PATH):
+                return _internal_mlb_carousel_hls_url()
+            return ""
         if value == _DEMO_PLAY_URL:
             return _internal_demo_hls_url()
         if value == _FAKE_PLAY_URL:
@@ -246,8 +323,8 @@ def install() -> None:
     _installed = True
 
     # Existing XMLTV files may have been built before this experimental layer
-    # was installed during app startup. Rebuild once so the .1 programme rows
-    # are immediately visible without waiting for the next Sports Update.
+    # was installed during app startup. Rebuild once so the synthetic stats
+    # channels are immediately visible without waiting for the next Sports Update.
     try:
         core.ensure_epg_exports_current(force=True)
     except Exception:
@@ -256,6 +333,16 @@ def install() -> None:
 
 
 def register_stats_guide_demo_routes(app: Flask) -> None:
+    @app.get(mlb_stats_carousel.PLAY_URL)
+    def guide_play_mlb_stats_carousel():
+        if not mlb_stats_carousel.is_enabled(core.DB_PATH):
+            return Response(
+                "MLB live-score carousel not enabled.\n",
+                status=404,
+                content_type="text/plain; charset=utf-8",
+            )
+        return browser.response_for(_internal_mlb_carousel_hls_url())
+
     @app.get(_DEMO_PLAY_URL)
     def guide_play_stats_demo():
         return browser.response_for(_internal_demo_hls_url())
