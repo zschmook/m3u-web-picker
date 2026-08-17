@@ -7,15 +7,17 @@ from sports import live_stats
 from sports import live_stats_transport
 from sports import mlb_fake_stats
 from sports import mlb_stats_enrichment
+from sports import mlb_stats_scorebug
 from sports import nfl_demo_stats
 from .http import no_cache
 
 
 # MLB StatsAPI is the primary live-game source. The transport layer keeps ESPN
-# available as a fallback, then the enrichment layer adds cold daily standings
-# context (GB) plus the small presentation cleanup used by the MLB renderer.
+# available as a fallback, enrichment adds cold daily standings context (GB),
+# and the scorebug layer applies canonical team colors plus compact inning/outs.
 live_stats_transport.install(live_stats)
 mlb_stats_enrichment.install(live_stats)
+mlb_stats_scorebug.install(live_stats)
 
 
 def _install_low_latency_stats_hls() -> None:
