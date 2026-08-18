@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
@@ -152,29 +152,6 @@ def _add_text(parent: ElementTree.Element, tag: str, text: str, **attrs) -> Elem
     return element
 
 
-def append_xmltv(
-    root: ElementTree.Element,
-    generated: Iterable[dict],
-    timezone_name: str,
-    *,
-    generated_at: datetime | None = None,
-) -> None:
-    """Append PiP XMLTV rows for games believed live when the guide is built."""
-    del generated  # live eligibility comes from the published generated rows in the DB.
-    timezone = ZoneInfo(str(timezone_name or "America/New_York"))
-    anchor = generated_at if isinstance(generated_at, datetime) else datetime.now(timezone)
-    if anchor.tzinfo is None:
-        anchor = anchor.replace(tzinfo=timezone)
-    else:
-        anchor = anchor.astimezone(timezone)
-    rows = live_rows(_s.DB_PATH if hasattr(_s, "DB_PATH") else "", now=anchor)
-    # sports.__init__ does not own DB_PATH in every import layout; callers that
-    # need XMLTV should use append_xmltv_for_db below.
-    if not rows:
-        return
-    _append_xmltv_rows(root, rows, timezone)
-
-
 def append_xmltv_for_db(
     root: ElementTree.Element,
     db_path: Path | str,
@@ -265,6 +242,8 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
         "-hide_banner",
         "-loglevel",
         "error",
+        "-fflags",
+        "+genpts",
         "-thread_queue_size",
         "512",
         "-i",
@@ -295,6 +274,8 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
         "2",
         "-ar",
         "48000",
+        "-max_muxing_queue_size",
+        "2048",
         "-f",
         "hls",
         "-hls_time",
