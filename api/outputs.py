@@ -3,6 +3,7 @@ from flask import Response, redirect, request, send_file
 import core
 import public_epg_logos
 import sports
+from sports import game_alert_demo
 from sports import live_stats
 from sports import mlb_fake_stats
 from sports import mlb_stats_pip
@@ -120,9 +121,11 @@ def register_output_routes(app):
         # Permanent lab channels for this experiment branch. 1.1 proves the
         # ESPN -> renderer -> HLS path using a completed NFL game; 1.2 proves
         # that a single synthetic channel can keep changing game state without
-        # any external sports feed at all.
+        # any external sports feed at all. 0.10 wraps saved channel 1 and burns
+        # in rotating fake game alerts to prove the Red-Zone-light concept.
         text = nfl_demo_stats.inject_demo_channel(text, base_url)
         text = mlb_fake_stats.inject_demo_channel(text, base_url)
+        text = game_alert_demo.inject_demo_channel(text, base_url)
 
         # Add N.2 first so the existing N.1 injector inserts between the parent
         # game and PiP channel. Final order is N, N.1, N.2. PiP rows are exposed
