@@ -9,6 +9,7 @@ from sports import mlb_fake_stats
 from sports import mlb_stats_carousel
 from sports import mlb_stats_enrichment
 from sports import mlb_stats_pip
+from sports import mlb_stats_pip_carousel
 from sports import mlb_stats_scorebug
 from sports import nfl_demo_stats
 from .http import no_cache
@@ -133,6 +134,27 @@ def register_sports_stats_routes(app):
             return _media_response_error("MLB live-score carousel not found.", 404)
         return _media_response(path, filename)
 
+    @app.get("/api/sports/stats-carousel/mlb-pip")
+    def sports_stats_pip_carousel_mlb_state():
+        try:
+            return no_cache(jsonify(mlb_stats_pip_carousel.state_payload(core.DB_PATH)))
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not load compact MLB PiP carousel: {exc}")), 502
+
+    @app.route("/sports/stats-carousel/mlb-pip/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_stats_pip_carousel_mlb_media(filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = mlb_stats_pip_carousel.safe_media_file(core.DB_PATH, filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start compact MLB PiP carousel: {exc}", 502)
+        if path is None:
+            return _media_response_error("Compact MLB PiP carousel not found.", 404)
+        return _media_response(path, filename)
+
     @app.get("/api/sports/stats-pip/<int:assigned_number>")
     def sports_stats_pip_state(assigned_number: int):
         try:
@@ -174,7 +196,7 @@ def register_sports_stats_routes(app):
         except Exception as exc:
             return _media_response_error(f"Could not start NFL stats demo stream: {exc}", 502)
         if path is None:
-            return _media_response_error("NFL stats demo stream not found.", 404)
+            return _media_response_error("NFL stats demo channel not found.", 404)
         return _media_response(path, filename)
 
     @app.get("/api/sports/stats-fake/1.2")
