@@ -7,13 +7,17 @@ import shutil
 import subprocess
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+import espn_known_logos
+import espn_team_logos
+import event_logos
+import logo_registry
 from media.ffmpeg import executable as ffmpeg_executable, terminate
+from sports_taxonomy import MLB_TEAMS
 
 from . import live_stats
 
@@ -39,7 +43,7 @@ LOGO_SIZE = 72
 _LOCK = threading.RLock()
 _SESSION: "AlertDemoSession | None" = None
 _LOGO_LOCK = threading.RLock()
-_LOGO_CACHE: dict[str, Image.Image | None] = {}
+_LOGO_CACHE: dict[str, Image.Image] = {}
 
 
 @dataclass(frozen=True)
@@ -284,40 +288,124 @@ def _fallback_team_icon(team: DemoTeam, size: int = LOGO_SIZE) -> Image.Image:
     return icon
 
 
-def _fetch_logo(team: DemoTeam) -> Image.Image | None:
-    request = urllib.request.Request(
+def _logo_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _mlb_identity(team: DemoTeam) -> tuple[str, str]:
+    candidates = {_logo_key(team.name), _logo_key(team.abbr)} - {""}
+    for slug, display_name, aliases in MLB_TEAMS:
+        names = {
+            _logo_key(display_name),
+            _logo_key(str(slug).replace("-", " ")),
+            *(_logo_key(alias) for alias in aliases),
+        }
+        if candidates & (names - {""}):
+            return str(slug), str(display_name)
+    return "", team.name
+
+
+def _shared_logo_request(team: DemoTeam) -> tuple[str, str, str]:
+    league = str(team.league or "").strip().upper()
+    if league == "MLB":
+        team_id, canonical_name = _mlb_identity(team)
+        preferred = ""
+        try:
+            preferred = espn_team_logos.espn_full_default_url(
+                "mlb",
+                canonical_name,
+                "baseball",
+            )
+        except Exception:
+            preferred = ""
+        fallback = ""
+        try:
+            fallback = espn_known_logos.direct_full_default_url(
+                "mlb",
+                canonical_name,
+            )
+        except Exception:
+            fallback = ""
+        if not preferred:
+            preferred, fallback = fallback, ""
+        elif fallback == preferred:
+            fallback = ""
+        return team_id or f"mlb:{_logo_key(canonical_name)}", preferred, fallback
+
+    # Non-MLB alerts still use the exact same cache/fetch path. Their stable
+    # taxonomy identity can replace this name-based key when live adapters land.
+    return (
+        f"{league.casefold()}:{_logo_key(team.name)}",
         team.logo_url,
-        headers={"User-Agent": "M3U-Web-Picker sports-alert-demo"},
+        "",
     )
+
+
+def _icon_from_payload(payload: bytes | None) -> Image.Image | None:
+    if not payload:
+        return None
     try:
-        with urllib.request.urlopen(request, timeout=2.0) as response:
-            data = response.read(512 * 1024)
-        image = Image.open(io.BytesIO(data)).convert("RGBA")
-        image.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", (LOGO_SIZE, LOGO_SIZE), (0, 0, 0, 0))
-        canvas.alpha_composite(
-            image,
-            (
-                (LOGO_SIZE - image.width) // 2,
-                (LOGO_SIZE - image.height) // 2,
-            ),
-        )
-        return canvas
+        with Image.open(io.BytesIO(payload)) as source_image:
+            image = source_image.convert("RGBA")
     except Exception:
         return None
 
+    alpha = image.getchannel("A")
+    bbox = alpha.getbbox()
+    if bbox:
+        image = image.crop(bbox)
+    if image.width <= 0 or image.height <= 0:
+        return None
+
+    image.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (LOGO_SIZE, LOGO_SIZE), (0, 0, 0, 0))
+    canvas.alpha_composite(
+        image,
+        (
+            (LOGO_SIZE - image.width) // 2,
+            (LOGO_SIZE - image.height) // 2,
+        ),
+    )
+    return canvas
+
+
+def _fetch_logo(team: DemoTeam) -> Image.Image | None:
+    team_id, preferred_url, fallback_url = _shared_logo_request(team)
+    if not preferred_url:
+        return None
+    try:
+        payload, _digest = event_logos._resolve_team_asset(
+            {
+                "team_id": team_id,
+                "name": team.name,
+                "identity": logo_registry.team_identity(team_id),
+                "source_url": preferred_url,
+                "fallback_url": fallback_url,
+            }
+        )
+    except Exception:
+        return None
+    return _icon_from_payload(payload)
+
 
 def _team_icon(team: DemoTeam) -> Image.Image:
-    key = team.logo_url
+    team_id, preferred_url, fallback_url = _shared_logo_request(team)
+    key = "|".join((team_id, preferred_url, fallback_url))
     with _LOGO_LOCK:
-        if key in _LOGO_CACHE:
-            cached = _LOGO_CACHE[key]
-            return cached.copy() if cached is not None else _fallback_team_icon(team)
+        cached = _LOGO_CACHE.get(key)
+        if cached is not None:
+            return cached.copy()
 
     fetched = _fetch_logo(team)
-    with _LOGO_LOCK:
-        _LOGO_CACHE[key] = fetched
-    return fetched.copy() if fetched is not None else _fallback_team_icon(team)
+    if fetched is not None:
+        with _LOGO_LOCK:
+            _LOGO_CACHE[key] = fetched
+        return fetched.copy()
+
+    # Failed lookups are deliberately not cached forever. The shared registry
+    # may be populated by the guide or a later icon warm-up while this process
+    # is still running, so a future alert gets another chance to resolve it.
+    return _fallback_team_icon(team)
 
 
 def _score_row(image: Image.Image, draw: ImageDraw.ImageDraw, alert: DemoAlert) -> None:
