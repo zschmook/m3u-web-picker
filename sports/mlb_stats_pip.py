@@ -20,11 +20,12 @@ from settings import load_settings
 from . import live_stats
 from . import mlb_stats_carousel
 from . import mlb_stats_companions
+from . import mlb_stats_pip_carousel
 
 
 PIP_SUFFIX = " — Live Scores PiP"
 PIP_WIDTH = 400
-PIP_HEIGHT = 225
+PIP_HEIGHT = 112
 PIP_BORDER = 4
 PIP_MARGIN = 24
 PIP_POSITION = "top-right"
@@ -64,7 +65,11 @@ def pip_title(row: dict) -> str:
 
 
 def pip_tvg_id(row: dict) -> str:
-    digest = hashlib.sha256(mlb_stats_companions.logical_event_key(row).encode("utf-8")).hexdigest()[:24]
+    identity = (
+        f"{mlb_stats_companions.logical_event_key(row)}:"
+        f"{int(row.get('assigned_number') or 0)}"
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     return f"m3u-picker-sports-pip-{digest}"
 
 
@@ -77,8 +82,20 @@ def pip_play_path(row: dict) -> str:
 
 
 def live_rows(db_path: Path | str, *, now: datetime | None = None) -> list[dict]:
-    """Return one MLB parent row per logical event currently believed live."""
-    return mlb_stats_carousel.candidate_rows(db_path, now=now)
+    """Return every generated MLB feed currently believed live."""
+    anchor = now if isinstance(now, datetime) else datetime.now().astimezone()
+    if anchor.tzinfo is None:
+        anchor = anchor.astimezone()
+
+    rows: list[dict] = []
+    for row in _s.generated_rows(db_path):
+        if str(row.get("league_id", "") or "").strip().lower() != "mlb":
+            continue
+        if int(row.get("assigned_number") or 0) <= 0:
+            continue
+        if mlb_stats_carousel._row_thinks_live(row, anchor):
+            rows.append(row)
+    return rows
 
 
 def live_row_for_number(db_path: Path | str, assigned_number: int) -> dict | None:
@@ -106,7 +123,7 @@ def guide_item(row: dict) -> dict:
         "epg_mirror_tvg_id": _value(row.get("tvg_id")),
         "epg_mirror_title": title,
         "epg_mirror_subtitle": "Live Scores PiP",
-        "epg_mirror_description": f"{event_title(row)} with the MLB live-score carousel in picture-in-picture.",
+        "epg_mirror_description": f"{event_title(row)} with the compact MLB live-score carousel in picture-in-picture.",
     }
 
 
@@ -213,7 +230,7 @@ def _append_xmltv_rows(root: ElementTree.Element, rows: list[dict], timezone: Zo
         _add_text(
             programme,
             "desc",
-            f"{event_title(row)} with the rotating MLB live-score carousel in the upper-right corner.",
+            f"{event_title(row)} with the compact rotating MLB live-score carousel in the upper-right corner.",
             lang="en",
         )
         for category in ("Sports", "Baseball", "MLB", "Live Scores", "Picture in Picture"):
@@ -224,7 +241,7 @@ def _append_xmltv_rows(root: ElementTree.Element, rows: list[dict], timezone: Zo
 
 def _carousel_url() -> str:
     settings = load_settings()
-    return f"http://127.0.0.1:{settings.port}{mlb_stats_carousel.STREAM_PATH}"
+    return f"http://127.0.0.1:{settings.port}{mlb_stats_pip_carousel.STREAM_PATH}"
 
 
 def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
@@ -446,7 +463,7 @@ def state_payload(db_path: Path | str, assigned_number: int) -> dict[str, Any]:
         "active": session is not None,
         "event_key": mlb_stats_companions.logical_event_key(row) if row else "",
         "parent_stream": bool(_s.generated_stream_target(db_path, number)) if row else False,
-        "carousel": mlb_stats_carousel.state_payload(db_path),
+        "carousel": mlb_stats_pip_carousel.state_payload(db_path),
         "pip_width": PIP_WIDTH,
         "pip_height": PIP_HEIGHT,
         "pip_margin": PIP_MARGIN,
