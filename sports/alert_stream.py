@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from media.ffmpeg import terminate
 
@@ -295,6 +295,26 @@ def _fit_line(
     return clipped, font
 
 
+def _with_logo_contrast(icon: Image.Image) -> Image.Image:
+    """Give transparent team marks a soft light halo on the dark alert panel."""
+    source = icon.convert("RGBA")
+    alpha = source.getchannel("A")
+    if not alpha.getbbox():
+        return source
+
+    halo_alpha = alpha.filter(ImageFilter.MaxFilter(9)).filter(
+        ImageFilter.GaussianBlur(2.0)
+    )
+    halo_alpha = halo_alpha.point(lambda value: min(132, int(value * 0.52)))
+    halo = Image.new("RGBA", source.size, (238, 242, 247, 0))
+    halo.putalpha(halo_alpha)
+
+    output = Image.new("RGBA", source.size, (0, 0, 0, 0))
+    output.alpha_composite(halo)
+    output.alpha_composite(source)
+    return output
+
+
 def _score_row(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -311,6 +331,8 @@ def _score_row(
         if str(alert.home.abbr or "").strip()
         else demo._fallback_team_icon(alert.home)
     )
+    away_icon = _with_logo_contrast(away_icon)
+    home_icon = _with_logo_contrast(home_icon)
     image.alpha_composite(away_icon, (95, y - 20))
     image.alpha_composite(
         home_icon,
