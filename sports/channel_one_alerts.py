@@ -97,6 +97,23 @@ class MlbScoreTracker:
         )
         return demo.DemoTeam("MLB", name or side.title(), abbr, primary, secondary)
 
+    @staticmethod
+    def _team_from_live_state(
+        state: dict,
+        side: str,
+        fallback: demo.DemoTeam,
+    ) -> demo.DemoTeam:
+        entry = state.get(side) if isinstance(state.get(side), dict) else {}
+        name = str(entry.get("name") or fallback.name).strip() or fallback.name
+        abbr = str(entry.get("abbr") or fallback.abbr).strip().upper()
+        return demo.DemoTeam(
+            "MLB",
+            name,
+            abbr,
+            fallback.primary,
+            fallback.secondary,
+        )
+
     def _resolve_games(self, rows: list[dict]) -> dict[str, dict]:
         anchors: dict[str, datetime] = {}
         for row in rows:
@@ -206,16 +223,19 @@ class MlbScoreTracker:
 
             away = self._team_from_game(game, "away")
             home = self._team_from_game(game, "home")
-            scoring_team = away if away_delta > 0 else home
-            play = f"{scoring_team.name} scored"
+            scoring_is_away = away_delta > 0
+            play = f"{(away if scoring_is_away else home).name} scored"
             try:
                 state = mlb_live_source.fetch_live_state(game_pk)
+                away = self._team_from_live_state(state, "away", away)
+                home = self._team_from_live_state(state, "home", home)
                 latest = str(state.get("last_play") or "").strip()
                 if latest:
                     play = latest
             except Exception as exc:
                 with self.state_lock:
                     self.last_error = str(exc)
+            scoring_team = away if scoring_is_away else home
 
             source_channel = int(row.get("assigned_number") or 0)
             if source_channel <= 0:
