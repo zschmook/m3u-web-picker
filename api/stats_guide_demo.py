@@ -12,6 +12,7 @@ import sports
 import sports.guide as sports_guide
 from media import browser
 from settings import load_settings
+from sports import game_alert_demo
 from sports import mlb_fake_stats
 from sports import mlb_stats_carousel
 from sports import mlb_stats_companions
@@ -36,6 +37,11 @@ def _internal_demo_hls_url() -> str:
 def _internal_fake_hls_url() -> str:
     settings = load_settings()
     return f"http://127.0.0.1:{settings.port}/sports/stats-fake/stream.m3u8"
+
+
+def _internal_alert_demo_hls_url() -> str:
+    settings = load_settings()
+    return f"http://127.0.0.1:{settings.port}{game_alert_demo.STREAM_PATH}"
 
 
 def _internal_mlb_hls_url(assigned_number: int) -> str:
@@ -111,6 +117,17 @@ def _inject_guide_companions(items: list[dict]) -> list[dict]:
         for item in output
     ):
         output.insert(0, mlb_stats_carousel.guide_item())
+
+    # 0.10 is a permanent experiment that wraps saved channel 1 with a rotating
+    # set of simulated alerts. It is deliberately dumb: no score APIs, no rules,
+    # just proof that a mostly-transparent alert surface can be burned into an
+    # otherwise ordinary live channel.
+    if not any(
+        str(item.get("play_url", "") or "") == game_alert_demo.PLAY_URL
+        for item in output
+    ):
+        insert_at = 1 if output and str(output[0].get("number", "") or "") == "0.1" else 0
+        output.insert(insert_at, game_alert_demo.guide_item())
 
     # Permanent experiment channels: 1.1 is completed ESPN data; 1.2 is a fake
     # live MLB state machine that changes continuously without external input.
@@ -302,6 +319,8 @@ def install() -> None:
 
     def resolve_guide_play_target(play_url: str) -> str:
         value = str(play_url or "").split("?", 1)[0].strip()
+        if value == game_alert_demo.PLAY_URL:
+            return _internal_alert_demo_hls_url() if game_alert_demo.parent_target() else ""
         if value == mlb_stats_carousel.PLAY_URL:
             if mlb_stats_carousel.is_enabled(core.DB_PATH):
                 return _internal_mlb_carousel_hls_url()
@@ -333,6 +352,16 @@ def install() -> None:
 
 
 def register_stats_guide_demo_routes(app: Flask) -> None:
+    @app.get(game_alert_demo.PLAY_URL)
+    def guide_play_sports_alert_demo():
+        if not game_alert_demo.parent_target():
+            return Response(
+                "Channel 1 is not available for the sports alert demo.\n",
+                status=404,
+                content_type="text/plain; charset=utf-8",
+            )
+        return browser.response_for(_internal_alert_demo_hls_url())
+
     @app.get(mlb_stats_carousel.PLAY_URL)
     def guide_play_mlb_stats_carousel():
         if not mlb_stats_carousel.is_enabled(core.DB_PATH):
