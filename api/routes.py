@@ -23,6 +23,7 @@ from .providers import register_provider_routes
 from .sports_routes import register_sports_routes
 from .sports_stats import register_sports_stats_routes
 from .stats_guide_demo import install as install_stats_guide_demo, register_stats_guide_demo_routes
+from .stats_pip_guide import install as install_stats_pip_guide, register_stats_pip_guide_routes
 # Import onboarding before ui_status so its Jellyfin post-update wrapper sits
 # inside the existing master-update reporting wrapper.
 from .onboarding import register_onboarding_routes
@@ -37,6 +38,8 @@ def register_routes(app):
     register_sports_stats_routes(app)
     install_stats_guide_demo()
     register_stats_guide_demo_routes(app)
+    install_stats_pip_guide()
+    register_stats_pip_guide_routes(app)
     register_guide_routes(app)
     register_guide_debug_routes(app)
     register_hdhr_routes(app)
