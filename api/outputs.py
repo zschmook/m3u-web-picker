@@ -3,6 +3,7 @@ from flask import Response, redirect, request, send_file
 import core
 import public_epg_logos
 import sports
+from sports import alert_stream
 from sports import game_alert_demo
 from sports import live_stats
 from sports import mlb_fake_stats
@@ -44,10 +45,81 @@ def register_output_routes(app):
         target = sports.generated_stream_target(core.DB_PATH, assigned_number)
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
-        response = redirect(target, code=307)
+
+        # Experimental alert plumbing: every currently generated sports channel
+        # keeps its existing public URL, but that URL now enters an HLS wrapper
+        # which can burn cross-event scoring notifications over the provider feed.
+        response = redirect(
+            f"/sports/alert-stream/{assigned_number}/stream.m3u8",
+            code=307,
+        )
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        return response
+
+    @app.route(
+        "/sports/alert-stream/<int:assigned_number>/<filename>",
+        methods=["GET", "HEAD", "OPTIONS"],
+    )
+    def generated_sports_alert_media(assigned_number: int, filename: str):
+        if request.method == "OPTIONS":
+            response = Response(status=204)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Origin, Accept, Accept-Encoding, Content-Type, Range"
+            )
+            return response
+
+        try:
+            path = alert_stream.safe_media_file(
+                core.DB_PATH,
+                assigned_number,
+                filename,
+            )
+        except RuntimeError as exc:
+            return Response(
+                f"{exc}\n",
+                status=404,
+                content_type="text/plain; charset=utf-8",
+            )
+        except Exception as exc:
+            return Response(
+                f"Could not start sports alert stream: {exc}\n",
+                status=502,
+                content_type="text/plain; charset=utf-8",
+            )
+
+        if path is None:
+            return Response(
+                "Sports alert stream not found.\n",
+                status=404,
+                content_type="text/plain; charset=utf-8",
+            )
+
+        if filename == "stream.m3u8":
+            response = send_file(
+                path,
+                mimetype="application/x-mpegurl",
+                conditional=True,
+            )
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        else:
+            response = send_file(path, mimetype="video/mp2t", conditional=True)
+            response.headers["Cache-Control"] = "public, max-age=30"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Origin, Accept, Accept-Encoding, Content-Type, Range"
+        )
+        response.headers["Access-Control-Expose-Headers"] = (
+            "Content-Length, Content-Range, Accept-Ranges, Content-Type"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Accel-Buffering"] = "no"
         return response
 
     @app.get("/epg/<source_id>.xml")
