@@ -5,6 +5,7 @@ import public_epg_logos
 import sports
 from sports import live_stats
 from sports import mlb_fake_stats
+from sports import mlb_stats_pip
 from sports import nfl_demo_stats
 
 
@@ -123,8 +124,13 @@ def register_output_routes(app):
         text = nfl_demo_stats.inject_demo_channel(text, base_url)
         text = mlb_fake_stats.inject_demo_channel(text, base_url)
 
+        # Add N.2 first so the existing N.1 injector inserts between the parent
+        # game and PiP channel. Final order is N, N.1, N.2. PiP rows are exposed
+        # only for MLB games the carousel currently believes are live.
+        text = mlb_stats_pip.inject_pip_channels(text, core.DB_PATH, base_url)
+
         # Experimental second-screen companion channels. Every logical MLB game
-        # gets one N.1 HLS stats channel backed by ESPN game data. The synthetic
+        # gets one N.1 HLS stats channel backed by live game data. The synthetic
         # stream starts only when a client tunes it.
         text = live_stats.inject_stats_channels(text, core.DB_PATH, base_url)
         text = with_manual_epg_logos(text)
