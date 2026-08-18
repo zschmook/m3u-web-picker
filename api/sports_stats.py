@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Response, jsonify, request, send_file
 
 import core
+from sports import channel_one_alerts
 from sports import game_alert_demo
 from sports import live_stats
 from sports import live_stats_transport
@@ -175,6 +176,27 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start MLB PiP stream: {exc}", 502)
         if path is None:
             return _media_response_error("MLB PiP stream not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/mlb-score-alerts/1")
+    def channel_one_mlb_score_alert_state():
+        try:
+            return no_cache(jsonify(channel_one_alerts.state_payload(core.DB_PATH)))
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not load channel 1 MLB alert state: {exc}")), 502
+
+    @app.route("/sports/mlb-score-alerts/1/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def channel_one_mlb_score_alert_media(filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = channel_one_alerts.safe_media_file(core.DB_PATH, filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start channel 1 MLB alerts: {exc}", 502)
+        if path is None:
+            return _media_response_error("Channel 1 MLB alert stream not found.", 404)
         return _media_response(path, filename)
 
     @app.get("/api/sports/alert-demo/0.10")
