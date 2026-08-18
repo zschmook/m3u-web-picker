@@ -379,15 +379,23 @@ def render_overlay(elapsed: float) -> bytes:
             outline=(255, 255, 255, 72),
             width=2,
         )
+        pill = (24, 22, 137, 50)
         draw.rounded_rectangle(
-            (24, 22, 137, 50),
+            pill,
             radius=10,
             fill=(199, 32, 45, 245),
         )
+        league_label = f"{alert.league} SCORE"
+        league_font = _font(15, bold=True)
+        league_box = draw.textbbox((0, 0), league_label, font=league_font)
+        league_width = league_box[2] - league_box[0]
+        league_height = league_box[3] - league_box[1]
+        league_x = pill[0] + ((pill[2] - pill[0]) - league_width) // 2 - league_box[0]
+        league_y = pill[1] + ((pill[3] - pill[1]) - league_height) // 2 - league_box[1]
         draw.text(
-            (38, 27),
-            f"{alert.league} SCORE",
-            font=_font(15, bold=True),
+            (league_x, league_y),
+            league_label,
+            font=league_font,
             fill=(255, 255, 255, 255),
         )
 
