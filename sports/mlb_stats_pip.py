@@ -23,10 +23,11 @@ from . import mlb_stats_companions
 
 
 PIP_SUFFIX = " — Live Scores PiP"
-PIP_WIDTH = 480
-PIP_HEIGHT = 270
+PIP_WIDTH = 400
+PIP_HEIGHT = 225
 PIP_BORDER = 4
 PIP_MARGIN = 24
+PIP_POSITION = "top-right"
 STARTUP_TIMEOUT = 24.0
 
 _LOCK = threading.RLock()
@@ -212,7 +213,7 @@ def _append_xmltv_rows(root: ElementTree.Element, rows: list[dict], timezone: Zo
         _add_text(
             programme,
             "desc",
-            f"{event_title(row)} with the rotating MLB live-score carousel in the lower-right corner.",
+            f"{event_title(row)} with the rotating MLB live-score carousel in the upper-right corner.",
             lang="en",
         )
         for category in ("Sports", "Baseball", "MLB", "Live Scores", "Picture in Picture"):
@@ -234,7 +235,7 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
     filter_graph = (
         f"[1:v]scale={PIP_WIDTH}:{PIP_HEIGHT}:force_original_aspect_ratio=decrease,"
         f"pad={pip_w}:{pip_h}:{PIP_BORDER}:{PIP_BORDER}:black[pip];"
-        f"[0:v][pip]overlay=W-w-{PIP_MARGIN}:H-h-{PIP_MARGIN}:shortest=1[v]"
+        f"[0:v][pip]overlay=W-w-{PIP_MARGIN}:{PIP_MARGIN}:shortest=1[v]"
     )
     return [
         ffmpeg_executable(),
@@ -449,5 +450,6 @@ def state_payload(db_path: Path | str, assigned_number: int) -> dict[str, Any]:
         "pip_width": PIP_WIDTH,
         "pip_height": PIP_HEIGHT,
         "pip_margin": PIP_MARGIN,
+        "pip_position": PIP_POSITION,
         "error": session.last_error if session else "",
     }
