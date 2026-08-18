@@ -260,15 +260,60 @@ def _routed_alert_valid(
     )
 
 
+def _fit_line(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    *,
+    max_width: int,
+    start_size: int,
+    minimum: int,
+):
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    font = demo._fit_text(
+        draw,
+        text,
+        max_width=max_width,
+        start_size=start_size,
+        minimum=minimum,
+    )
+    box = draw.textbbox((0, 0), text, font=font)
+    if box[2] - box[0] <= max_width:
+        return text, font
+
+    suffix = "…"
+    low = 0
+    high = len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        candidate = text[:mid].rstrip() + suffix
+        candidate_box = draw.textbbox((0, 0), candidate, font=font)
+        if candidate_box[2] - candidate_box[0] <= max_width:
+            low = mid
+        else:
+            high = mid - 1
+    clipped = text[:low].rstrip() + suffix if low else suffix
+    return clipped, font
+
+
 def _score_row(
     image: Image.Image,
     draw: ImageDraw.ImageDraw,
     alert: demo.DemoAlert,
 ) -> None:
     y = 120
-    image.alpha_composite(demo._fallback_team_icon(alert.away), (95, y - 20))
+    away_icon = (
+        demo._team_icon(alert.away)
+        if str(alert.away.abbr or "").strip()
+        else demo._fallback_team_icon(alert.away)
+    )
+    home_icon = (
+        demo._team_icon(alert.home)
+        if str(alert.home.abbr or "").strip()
+        else demo._fallback_team_icon(alert.home)
+    )
+    image.alpha_composite(away_icon, (95, y - 20))
     image.alpha_composite(
-        demo._fallback_team_icon(alert.home),
+        home_icon,
         (demo.FRAME_WIDTH - 95 - demo.LOGO_SIZE, y - 20),
     )
 
@@ -357,7 +402,7 @@ def render_alert(alert: demo.DemoAlert | None) -> bytes:
             fill=(255, 255, 255, 255),
         )
 
-        play_font = demo._fit_text(
+        play_text, play_font = _fit_line(
             draw,
             alert.play,
             max_width=demo.FRAME_WIDTH - 64,
@@ -366,7 +411,7 @@ def render_alert(alert: demo.DemoAlert | None) -> bytes:
         )
         draw.text(
             (32, 67),
-            alert.play,
+            play_text,
             font=play_font,
             fill=(210, 219, 231, 255),
         )
