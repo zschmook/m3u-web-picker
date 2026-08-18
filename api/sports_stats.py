@@ -153,7 +153,7 @@ def register_sports_stats_routes(app):
         except RuntimeError as exc:
             return _media_response_error(str(exc), 404)
         except Exception as exc:
-            return _media_response_error(f"Could not start compact MLB PiP carousel: {exc}")), 502
+            return _media_response_error(f"Could not start compact MLB PiP carousel: {exc}", 502)
         if path is None:
             return _media_response_error("Compact MLB PiP carousel not found.", 404)
         return _media_response(path, filename)
