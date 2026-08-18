@@ -112,6 +112,21 @@ def test_score_row_uses_real_team_icons_when_abbreviations_exist(monkeypatch):
     assert calls == ["PHI", "NYM"]
 
 
+def test_logo_contrast_adds_light_halo_without_covering_mark():
+    icon = Image.new("RGBA", (72, 72), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(icon, "RGBA")
+    draw.rectangle((20, 20, 52, 52), fill=(5, 8, 12, 255))
+
+    contrasted = alert_stream._with_logo_contrast(icon)
+
+    halo = contrasted.getpixel((16, 36))
+    center = contrasted.getpixel((36, 36))
+    assert halo[3] > 0
+    assert min(halo[:3]) > 150
+    assert center[:3] == (5, 8, 12)
+    assert center[3] == 255
+
+
 def test_fit_line_ellipsizes_long_play_text():
     image = Image.new(
         "RGBA",
