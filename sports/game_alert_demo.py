@@ -218,6 +218,8 @@ def _demo_alert_for_slot(slot: int) -> DemoAlert:
             yards=rng.choice((1, 3, 6, 8, 12, 18, 24, 31, 42, 58, 73)),
         )
 
+    # Demo destinations intentionally stay in the generated sports-channel
+    # range. The production alert selector will be sports-only and UI-gated.
     source_channel = str(rng.choice((1000, 1001, 1010, 1020, 1100, 1200)))
     return DemoAlert(
         league=league,
@@ -351,6 +353,17 @@ def _score_row(image: Image.Image, draw: ImageDraw.ImageDraw, alert: DemoAlert) 
         home_score,
         font=score_font,
         fill=(255, 255, 255, 255),
+    )
+
+    channel_text = f"On channel: {alert.source_channel}"
+    channel_font = _font(17, bold=True)
+    channel_box = draw.textbbox((0, 0), channel_text, font=channel_font)
+    channel_width = channel_box[2] - channel_box[0]
+    draw.text(
+        ((FRAME_WIDTH - channel_width) // 2, 183),
+        channel_text,
+        font=channel_font,
+        fill=(171, 184, 201, 255),
     )
 
 
