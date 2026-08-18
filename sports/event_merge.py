@@ -8,6 +8,9 @@ from zoneinfo import ZoneInfo
 import sports as _s
 
 
+SCHEDULE_API_PROVIDER_CLUSTER_WINDOW = timedelta(minutes=15)
+
+
 def _timing_rank(event: dict) -> int:
     return {"untimed": 0, "embedded": 1, "xmltv": 2, "schedule_api": 3}.get(
         str(event.get("timing_source") or "untimed"),
@@ -249,7 +252,10 @@ def _schedule_api_provider_clusters(events: list[dict]) -> list[dict]:
             right = event.get("start")
             if isinstance(left, datetime) and isinstance(right, datetime):
                 try:
-                    same_slot = abs((left - right).total_seconds()) <= 90
+                    same_slot = (
+                        abs((left - right).total_seconds())
+                        <= SCHEDULE_API_PROVIDER_CLUSTER_WINDOW.total_seconds()
+                    )
                 except Exception:
                     same_slot = False
         if same_slot:
