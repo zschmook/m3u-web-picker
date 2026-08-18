@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import io
+import random
 import re
 import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,68 +27,45 @@ STREAM_PATH = "/sports/alert-demo/stream.m3u8"
 PARENT_CHANNEL_NUMBER = "1"
 
 FRAME_WIDTH = 640
-FRAME_HEIGHT = 240
+FRAME_HEIGHT = 220
 FRAME_RATE = 2
 ALERT_SLOT_SECONDS = 10.0
 ALERT_VISIBLE_SECONDS = 7.0
 STARTUP_TIMEOUT = 24.0
-
-# Intentionally ridiculous canned situations. The fourth field is deliberately
-# first-class source-channel metadata rather than display text; real alerts need
-# to identify exactly which generated sports channel the viewer can switch to.
-DEMO_ALERTS = (
-    (
-        "RUNNY McRUN FACE TD",
-        "DOPES 34   IDIOTS 32",
-        "1:34 LEFT IN Q4",
-        "8000-ELEVENTY",
-    ),
-    (
-        "4TH & FOREVER — SOMEHOW CONVERTED",
-        "WOMBATS 27   FIGHTING BEIGE 24",
-        "0:31 LEFT IN Q4",
-        "31337",
-    ),
-    (
-        "PUNT RETURN CHAOS!",
-        "POSSUMS 19   TAX ACCOUNTANTS 17",
-        "0:07 LEFT IN Q4",
-        "404",
-    ),
-    (
-        "ON-SIDE KICK RECOVERED BY THE WRONG GUYS",
-        "FERAL CATS 30   PARKING ENFORCEMENT 28",
-        "0:42 LEFT IN Q4",
-        "8675309",
-    ),
-    (
-        "WE HAVE A SCORIGAMI SITUATION",
-        "MEAT SWEATS 11   LAWN DARTS 5",
-        "2:12 LEFT IN Q4",
-        "42",
-    ),
-    (
-        "BASES LOADED, NOBODY KNOWS WHY",
-        "MUD HENS 6   SPACE COWBOYS 6",
-        "BOTTOM 11TH",
-        "1776.5",
-    ),
-    (
-        "GOALIE PULLED. BOTH TEAMS CONFUSED.",
-        "ICE GOBLINS 3   BEIGE SWEATERS 2",
-        "1:02 LEFT IN 3RD",
-        "66.6",
-    ),
-    (
-        "OVERTIME! TALL PEOPLE STILL RUNNING",
-        "TALL PEOPLE 121   OTHER TALL PEOPLE 121",
-        "END Q4",
-        "9001",
-    ),
-)
+DEMO_SEED = 0x010
+DEMO_PREVIEW_COUNT = 8
+LOGO_SIZE = 72
 
 _LOCK = threading.RLock()
 _SESSION: "AlertDemoSession | None" = None
+_LOGO_LOCK = threading.RLock()
+_LOGO_CACHE: dict[str, Image.Image | None] = {}
+
+
+@dataclass(frozen=True)
+class DemoTeam:
+    league: str
+    name: str
+    abbr: str
+    primary: tuple[int, int, int]
+    secondary: tuple[int, int, int]
+
+    @property
+    def logo_url(self) -> str:
+        league_slug = "mlb" if self.league == "MLB" else "nfl"
+        return f"https://a.espncdn.com/i/teamlogos/{league_slug}/500/{self.abbr.lower()}.png"
+
+
+@dataclass(frozen=True)
+class DemoAlert:
+    league: str
+    scoring_team: DemoTeam
+    away: DemoTeam
+    home: DemoTeam
+    away_score: int
+    home_score: int
+    play: str
+    source_channel: str
 
 
 @dataclass
@@ -101,6 +80,59 @@ class AlertDemoSession:
     last_error: str = ""
 
 
+_MLB_TEAMS = (
+    DemoTeam("MLB", "Philadelphia Phillies", "PHI", (232, 24, 40), (0, 45, 114)),
+    DemoTeam("MLB", "New York Mets", "NYM", (0, 45, 114), (255, 89, 16)),
+    DemoTeam("MLB", "New York Yankees", "NYY", (12, 35, 64), (196, 206, 211)),
+    DemoTeam("MLB", "Boston Red Sox", "BOS", (189, 48, 57), (12, 35, 64)),
+    DemoTeam("MLB", "Chicago Cubs", "CHC", (14, 51, 134), (204, 52, 51)),
+    DemoTeam("MLB", "St. Louis Cardinals", "STL", (196, 30, 58), (12, 35, 64)),
+    DemoTeam("MLB", "Los Angeles Dodgers", "LAD", (0, 90, 156), (239, 62, 66)),
+    DemoTeam("MLB", "San Francisco Giants", "SF", (253, 90, 30), (39, 37, 31)),
+)
+
+_NFL_TEAMS = (
+    DemoTeam("NFL", "Philadelphia Eagles", "PHI", (0, 76, 84), (165, 172, 175)),
+    DemoTeam("NFL", "Dallas Cowboys", "DAL", (0, 53, 148), (134, 147, 151)),
+    DemoTeam("NFL", "Kansas City Chiefs", "KC", (227, 24, 55), (255, 184, 28)),
+    DemoTeam("NFL", "Buffalo Bills", "BUF", (0, 51, 141), (198, 12, 48)),
+    DemoTeam("NFL", "Detroit Lions", "DET", (0, 118, 182), (176, 183, 188)),
+    DemoTeam("NFL", "Green Bay Packers", "GB", (24, 48, 40), (255, 184, 28)),
+    DemoTeam("NFL", "Baltimore Ravens", "BAL", (36, 23, 115), (158, 124, 12)),
+    DemoTeam("NFL", "Pittsburgh Steelers", "PIT", (16, 24, 32), (255, 182, 18)),
+)
+
+_MLB_PLAYS = (
+    "{player} — solo home run",
+    "{player} — 2-run home run",
+    "{player} — 3-run home run",
+    "{player} — RBI double",
+    "{player} — 2-run single",
+    "{player} — sacrifice fly",
+)
+
+_NFL_PLAYS = (
+    "{player} — {yards}-yard rushing TD",
+    "{player} — {yards}-yard TD reception",
+    "{player} — {yards}-yard pick-six",
+    "{player} — kickoff return TD",
+    "{player} — punt return TD",
+)
+
+_DEMO_PLAYERS = (
+    "Jordan Vega",
+    "Marcus Reed",
+    "Tyler Brooks",
+    "Alex Ramirez",
+    "Chris Daniels",
+    "Devin Carter",
+    "Ryan Knox",
+    "Malik Hayes",
+    "Evan Cole",
+    "Nico Bennett",
+)
+
+
 def guide_item() -> dict:
     return {
         "number": CHANNEL_NUMBER,
@@ -108,7 +140,7 @@ def guide_item() -> dict:
         "group": GROUP_TITLE,
         "logo": "",
         "tvg_id": TVG_ID,
-        "subtitle": "Channel 1 with rotating simulated game alerts",
+        "subtitle": "Channel 1 with simulated MLB/NFL scoring notifications",
         "generated": True,
         "play_url": PLAY_URL,
         "sports_alert_demo": True,
@@ -157,24 +189,169 @@ def _fit_text(draw: ImageDraw.ImageDraw, value: str, *, max_width: int, start_si
     return _font(minimum, bold=True)
 
 
-def _current_alert(elapsed: float) -> tuple[int, tuple[str, str, str, str] | None]:
+def _demo_alert_for_slot(slot: int) -> DemoAlert:
+    rng = random.Random(DEMO_SEED + max(0, int(slot)) * 1009)
+    league = rng.choice(("MLB", "NFL"))
+    teams = _MLB_TEAMS if league == "MLB" else _NFL_TEAMS
+    away, home = rng.sample(teams, 2)
+    scoring_team = rng.choice((away, home))
+    player = rng.choice(_DEMO_PLAYERS)
+
+    if league == "MLB":
+        away_score = rng.randint(0, 8)
+        home_score = rng.randint(0, 8)
+        scoring_runs = rng.choice((1, 1, 1, 2, 2, 3))
+        if scoring_team is away:
+            away_score = max(away_score, home_score - 2) + scoring_runs
+        else:
+            home_score = max(home_score, away_score - 2) + scoring_runs
+        play = rng.choice(_MLB_PLAYS).format(player=player)
+    else:
+        away_score = rng.choice(range(3, 39))
+        home_score = rng.choice(range(3, 39))
+        if scoring_team is away:
+            away_score += 6
+        else:
+            home_score += 6
+        play = rng.choice(_NFL_PLAYS).format(
+            player=player,
+            yards=rng.choice((1, 3, 6, 8, 12, 18, 24, 31, 42, 58, 73)),
+        )
+
+    source_channel = str(rng.choice((1000, 1001, 1010, 1020, 1100, 1200)))
+    return DemoAlert(
+        league=league,
+        scoring_team=scoring_team,
+        away=away,
+        home=home,
+        away_score=away_score,
+        home_score=home_score,
+        play=play,
+        source_channel=source_channel,
+    )
+
+
+def _current_alert(elapsed: float) -> tuple[int, DemoAlert | None]:
     slot = int(max(0.0, elapsed) // ALERT_SLOT_SECONDS)
     within = max(0.0, elapsed) % ALERT_SLOT_SECONDS
     if within >= ALERT_VISIBLE_SECONDS:
         return slot, None
-    return slot, DEMO_ALERTS[slot % len(DEMO_ALERTS)]
+    return slot, _demo_alert_for_slot(slot)
 
 
-def _alert_payload(alert: tuple[str, str, str, str] | None) -> dict | None:
+def _team_payload(team: DemoTeam, score: int) -> dict:
+    return {
+        "name": team.name,
+        "abbr": team.abbr,
+        "score": int(score),
+        "logo_url": team.logo_url,
+    }
+
+
+def _alert_payload(alert: DemoAlert | None) -> dict | None:
     if alert is None:
         return None
-    headline, score, situation, source_channel = alert
     return {
-        "headline": headline,
-        "score": score,
-        "situation": situation,
-        "source_channel": source_channel,
+        "league": alert.league,
+        "scoring_team": alert.scoring_team.name,
+        "play": alert.play,
+        "away": _team_payload(alert.away, alert.away_score),
+        "home": _team_payload(alert.home, alert.home_score),
+        "source_channel": alert.source_channel,
     }
+
+
+def _fallback_team_icon(team: DemoTeam, size: int = LOGO_SIZE) -> Image.Image:
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(icon, "RGBA")
+    pad = max(3, size // 18)
+    draw.rounded_rectangle(
+        (pad, pad, size - pad, size - pad),
+        radius=max(12, size // 4),
+        fill=(*team.primary, 255),
+        outline=(*team.secondary, 255),
+        width=max(3, size // 14),
+    )
+    # Deliberately graphical only: no team abbreviation text. The real alert
+    # renderer can drop actual logos into this exact slot.
+    inset = max(16, size // 4)
+    draw.ellipse(
+        (inset, inset, size - inset, size - inset),
+        fill=(*team.secondary, 255),
+    )
+    return icon
+
+
+def _fetch_logo(team: DemoTeam) -> Image.Image | None:
+    request = urllib.request.Request(
+        team.logo_url,
+        headers={"User-Agent": "M3U-Web-Picker sports-alert-demo"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            data = response.read(512 * 1024)
+        image = Image.open(io.BytesIO(data)).convert("RGBA")
+        image.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (LOGO_SIZE, LOGO_SIZE), (0, 0, 0, 0))
+        canvas.alpha_composite(
+            image,
+            (
+                (LOGO_SIZE - image.width) // 2,
+                (LOGO_SIZE - image.height) // 2,
+            ),
+        )
+        return canvas
+    except Exception:
+        return None
+
+
+def _team_icon(team: DemoTeam) -> Image.Image:
+    key = team.logo_url
+    with _LOGO_LOCK:
+        if key in _LOGO_CACHE:
+            cached = _LOGO_CACHE[key]
+            return cached.copy() if cached is not None else _fallback_team_icon(team)
+
+    fetched = _fetch_logo(team)
+    with _LOGO_LOCK:
+        _LOGO_CACHE[key] = fetched
+    return fetched.copy() if fetched is not None else _fallback_team_icon(team)
+
+
+def _score_row(image: Image.Image, draw: ImageDraw.ImageDraw, alert: DemoAlert) -> None:
+    y = 120
+    away_icon = _team_icon(alert.away)
+    home_icon = _team_icon(alert.home)
+    image.alpha_composite(away_icon, (95, y - 20))
+    image.alpha_composite(home_icon, (FRAME_WIDTH - 95 - LOGO_SIZE, y - 20))
+
+    score_font = _font(48, bold=True)
+    separator_font = _font(32, bold=True)
+    away_score = str(alert.away_score)
+    home_score = str(alert.home_score)
+
+    away_box = draw.textbbox((0, 0), away_score, font=score_font)
+    away_width = away_box[2] - away_box[0]
+
+    center = FRAME_WIDTH // 2
+    draw.text(
+        (center - 58 - away_width, y - 8),
+        away_score,
+        font=score_font,
+        fill=(255, 255, 255, 255),
+    )
+    draw.text(
+        (center - 9, y + 2),
+        "–",
+        font=separator_font,
+        fill=(151, 163, 181, 255),
+    )
+    draw.text(
+        (center + 58, y - 8),
+        home_score,
+        font=score_font,
+        fill=(255, 255, 255, 255),
+    )
 
 
 def render_overlay(elapsed: float) -> bytes:
@@ -183,29 +360,53 @@ def render_overlay(elapsed: float) -> bytes:
     if alert is not None:
         draw = ImageDraw.Draw(image, "RGBA")
         draw.rounded_rectangle(
-            (8, 8, FRAME_WIDTH - 8, FRAME_HEIGHT - 8),
+            (10, 10, FRAME_WIDTH - 10, FRAME_HEIGHT - 10),
             radius=22,
-            fill=(8, 14, 24, 224),
-            outline=(255, 186, 36, 245),
-            width=4,
+            fill=(8, 14, 24, 226),
+            outline=(255, 255, 255, 72),
+            width=2,
         )
-        draw.rounded_rectangle((24, 22, 205, 60), radius=12, fill=(205, 38, 45, 245))
-        draw.text((39, 28), "GAME UPDATE!", font=_font(22, bold=True), fill=(255, 255, 255, 255))
+        draw.rounded_rectangle(
+            (24, 22, 137, 50),
+            radius=10,
+            fill=(199, 32, 45, 245),
+        )
         draw.text(
-            (FRAME_WIDTH - 213, 31),
-            "SIMULATED ALERT DEMO",
-            font=_font(14, bold=True),
-            fill=(171, 184, 201, 255),
+            (38, 27),
+            f"{alert.league} SCORE",
+            font=_font(15, bold=True),
+            fill=(255, 255, 255, 255),
         )
 
-        headline, score, situation, source_channel = alert
-        situation_line = f"{situation}  ·  CH {source_channel}"
-        headline_font = _fit_text(draw, headline, max_width=FRAME_WIDTH - 64, start_size=31, minimum=20)
-        score_font = _fit_text(draw, score, max_width=FRAME_WIDTH - 64, start_size=29, minimum=20)
-        situation_font = _fit_text(draw, situation_line, max_width=FRAME_WIDTH - 64, start_size=23, minimum=17)
-        draw.text((32, 79), headline, font=headline_font, fill=(255, 255, 255, 255))
-        draw.text((32, 126), score, font=score_font, fill=(255, 208, 82, 255))
-        draw.text((32, 174), situation_line, font=situation_font, fill=(225, 232, 241, 255))
+        headline = f"{alert.scoring_team.name} scored"
+        headline_font = _fit_text(
+            draw,
+            headline,
+            max_width=FRAME_WIDTH - 185,
+            start_size=26,
+            minimum=18,
+        )
+        draw.text(
+            (151, 22),
+            headline,
+            font=headline_font,
+            fill=(255, 255, 255, 255),
+        )
+
+        play_font = _fit_text(
+            draw,
+            alert.play,
+            max_width=FRAME_WIDTH - 64,
+            start_size=22,
+            minimum=16,
+        )
+        draw.text(
+            (32, 67),
+            alert.play,
+            font=play_font,
+            fill=(210, 219, 231, 255),
+        )
+        _score_row(image, draw, alert)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=False)
@@ -235,7 +436,7 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
     segments = directory / "segment_%06d.ts"
     filter_graph = (
         "[1:v]format=rgba[alert];"
-        "[0:v][alert]overlay=x=(W-w)/2:y=H-h-60:format=auto:eof_action=pass[v]"
+        "[0:v][alert]overlay=x=(W-w)/2:y=H-h-48:format=auto:eof_action=pass[v]"
     )
     return [
         ffmpeg_executable(),
@@ -443,9 +644,12 @@ def state_payload() -> dict:
         "channel_number": CHANNEL_NUMBER,
         "parent_channel_number": PARENT_CHANNEL_NUMBER,
         "active": session is not None,
-        "alert_index": slot % len(DEMO_ALERTS),
+        "alert_index": slot,
         "alert": _alert_payload(alert),
-        "alerts": [_alert_payload(item) for item in DEMO_ALERTS],
+        "alerts": [
+            _alert_payload(_demo_alert_for_slot(index))
+            for index in range(DEMO_PREVIEW_COUNT)
+        ],
         "visible_seconds": ALERT_VISIBLE_SECONDS,
         "slot_seconds": ALERT_SLOT_SECONDS,
         "last_error": session.last_error if session is not None else "",
