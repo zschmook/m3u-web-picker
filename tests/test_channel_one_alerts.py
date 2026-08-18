@@ -60,6 +60,10 @@ def test_mlb_score_tracker_baselines_then_alerts(monkeypatch):
         _row(1001),  # alternate feed of the same logical event
     ]
     game = _game(away_score=1, home_score=0)
+    # The schedule response does not reliably include abbreviations. The live
+    # feed does, and alerts should use those identities for real team logos.
+    game["teams"]["away"]["team"].pop("abbreviation")
+    game["teams"]["home"]["team"].pop("abbreviation")
 
     monkeypatch.setattr(
         channel_one_alerts.generated,
@@ -72,7 +76,11 @@ def test_mlb_score_tracker_baselines_then_alerts(monkeypatch):
     monkeypatch.setattr(
         channel_one_alerts.mlb_live_source,
         "fetch_live_state",
-        lambda _game_pk: {"last_play": "Kyle Schwarber homers to right field."},
+        lambda _game_pk: {
+            "last_play": "Kyle Schwarber homers to right field.",
+            "away": {"name": "Philadelphia Phillies", "abbr": "PHI"},
+            "home": {"name": "New York Mets", "abbr": "NYM"},
+        },
     )
 
     tracker.poll("db.sqlite")
@@ -85,6 +93,8 @@ def test_mlb_score_tracker_baselines_then_alerts(monkeypatch):
     assert alert is not None
     assert alert.league == "MLB"
     assert alert.scoring_team.name == "Philadelphia Phillies"
+    assert alert.away.abbr == "PHI"
+    assert alert.home.abbr == "NYM"
     assert alert.away_score == 2
     assert alert.home_score == 0
     assert alert.source_channel == "1000"
