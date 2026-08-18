@@ -31,48 +31,57 @@ ALERT_SLOT_SECONDS = 10.0
 ALERT_VISIBLE_SECONDS = 7.0
 STARTUP_TIMEOUT = 24.0
 
-# Intentionally ridiculous canned situations. The prototype is proving the
-# overlay/transport idea, not sports-event rules yet.
+# Intentionally ridiculous canned situations. The fourth field is deliberately
+# first-class source-channel metadata rather than display text; real alerts need
+# to identify exactly which generated sports channel the viewer can switch to.
 DEMO_ALERTS = (
     (
         "RUNNY McRUN FACE TD",
         "DOPES 34   IDIOTS 32",
-        "1:34 LEFT IN Q4  ·  CH 8000-ELEVENTY",
+        "1:34 LEFT IN Q4",
+        "8000-ELEVENTY",
     ),
     (
         "4TH & FOREVER — SOMEHOW CONVERTED",
         "WOMBATS 27   FIGHTING BEIGE 24",
-        "0:31 LEFT IN Q4  ·  CH 31337",
+        "0:31 LEFT IN Q4",
+        "31337",
     ),
     (
         "PUNT RETURN CHAOS!",
         "POSSUMS 19   TAX ACCOUNTANTS 17",
-        "0:07 LEFT IN Q4  ·  CH 404",
+        "0:07 LEFT IN Q4",
+        "404",
     ),
     (
         "ON-SIDE KICK RECOVERED BY THE WRONG GUYS",
         "FERAL CATS 30   PARKING ENFORCEMENT 28",
-        "0:42 LEFT IN Q4  ·  CH 8675309",
+        "0:42 LEFT IN Q4",
+        "8675309",
     ),
     (
         "WE HAVE A SCORIGAMI SITUATION",
         "MEAT SWEATS 11   LAWN DARTS 5",
-        "2:12 LEFT IN Q4  ·  CH 42",
+        "2:12 LEFT IN Q4",
+        "42",
     ),
     (
         "BASES LOADED, NOBODY KNOWS WHY",
         "MUD HENS 6   SPACE COWBOYS 6",
-        "BOTTOM 11TH  ·  CH 1776.5",
+        "BOTTOM 11TH",
+        "1776.5",
     ),
     (
         "GOALIE PULLED. BOTH TEAMS CONFUSED.",
         "ICE GOBLINS 3   BEIGE SWEATERS 2",
-        "1:02 LEFT IN 3RD  ·  CH 66.6",
+        "1:02 LEFT IN 3RD",
+        "66.6",
     ),
     (
         "OVERTIME! TALL PEOPLE STILL RUNNING",
         "TALL PEOPLE 121   OTHER TALL PEOPLE 121",
-        "END Q4  ·  CH 9001",
+        "END Q4",
+        "9001",
     ),
 )
 
@@ -148,12 +157,24 @@ def _fit_text(draw: ImageDraw.ImageDraw, value: str, *, max_width: int, start_si
     return _font(minimum, bold=True)
 
 
-def _current_alert(elapsed: float) -> tuple[int, tuple[str, str, str] | None]:
+def _current_alert(elapsed: float) -> tuple[int, tuple[str, str, str, str] | None]:
     slot = int(max(0.0, elapsed) // ALERT_SLOT_SECONDS)
     within = max(0.0, elapsed) % ALERT_SLOT_SECONDS
     if within >= ALERT_VISIBLE_SECONDS:
         return slot, None
     return slot, DEMO_ALERTS[slot % len(DEMO_ALERTS)]
+
+
+def _alert_payload(alert: tuple[str, str, str, str] | None) -> dict | None:
+    if alert is None:
+        return None
+    headline, score, situation, source_channel = alert
+    return {
+        "headline": headline,
+        "score": score,
+        "situation": situation,
+        "source_channel": source_channel,
+    }
 
 
 def render_overlay(elapsed: float) -> bytes:
@@ -177,13 +198,14 @@ def render_overlay(elapsed: float) -> bytes:
             fill=(171, 184, 201, 255),
         )
 
-        headline, score, situation = alert
+        headline, score, situation, source_channel = alert
+        situation_line = f"{situation}  ·  CH {source_channel}"
         headline_font = _fit_text(draw, headline, max_width=FRAME_WIDTH - 64, start_size=31, minimum=20)
         score_font = _fit_text(draw, score, max_width=FRAME_WIDTH - 64, start_size=29, minimum=20)
-        situation_font = _fit_text(draw, situation, max_width=FRAME_WIDTH - 64, start_size=23, minimum=17)
+        situation_font = _fit_text(draw, situation_line, max_width=FRAME_WIDTH - 64, start_size=23, minimum=17)
         draw.text((32, 79), headline, font=headline_font, fill=(255, 255, 255, 255))
         draw.text((32, 126), score, font=score_font, fill=(255, 208, 82, 255))
-        draw.text((32, 174), situation, font=situation_font, fill=(225, 232, 241, 255))
+        draw.text((32, 174), situation_line, font=situation_font, fill=(225, 232, 241, 255))
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=False)
@@ -422,8 +444,8 @@ def state_payload() -> dict:
         "parent_channel_number": PARENT_CHANNEL_NUMBER,
         "active": session is not None,
         "alert_index": slot % len(DEMO_ALERTS),
-        "alert": list(alert) if alert is not None else None,
-        "alerts": [list(item) for item in DEMO_ALERTS],
+        "alert": _alert_payload(alert),
+        "alerts": [_alert_payload(item) for item in DEMO_ALERTS],
         "visible_seconds": ALERT_VISIBLE_SECONDS,
         "slot_seconds": ALERT_SLOT_SECONDS,
         "last_error": session.last_error if session is not None else "",
