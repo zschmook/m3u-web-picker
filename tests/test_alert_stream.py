@@ -112,19 +112,60 @@ def test_score_row_uses_real_team_icons_when_abbreviations_exist(monkeypatch):
     assert calls == ["PHI", "NYM"]
 
 
-def test_logo_contrast_adds_light_halo_without_covering_mark():
+def test_logo_contrast_adds_consistent_light_disc_without_covering_mark():
     icon = Image.new("RGBA", (72, 72), (0, 0, 0, 0))
     draw = ImageDraw.Draw(icon, "RGBA")
     draw.rectangle((20, 20, 52, 52), fill=(5, 8, 12, 255))
 
     contrasted = alert_stream._with_logo_contrast(icon)
 
-    halo = contrasted.getpixel((16, 36))
+    backing = contrasted.getpixel((10, 36))
     center = contrasted.getpixel((36, 36))
-    assert halo[3] > 0
-    assert min(halo[:3]) > 150
+    assert backing[3] > 0
+    assert min(backing[:3]) > 150
     assert center[:3] == (5, 8, 12)
     assert center[3] == 255
+
+
+def test_alert_motion_scales_to_75_percent_and_keeps_bottom_anchor():
+    image = Image.new(
+        "RGBA",
+        (alert_stream.demo.FRAME_WIDTH, alert_stream.demo.FRAME_HEIGHT),
+        (255, 255, 255, 255),
+    )
+
+    transformed = alert_stream._apply_alert_motion(image, 0.0)
+    bbox = transformed.getchannel("A").getbbox()
+
+    assert bbox is not None
+    assert bbox[2] - bbox[0] == round(
+        alert_stream.demo.FRAME_WIDTH * alert_stream.ALERT_BASE_SCALE
+    )
+    assert bbox[3] - bbox[1] == round(
+        alert_stream.demo.FRAME_HEIGHT * alert_stream.ALERT_BASE_SCALE
+    )
+    assert bbox[3] == alert_stream.demo.FRAME_HEIGHT
+
+
+def test_alert_poof_pops_then_shrinks_and_fades():
+    before_scale, before_opacity = alert_stream._motion_values(
+        alert_stream.ALERT_POOF_START_SECONDS
+    )
+    pop_scale, pop_opacity = alert_stream._motion_values(
+        alert_stream.ALERT_POOF_START_SECONDS
+        + alert_stream.ALERT_POOF_DURATION_SECONDS * 0.28
+    )
+    end_scale, end_opacity = alert_stream._motion_values(
+        alert_stream.ALERT_POOF_START_SECONDS
+        + alert_stream.ALERT_POOF_DURATION_SECONDS
+    )
+
+    assert before_scale == alert_stream.ALERT_BASE_SCALE
+    assert before_opacity == 1.0
+    assert pop_scale > before_scale
+    assert pop_opacity == 1.0
+    assert end_scale < before_scale
+    assert end_opacity == 0.0
 
 
 def test_fit_line_ellipsizes_long_play_text():
