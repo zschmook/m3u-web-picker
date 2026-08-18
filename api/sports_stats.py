@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Response, jsonify, request, send_file
 
 import core
+from sports import game_alert_demo
 from sports import live_stats
 from sports import live_stats_transport
 from sports import mlb_fake_stats
@@ -174,6 +175,24 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start MLB PiP stream: {exc}", 502)
         if path is None:
             return _media_response_error("MLB PiP stream not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/alert-demo/0.10")
+    def sports_alert_demo_state():
+        return no_cache(jsonify(game_alert_demo.state_payload()))
+
+    @app.route("/sports/alert-demo/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_alert_demo_media(filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = game_alert_demo.safe_media_file(filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start sports alert demo: {exc}", 502)
+        if path is None:
+            return _media_response_error("Sports alert demo stream not found.", 404)
         return _media_response(path, filename)
 
     @app.get("/api/sports/stats-demo/1")
