@@ -45,11 +45,10 @@ class MlbScoreTracker:
     active: MlbScoreAlert | None = None
     active_until: float = 0.0
     last_error: str = ""
+    valid_destinations: set[tuple[str, int]] = field(default_factory=set)
+    state_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def _mlb_rows(self, db_path: Path | str) -> list[dict]:
-        # The generated Sports Automation lineup is the alert universe. Collapse
-        # home/away/national feeds so one logical game can only alert once, and
-        # use the first/lowest generated channel as the switch-to destination.
         by_event: dict[str, dict] = {}
         for row in generated.generated_rows(db_path):
             if str(row.get("league_id") or "").strip().lower() != "mlb":
@@ -83,10 +82,8 @@ class MlbScoreTracker:
         team = entry.get("team") if isinstance(entry.get("team"), dict) else {}
         name = str(team.get("name") or team.get("teamName") or side.title()).strip()
         abbr = str(team.get("abbreviation") or team.get("fileCode") or "").strip().upper()
-
-        # Real MLB abbreviations allow the shared alert renderer to load a real
-        # logo. These colors are only a deterministic fallback if logo fetches
-        # are unavailable.
+        # MLB notifications have real abbreviations/logos. Colors are only a
+        # fallback if the remote logo cannot be fetched.
         seed = sum(ord(ch) for ch in name)
         primary = (
             48 + (seed * 17) % 160,
@@ -104,12 +101,10 @@ class MlbScoreTracker:
         anchors: dict[str, datetime] = {}
         for row in rows:
             event_key = str(row.get("event_key") or "").strip()
-            if event_key:
-                anchors[event_key] = mlb_live_source._event_date(row)
+            if not event_key:
+                continue
+            anchors[event_key] = mlb_live_source._event_date(row)
 
-        # Usually this is one date; a late-night scan may contain tonight plus
-        # tomorrow. One schedule request per represented date gives us scores
-        # for every generated MLB game without polling 15 live feeds every pass.
         dates = sorted({anchor.date().isoformat() for anchor in anchors.values()})
         games: list[dict] = []
         for value in dates:
@@ -119,8 +114,8 @@ class MlbScoreTracker:
                         datetime.fromisoformat(value).astimezone()
                     )
                 )
-            except Exception as exc:
-                self.last_error = str(exc)
+            except Exception:
+                continue
 
         by_pk = {
             self._game_pk(game): game
@@ -130,7 +125,8 @@ class MlbScoreTracker:
         resolved: dict[str, dict] = {}
         for row in rows:
             event_key = str(row.get("event_key") or "").strip()
-            cached_pk = self.event_game_ids.get(event_key, "")
+            with self.state_lock:
+                cached_pk = self.event_game_ids.get(event_key, "")
             if cached_pk and cached_pk in by_pk:
                 resolved[event_key] = by_pk[cached_pk]
                 continue
@@ -148,7 +144,8 @@ class MlbScoreTracker:
             game_pk = self._game_pk(game)
             if not game_pk:
                 continue
-            self.event_game_ids[event_key] = game_pk
+            with self.state_lock:
+                self.event_game_ids[event_key] = game_pk
             resolved[event_key] = game
         return resolved
 
@@ -159,9 +156,22 @@ class MlbScoreTracker:
             for row in rows
         }
         if not rows:
-            self.baselines.clear()
-            self.event_game_ids.clear()
+            with self.state_lock:
+                self.baselines.clear()
+                self.event_game_ids.clear()
+                self.pending.clear()
+                self.active = None
+                self.valid_destinations.clear()
             return
+
+        with self.state_lock:
+            self.valid_destinations = {
+                (
+                    str(row.get("event_key") or "").strip(),
+                    int(row.get("assigned_number") or 0),
+                )
+                for row in rows
+            }
 
         resolved = self._resolve_games(rows)
         current_game_ids: set[str] = set()
@@ -180,11 +190,12 @@ class MlbScoreTracker:
             home_entry = teams.get("home") if isinstance(teams.get("home"), dict) else {}
             away_score = self._score(away_entry)
             home_score = self._score(home_entry)
-            previous = self.baselines.get(game_pk)
-            self.baselines[game_pk] = (away_score, home_score)
+            with self.state_lock:
+                previous = self.baselines.get(game_pk)
+                self.baselines[game_pk] = (away_score, home_score)
 
-            # Baseline on first sight. Tuning channel 1 in the middle of a 7-5
-            # game must never replay the seven and five historical runs.
+            # Baseline on first sight so starting the stream in the middle of a
+            # 7-5 game never dumps historical scoring alerts on the viewer.
             if previous is None:
                 continue
 
@@ -203,9 +214,8 @@ class MlbScoreTracker:
                 if latest:
                     play = latest
             except Exception as exc:
-                # The score itself came from the schedule snapshot, so a failed
-                # detail fetch only costs us the play description, not the alert.
-                self.last_error = str(exc)
+                with self.state_lock:
+                    self.last_error = str(exc)
 
             source_channel = int(row.get("assigned_number") or 0)
             if source_channel <= 0:
@@ -220,64 +230,62 @@ class MlbScoreTracker:
                 play=play,
                 source_channel=str(source_channel),
             )
-            self.pending.append(
-                MlbScoreAlert(
-                    event_key=event_key,
-                    game_pk=game_pk,
-                    source_channel=source_channel,
-                    alert=alert,
+            with self.state_lock:
+                self.pending.append(
+                    MlbScoreAlert(
+                        event_key=event_key,
+                        game_pk=game_pk,
+                        source_channel=source_channel,
+                        alert=alert,
+                    )
                 )
-            )
 
-        # Sports Automation remains authoritative. Removed/expired events stop
-        # contributing baselines or destinations immediately.
-        for game_pk in list(self.baselines):
-            if game_pk not in current_game_ids:
-                self.baselines.pop(game_pk, None)
-
+        # Forget finished/removed games after Sports Automation removes them.
         active_events = set(rows_by_event)
-        for event_key in list(self.event_game_ids):
-            if event_key not in active_events:
-                self.event_game_ids.pop(event_key, None)
+        with self.state_lock:
+            for game_pk in list(self.baselines):
+                if game_pk not in current_game_ids:
+                    self.baselines.pop(game_pk, None)
+            for event_key in list(self.event_game_ids):
+                if event_key not in active_events:
+                    self.event_game_ids.pop(event_key, None)
 
     def current(self, db_path: Path | str) -> demo.DemoAlert | None:
+        del db_path  # validity is refreshed by the polling thread
         now = time.monotonic()
-        if self.active is not None and now >= self.active_until:
-            self.active = None
+        with self.state_lock:
+            valid = set(self.valid_destinations)
+            if self.active is not None and now >= self.active_until:
+                self.active = None
 
-        rows = self._mlb_rows(db_path)
-        valid = {
-            (
-                str(row.get("event_key") or "").strip(),
-                int(row.get("assigned_number") or 0),
-            )
-            for row in rows
-        }
+            if self.active is not None:
+                key = (self.active.event_key, self.active.source_channel)
+                if key in valid:
+                    return self.active.alert
+                self.active = None
 
-        if self.active is not None:
-            key = (self.active.event_key, self.active.source_channel)
-            if key in valid:
-                return self.active.alert
-            self.active = None
-
-        while self.pending:
-            candidate = self.pending.popleft()
-            if (candidate.event_key, candidate.source_channel) not in valid:
-                continue
-            self.active = candidate
-            self.active_until = now + ALERT_VISIBLE_SECONDS
-            return candidate.alert
+            while self.pending:
+                candidate = self.pending.popleft()
+                if (candidate.event_key, candidate.source_channel) not in valid:
+                    continue
+                self.active = candidate
+                self.active_until = now + ALERT_VISIBLE_SECONDS
+                return candidate.alert
         return None
 
     def state_payload(self, db_path: Path | str) -> dict:
         current = self.current(db_path)
+        with self.state_lock:
+            queued = len(self.pending)
+            tracked = len(self.baselines)
+            last_error = self.last_error
         return {
             "channel_number": CHANNEL_NUMBER,
             "mode": "all-mlb-scores",
             "active_alert": demo._alert_payload(current),
-            "queued_alerts": len(self.pending),
-            "tracked_games": len(self.baselines),
-            "last_error": self.last_error,
+            "queued_alerts": queued,
+            "tracked_games": tracked,
+            "last_error": last_error,
         }
 
 
@@ -288,14 +296,33 @@ class ChannelOneAlertSession:
     tracker: MlbScoreTracker = field(default_factory=MlbScoreTracker)
     process: subprocess.Popen | None = None
     thread: threading.Thread | None = None
+    poll_thread: threading.Thread | None = None
     stop_event: threading.Event = field(default_factory=threading.Event)
     last_access_monotonic: float = field(default_factory=time.monotonic)
-    last_poll_monotonic: float = 0.0
     last_error: str = ""
 
 
 def _directory() -> Path:
     return Path(live_stats.STATS_ROOT) / "mlb-score-alerts-channel-1"
+
+
+def _poll_loop(session: ChannelOneAlertSession, db_path: Path | str) -> None:
+    while not session.stop_event.is_set():
+        process = session.process
+        if process is None or process.poll() is not None:
+            return
+        if (
+            time.monotonic() - session.last_access_monotonic
+            > float(live_stats.IDLE_SECONDS)
+        ):
+            return
+        try:
+            session.tracker.poll(db_path)
+        except Exception as exc:
+            session.last_error = str(exc)
+            with session.tracker.state_lock:
+                session.tracker.last_error = str(exc)
+        session.stop_event.wait(POLL_SECONDS)
 
 
 def _run(session: ChannelOneAlertSession, db_path: Path | str) -> None:
@@ -312,15 +339,6 @@ def _run(session: ChannelOneAlertSession, db_path: Path | str) -> None:
                 > float(live_stats.IDLE_SECONDS)
             ):
                 break
-
-            now = time.monotonic()
-            if now - session.last_poll_monotonic >= POLL_SECONDS:
-                session.last_poll_monotonic = now
-                try:
-                    session.tracker.poll(db_path)
-                except Exception as exc:
-                    session.last_error = str(exc)
-                    session.tracker.last_error = str(exc)
 
             alert = session.tracker.current(db_path)
             try:
@@ -367,8 +385,6 @@ def start_session(db_path: Path | str) -> ChannelOneAlertSession:
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True, exist_ok=True)
     try:
-        # Reuse the existing proven alert-overlay ffmpeg command. This change is
-        # about real MLB event detection, not another media-pipeline experiment.
         process = subprocess.Popen(
             demo._ffmpeg_command(target, directory),
             stdin=subprocess.PIPE,
@@ -387,12 +403,19 @@ def start_session(db_path: Path | str) -> ChannelOneAlertSession:
     session.thread = threading.Thread(
         target=_run,
         args=(session, db_path),
-        name="mlb-score-alerts-channel-1",
+        name="mlb-score-alerts-channel-1-render",
+        daemon=True,
+    )
+    session.poll_thread = threading.Thread(
+        target=_poll_loop,
+        args=(session, db_path),
+        name="mlb-score-alerts-channel-1-poll",
         daemon=True,
     )
     with _LOCK:
         _SESSION = session
     session.thread.start()
+    session.poll_thread.start()
 
     playlist = directory / "stream.m3u8"
     deadline = time.monotonic() + demo.STARTUP_TIMEOUT
