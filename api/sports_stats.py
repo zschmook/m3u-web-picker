@@ -8,6 +8,7 @@ from sports import live_stats_transport
 from sports import mlb_fake_stats
 from sports import mlb_stats_carousel
 from sports import mlb_stats_enrichment
+from sports import mlb_stats_pip
 from sports import mlb_stats_scorebug
 from sports import nfl_demo_stats
 from .http import no_cache
@@ -130,6 +131,27 @@ def register_sports_stats_routes(app):
             return _media_response_error(f"Could not start MLB live-score carousel: {exc}", 502)
         if path is None:
             return _media_response_error("MLB live-score carousel not found.", 404)
+        return _media_response(path, filename)
+
+    @app.get("/api/sports/stats-pip/<int:assigned_number>")
+    def sports_stats_pip_state(assigned_number: int):
+        try:
+            return no_cache(jsonify(mlb_stats_pip.state_payload(core.DB_PATH, assigned_number)))
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not load MLB PiP state: {exc}")), 502
+
+    @app.route("/sports/stats-pip/<int:assigned_number>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
+    def sports_stats_pip_media(assigned_number: int, filename: str):
+        if request.method == "OPTIONS":
+            return _options_response()
+        try:
+            path = mlb_stats_pip.safe_media_file(core.DB_PATH, assigned_number, filename)
+        except RuntimeError as exc:
+            return _media_response_error(str(exc), 404)
+        except Exception as exc:
+            return _media_response_error(f"Could not start MLB PiP stream: {exc}", 502)
+        if path is None:
+            return _media_response_error("MLB PiP stream not found.", 404)
         return _media_response(path, filename)
 
     @app.get("/api/sports/stats-demo/1")
