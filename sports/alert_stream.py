@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 from media.ffmpeg import terminate
 
@@ -22,6 +22,12 @@ from . import live_stats
 
 _LOCK = threading.RLock()
 _SESSIONS: dict[int, "AlertSession"] = {}
+
+_RENDER_STATE_LOCK = threading.RLock()
+_RENDER_STATE: dict[int, tuple[tuple[object, ...], float, float]] = {}
+ALERT_BASE_SCALE = 0.75
+ALERT_POOF_START_SECONDS = 6.0
+ALERT_POOF_DURATION_SECONDS = 1.5
 
 
 @dataclass(frozen=True)
@@ -296,23 +302,97 @@ def _fit_line(
 
 
 def _with_logo_contrast(icon: Image.Image) -> Image.Image:
-    """Give transparent team marks a soft light halo on the dark alert panel."""
+    """Put every team mark on the same subtle light disc for dark-panel contrast."""
     source = icon.convert("RGBA")
-    alpha = source.getchannel("A")
-    if not alpha.getbbox():
-        return source
-
-    halo_alpha = alpha.filter(ImageFilter.MaxFilter(9)).filter(
-        ImageFilter.GaussianBlur(2.0)
-    )
-    halo_alpha = halo_alpha.point(lambda value: min(132, int(value * 0.52)))
-    halo = Image.new("RGBA", source.size, (238, 242, 247, 0))
-    halo.putalpha(halo_alpha)
-
     output = Image.new("RGBA", source.size, (0, 0, 0, 0))
-    output.alpha_composite(halo)
+    draw = ImageDraw.Draw(output, "RGBA")
+    inset = max(3, source.width // 18)
+    draw.ellipse(
+        (inset, inset, source.width - inset, source.height - inset),
+        fill=(238, 242, 247, 78),
+        outline=(255, 255, 255, 108),
+        width=1,
+    )
     output.alpha_composite(source)
     return output
+
+
+def _alert_signature(alert: demo.DemoAlert) -> tuple[object, ...]:
+    return (
+        alert.league,
+        alert.source_channel,
+        alert.away_score,
+        alert.home_score,
+        alert.play,
+        alert.away.name,
+        alert.home.name,
+    )
+
+
+def _animation_elapsed(alert: demo.DemoAlert | None) -> float:
+    thread_id = threading.get_ident()
+    now = time.monotonic()
+    with _RENDER_STATE_LOCK:
+        if alert is None:
+            _RENDER_STATE.pop(thread_id, None)
+            return 0.0
+
+        signature = _alert_signature(alert)
+        previous = _RENDER_STATE.get(thread_id)
+        if (
+            previous is None
+            or previous[0] != signature
+            or now - previous[2] > 1.5
+        ):
+            started = now
+        else:
+            started = previous[1]
+        _RENDER_STATE[thread_id] = (signature, started, now)
+        return max(0.0, now - started)
+
+
+def _motion_values(elapsed: float) -> tuple[float, float]:
+    """Return scale and opacity for the fixed-size overlay canvas."""
+    scale = ALERT_BASE_SCALE
+    opacity = 1.0
+    if elapsed < ALERT_POOF_START_SECONDS:
+        return scale, opacity
+
+    phase = min(
+        1.0,
+        max(
+            0.0,
+            (elapsed - ALERT_POOF_START_SECONDS) / ALERT_POOF_DURATION_SECONDS,
+        ),
+    )
+    pop_fraction = 0.28
+    pop_scale = ALERT_BASE_SCALE * 1.15
+    if phase <= pop_fraction:
+        t = phase / pop_fraction
+        return ALERT_BASE_SCALE + (pop_scale - ALERT_BASE_SCALE) * t, 1.0
+
+    t = (phase - pop_fraction) / (1.0 - pop_fraction)
+    scale = max(0.04, pop_scale * (1.0 - t))
+    opacity = max(0.0, 1.0 - t)
+    return scale, opacity
+
+
+def _apply_alert_motion(image: Image.Image, elapsed: float) -> Image.Image:
+    scale, opacity = _motion_values(elapsed)
+    width = max(1, int(round(image.width * scale)))
+    height = max(1, int(round(image.height * scale)))
+    transformed = image.resize((width, height), Image.Resampling.LANCZOS)
+
+    if opacity < 1.0:
+        alpha = transformed.getchannel("A")
+        alpha = alpha.point(lambda value: int(value * opacity))
+        transformed.putalpha(alpha)
+
+    canvas = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    x = (image.width - width) // 2
+    y = image.height - height
+    canvas.alpha_composite(transformed, (x, y))
+    return canvas
 
 
 def _score_row(
@@ -379,6 +459,7 @@ def _score_row(
 
 
 def render_alert(alert: demo.DemoAlert | None) -> bytes:
+    elapsed = _animation_elapsed(alert)
     image = Image.new(
         "RGBA",
         (demo.FRAME_WIDTH, demo.FRAME_HEIGHT),
@@ -438,6 +519,7 @@ def render_alert(alert: demo.DemoAlert | None) -> bytes:
             fill=(210, 219, 231, 255),
         )
         _score_row(image, draw, alert)
+        image = _apply_alert_motion(image, elapsed)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=False)
