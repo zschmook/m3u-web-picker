@@ -16,6 +16,7 @@ from . import guide as guide_api
 
 
 _PIP_PLAY_RE = re.compile(r"^/guide/play/stats-pip/(\d+)$")
+_PARENT_PLAY_RE = re.compile(r"^/guide/play/sports/(\d+)$")
 _installed = False
 _original_curated_channels = None
 _original_play_target_resolver = None
@@ -35,24 +36,47 @@ def _inject_pip_guide(items: list[dict]) -> list[dict]:
     if not rows:
         return items
 
+    companion_parents: set[int] = set()
+    for item in items:
+        if not bool(item.get("stats_companion")):
+            continue
+        try:
+            companion_parents.add(int(item.get("stats_parent") or 0))
+        except (TypeError, ValueError):
+            continue
+
     output: list[dict] = []
     inserted: set[int] = set()
     for item in items:
         output.append(item)
-        if not bool(item.get("stats_companion")):
+
+        if bool(item.get("stats_companion")):
+            try:
+                number = int(item.get("stats_parent") or 0)
+            except (TypeError, ValueError):
+                continue
+            row = rows.get(number)
+            if row is not None and number not in inserted:
+                output.append(mlb_stats_pip.guide_item(row))
+                inserted.add(number)
             continue
-        try:
-            number = int(item.get("stats_parent") or 0)
-        except (TypeError, ValueError):
+
+        play_url = str(item.get("play_url", "") or "").split("?", 1)[0]
+        match = _PARENT_PLAY_RE.fullmatch(play_url)
+        if not match:
+            continue
+        number = int(match.group(1))
+        if number in companion_parents:
+            # The primary logical feed has N.1 immediately after its parent; let
+            # the stats-companion branch above produce N -> N.1 -> N.2.
             continue
         row = rows.get(number)
-        if row is None:
-            continue
-        output.append(mlb_stats_pip.guide_item(row))
-        inserted.add(number)
+        if row is not None and number not in inserted:
+            # Additional home/away/national feeds do not get another N.1, but
+            # their own N.2 should still sit directly beside the parent feed.
+            output.append(mlb_stats_pip.guide_item(row))
+            inserted.add(number)
 
-    # The existing .1 guide layer normally gives us a reliable insertion point.
-    # Keep a fallback so a temporary .1 filtering bug cannot also hide .2.
     for number, row in sorted(rows.items()):
         if number not in inserted:
             output.append(mlb_stats_pip.guide_item(row))
