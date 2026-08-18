@@ -177,6 +177,16 @@ def _build_feeds(
     team_feed_map = channels if isinstance(channels, dict) else _team_feeds(channels)
     candidates_by_url: dict[str, dict] = {}
 
+    # Schedule-API provider clusters preserve their source channels in airing
+    # order. Regional networks commonly begin a game block several minutes
+    # before first pitch while event-only streams start on the canonical clock.
+    # Keep that ordering available as a feed-selection signal.
+    source_order: dict[str, int] = {}
+    for index, source in enumerate(event.get("source_channels", [])):
+        url = str(source.get("url", "") or "").strip()
+        if url and url not in source_order:
+            source_order[url] = index
+
     def add(channel: dict, team_id: str = "") -> None:
         url = str(channel.get("url", "") or "").strip()
         if not url:
@@ -187,6 +197,7 @@ def _build_feeds(
             "feed_type": kind,
             "team_id": team_id,
             "provider_priority": _provider_priority(channel),
+            "source_order": source_order.get(url, 1_000_000),
         }
         existing = candidates_by_url.get(url)
         if (
@@ -244,14 +255,30 @@ def _build_feeds(
         rank["national"] = -10
         rank["event"] = 0
 
-    candidates.sort(
-        key=lambda candidate: (
+    def semantic_rank(candidate: dict) -> int:
+        return (
             -10
             if favorite_team_id and candidate["team_id"] == favorite_team_id
-            else rank.get(candidate["feed_type"], 60),
-            str(candidate["channel"].get("name", "")).lower(),
+            else rank.get(candidate["feed_type"], 60)
         )
-    )
+
+    explicit_preference = preference in {"favorite", "home", "away", "national"}
+    if explicit_preference:
+        candidates.sort(
+            key=lambda candidate: (
+                semantic_rank(candidate),
+                candidate.get("source_order", 1_000_000),
+                str(candidate["channel"].get("name", "")).lower(),
+            )
+        )
+    else:
+        candidates.sort(
+            key=lambda candidate: (
+                candidate.get("source_order", 1_000_000),
+                semantic_rank(candidate),
+                str(candidate["channel"].get("name", "")).lower(),
+            )
+        )
 
     expanded_feeds = event.get("expanded_feeds")
     if expanded_feeds is None:
