@@ -115,3 +115,18 @@ def test_random_team_trigger_uses_latest_available_score(monkeypatch):
     assert tracker.active is not None
     assert tracker.active.alert.scoring_team.abbr == "BAL"
     assert tracker.active.alert.show_on_source
+
+
+def test_atv_trigger_marks_phillies_visual_variant(monkeypatch):
+    payload = {"ok": True}
+    calls = []
+    monkeypatch.setattr(
+        phillies_alert_control,
+        "trigger_current_score",
+        lambda db_path, **kwargs: calls.append((db_path, kwargs)) or dict(payload),
+    )
+
+    result = phillies_alert_control.trigger_atv_score("db.sqlite")
+
+    assert calls == [("db.sqlite", {"visual_variant": "phillies-atv"})]
+    assert result["visual_variant"] == "phillies-atv"

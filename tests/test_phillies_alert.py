@@ -1,4 +1,5 @@
 import io
+from dataclasses import replace
 
 from PIL import Image
 
@@ -48,6 +49,12 @@ def test_phillies_slide_rises_holds_and_drops_back_down():
     ) == phillies_alert.CANVAS_HEIGHT
 
 
+def test_phillies_atv_travels_left_to_right():
+    assert phillies_alert.atv_x_offset(0.0) < -phillies_alert.ATV_WIDTH
+    assert 0 < phillies_alert.atv_x_offset(3.8) < phillies_alert.CANVAS_WIDTH
+    assert phillies_alert.atv_x_offset(phillies_alert.ATV_TRAVEL_SECONDS) > phillies_alert.CANVAS_WIDTH
+
+
 def test_phillies_graphic_uses_large_transparent_canvas():
     phillies_alert._GRAPHICS.clear()
     phillies_alert._ASSET = None
@@ -74,6 +81,20 @@ def test_phillies_fireworks_animate_and_remain_transparent():
     assert phillies_alert._fireworks_layer(0.0).getchannel("A").getbbox() is None
 
 
+def test_phillies_atv_gif_loads_and_advances():
+    phillies_alert._ATV_FRAMES = ()
+    phillies_alert._ATV_DURATIONS = ()
+    phillies_alert._ATV_TOTAL_MS = 0
+
+    first = phillies_alert._atv_frame(0.0)
+    later = phillies_alert._atv_frame(0.5)
+
+    assert first is not None
+    assert later is not None
+    assert first.size == (phillies_alert.ATV_WIDTH, phillies_alert.ATV_HEIGHT)
+    assert first.tobytes() != later.tobytes()
+
+
 def test_phillies_render_is_ffmpeg_ready_large_png(monkeypatch):
     alert = _alert(_team("Philadelphia Phillies", "PHI"))
     monkeypatch.setattr(alert_stream, "_animation_elapsed", lambda _alert: 2.0)
@@ -87,3 +108,24 @@ def test_phillies_render_is_ffmpeg_ready_large_png(monkeypatch):
         )
         assert rendered.mode == "RGBA"
         assert rendered.getchannel("A").getbbox() is not None
+
+
+def test_atv_frames_are_used_only_for_explicit_atv_variant(monkeypatch):
+    alert = _alert(_team("Philadelphia Phillies", "PHI"))
+    monkeypatch.setattr(alert_stream, "_animation_elapsed", lambda _alert: 2.0)
+    calls = []
+    monkeypatch.setattr(
+        phillies_alert,
+        "_atv_frame",
+        lambda elapsed: calls.append(elapsed) or Image.new(
+            "RGBA",
+            (phillies_alert.ATV_WIDTH, phillies_alert.ATV_HEIGHT),
+            (255, 0, 0, 255),
+        ),
+    )
+
+    phillies_alert.render_alert(alert)
+    assert calls == []
+
+    phillies_alert.render_alert(replace(alert, visual_variant="phillies-atv"))
+    assert calls == [2.0]

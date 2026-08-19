@@ -30,6 +30,7 @@ _LIVE_TRACKER_THREAD: threading.Thread | None = None
 
 _RENDER_STATE_LOCK = threading.RLock()
 _RENDER_STATE: dict[int, tuple[tuple[object, ...], float, float]] = {}
+_RENDER_ELAPSED = threading.local()
 ALERT_BASE_SCALE = 0.75
 ALERT_POOF_START_SECONDS = 6.0
 ALERT_POOF_DURATION_SECONDS = 1.5
@@ -412,10 +413,14 @@ def _alert_signature(alert: demo.DemoAlert) -> tuple[object, ...]:
         alert.play,
         alert.away.name,
         alert.home.name,
+        alert.visual_variant,
     )
 
 
 def _animation_elapsed(alert: demo.DemoAlert | None) -> float:
+    override = getattr(_RENDER_ELAPSED, "value", None)
+    if override is not None:
+        return max(0.0, float(override))
     thread_id = threading.get_ident()
     now = time.monotonic()
     with _RENDER_STATE_LOCK:
@@ -613,6 +618,100 @@ def render_alert(alert: demo.DemoAlert | None) -> bytes:
     return buffer.getvalue()
 
 
+def _render_at_elapsed(alert: demo.DemoAlert | None, elapsed: float) -> bytes:
+    _RENDER_ELAPSED.value = max(0.0, float(elapsed))
+    try:
+        return render_alert(alert)
+    finally:
+        try:
+            del _RENDER_ELAPSED.value
+        except AttributeError:
+            pass
+
+
+class _AsyncAlertRenderer:
+    """Render overlays away from the FFmpeg writer and publish only complete PNGs."""
+
+    def __init__(self, stop_event: threading.Event):
+        self._stop_event = stop_event
+        self._shutdown = threading.Event()
+        self._condition = threading.Condition()
+        self._desired_alert: demo.DemoAlert | None = None
+        self._desired_signature: tuple[object, ...] | None = None
+        self._completed_signature: tuple[object, ...] | None = None
+        self._completed_frame: bytes | None = None
+        self._presented_signature: tuple[object, ...] | None = None
+        self._presented_at: float | None = None
+        self._transparent_frame = _render_at_elapsed(None, 0.0)
+        self._last_frame = self._transparent_frame
+        self._thread = threading.Thread(
+            target=self._run,
+            name="sports-alert-render",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._shutdown.set()
+        with self._condition:
+            self._condition.notify_all()
+        self._thread.join(timeout=2.0)
+
+    def request(self, alert: demo.DemoAlert | None) -> None:
+        signature = _alert_signature(alert) if alert is not None else None
+        with self._condition:
+            if signature == self._desired_signature:
+                return
+            self._desired_alert = alert
+            self._desired_signature = signature
+            if signature is None:
+                self._completed_signature = None
+                self._completed_frame = self._last_frame = self._transparent_frame
+                self._presented_signature = None
+                self._presented_at = None
+            self._condition.notify_all()
+
+    def frame_for_stream(self) -> bytes:
+        with self._condition:
+            if (
+                self._desired_signature is not None
+                and self._completed_signature == self._desired_signature
+                and self._completed_frame is not None
+            ):
+                if self._presented_signature != self._desired_signature:
+                    # The animation starts here: the first fully rendered frame
+                    # is now ready to be handed to the video pipeline.
+                    self._presented_signature = self._desired_signature
+                    self._presented_at = time.monotonic()
+                    self._condition.notify_all()
+                self._last_frame = self._completed_frame
+            return self._last_frame
+
+    def _run(self) -> None:
+        frame_period = 1.0 / demo.FRAME_RATE
+        while not self._stop_event.is_set() and not self._shutdown.is_set():
+            with self._condition:
+                alert = self._desired_alert
+                signature = self._desired_signature
+                presented_at = (
+                    self._presented_at
+                    if self._presented_signature == signature
+                    else None
+                )
+                if signature is None:
+                    self._condition.wait(timeout=frame_period)
+                    continue
+            elapsed = 0.0 if presented_at is None else time.monotonic() - presented_at
+            frame = _render_at_elapsed(alert, elapsed)
+            with self._condition:
+                if signature == self._desired_signature:
+                    self._completed_signature = signature
+                    self._completed_frame = frame
+            self._shutdown.wait(frame_period)
+
+
 def _directory(assigned_number: int) -> Path:
     return Path(live_stats.STATS_ROOT) / f"sports-alert-{int(assigned_number)}"
 
@@ -641,6 +740,8 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
         return
 
     frame_period = 1.0 / demo.FRAME_RATE
+    renderer = _AsyncAlertRenderer(session.stop_event)
+    renderer.start()
     try:
         while not session.stop_event.is_set():
             if process.poll() is not None:
@@ -660,15 +761,17 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
                 break
 
             alert = _live_alert_for(session, db_path)
+            renderer.request(alert)
 
             try:
-                process.stdin.write(render_alert(alert))
+                process.stdin.write(renderer.frame_for_stream())
                 process.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 session.last_error = str(exc)
                 break
             session.stop_event.wait(frame_period)
     finally:
+        renderer.stop()
         try:
             process.stdin.close()
         except OSError:
@@ -708,6 +811,8 @@ def start_session(db_path: Path | str, assigned_number: int) -> AlertSession:
 
     if current is not None:
         stop_session(number)
+
+    demo.warm_cached_logos()
 
     directory = _directory(number)
     shutil.rmtree(directory, ignore_errors=True)

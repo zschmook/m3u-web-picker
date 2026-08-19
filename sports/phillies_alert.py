@@ -5,7 +5,7 @@ import math
 import threading
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageSequence
 
 from . import alert_stream_base as base
 
@@ -37,10 +37,21 @@ FIREWORK_SPECS = (
 )
 
 _ASSET_PATH = Path(__file__).resolve().parent / "assets" / "phillies_phanatic.png"
+_ATV_ASSET_PATH = Path(__file__).resolve().parent / "assets" / "phillies_phanatic_atv.gif"
 _ASSET_LOCK = threading.RLock()
 _ASSET: Image.Image | None = None
+_ATV_LOCK = threading.RLock()
+_ATV_FRAMES: tuple[Image.Image, ...] = ()
+_ATV_DURATIONS: tuple[int, ...] = ()
+_ATV_TOTAL_MS = 0
 _GRAPHIC_LOCK = threading.RLock()
 _GRAPHICS: dict[tuple[object, ...], Image.Image] = {}
+_ATV_HEADERS: dict[tuple[object, ...], Image.Image] = {}
+
+ATV_WIDTH = 560
+ATV_HEIGHT = 315
+ATV_TOP = 292
+ATV_TRAVEL_SECONDS = 7.6
 
 
 def is_phillies_scoring_alert(alert) -> bool:
@@ -68,6 +79,32 @@ def _load_asset() -> Image.Image | None:
             return None
         _ASSET = image
         return image.copy()
+
+
+def _load_atv_frames() -> tuple[tuple[Image.Image, ...], tuple[int, ...], int]:
+    global _ATV_FRAMES, _ATV_DURATIONS, _ATV_TOTAL_MS
+    with _ATV_LOCK:
+        if _ATV_FRAMES and _ATV_TOTAL_MS > 0:
+            return _ATV_FRAMES, _ATV_DURATIONS, _ATV_TOTAL_MS
+        try:
+            with Image.open(_ATV_ASSET_PATH) as source:
+                frames: list[Image.Image] = []
+                durations: list[int] = []
+                for frame in ImageSequence.Iterator(source):
+                    image = frame.convert("RGBA").resize(
+                        (ATV_WIDTH, ATV_HEIGHT),
+                        Image.Resampling.LANCZOS,
+                    )
+                    frames.append(image)
+                    durations.append(max(20, int(frame.info.get("duration", 40) or 40)))
+        except OSError:
+            return (), (), 0
+        if not frames:
+            return (), (), 0
+        _ATV_FRAMES = tuple(frames)
+        _ATV_DURATIONS = tuple(durations)
+        _ATV_TOTAL_MS = sum(durations)
+        return _ATV_FRAMES, _ATV_DURATIONS, _ATV_TOTAL_MS
 
 
 def _team_abbr(team) -> str:
@@ -259,6 +296,116 @@ def _build_graphic(alert) -> Image.Image | None:
     return graphic.copy()
 
 
+def _build_atv_header(alert) -> Image.Image:
+    key = _graphic_key(alert)
+    with _GRAPHIC_LOCK:
+        cached = _ATV_HEADERS.get(key)
+        if cached is not None:
+            return cached.copy()
+
+    header = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
+    _draw_arc_title(header)
+    score = (
+        f"{_team_abbr(alert.away)} {int(alert.away_score)}"
+        f" - {int(alert.home_score)} {_team_abbr(alert.home)}"
+    )
+    _centered_text(
+        header,
+        score,
+        y=115,
+        font_size=58,
+        fill=PHILLIES_RED,
+        outer_width=8,
+        inner_width=4,
+    )
+
+    channel = f"On channel: {alert.source_channel}"
+    channel_font = base.demo._font(27, bold=True)
+    draw = ImageDraw.Draw(header, "RGBA")
+    box = draw.textbbox((0, 0), channel, font=channel_font)
+    text_width = box[2] - box[0]
+    text_height = box[3] - box[1]
+    pad_x = 18
+    pad_y = 8
+    left = (CANVAS_WIDTH - text_width) // 2 - pad_x
+    top = 187
+    right = left + text_width + pad_x * 2
+    bottom = top + text_height + pad_y * 2
+    draw.rounded_rectangle(
+        (left, top, right, bottom),
+        radius=16,
+        fill=(0, 45, 114, 235),
+        outline=(255, 255, 255, 235),
+        width=2,
+    )
+    draw.text(
+        ((CANVAS_WIDTH - text_width) // 2 - box[0], top + pad_y - box[1]),
+        channel,
+        font=channel_font,
+        fill=WHITE,
+    )
+    with _GRAPHIC_LOCK:
+        if len(_ATV_HEADERS) >= 12:
+            _ATV_HEADERS.pop(next(iter(_ATV_HEADERS)))
+        _ATV_HEADERS[key] = header
+    return header.copy()
+
+
+def _atv_frame(elapsed: float) -> Image.Image | None:
+    frames, durations, total_ms = _load_atv_frames()
+    if not frames or total_ms <= 0:
+        return None
+    cursor = int(max(0.0, float(elapsed)) * 1000.0) % total_ms
+    total = 0
+    for frame, duration in zip(frames, durations):
+        total += duration
+        if cursor < total:
+            return frame.copy()
+    return frames[-1].copy()
+
+
+def atv_x_offset(elapsed: float) -> int:
+    progress = min(1.0, max(0.0, float(elapsed)) / ATV_TRAVEL_SECONDS)
+    eased = progress * progress * (3.0 - 2.0 * progress)
+    start = -ATV_WIDTH - 18
+    end = CANVAS_WIDTH + 18
+    return int(round(start + (end - start) * eased))
+
+
+def _framed_atv(frame: Image.Image) -> Image.Image:
+    border = 7
+    radius = 28
+    panel = Image.new(
+        "RGBA",
+        (ATV_WIDTH + border * 2, ATV_HEIGHT + border * 2),
+        (0, 0, 0, 0),
+    )
+    mask = Image.new("L", (ATV_WIDTH, ATV_HEIGHT), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (0, 0, ATV_WIDTH - 1, ATV_HEIGHT - 1),
+        radius=radius,
+        fill=255,
+    )
+    clipped = Image.new("RGBA", (ATV_WIDTH, ATV_HEIGHT), (0, 0, 0, 0))
+    clipped.paste(frame, (0, 0), mask)
+    draw = ImageDraw.Draw(panel, "RGBA")
+    draw.rounded_rectangle(
+        (0, 0, panel.width - 1, panel.height - 1),
+        radius=radius + border,
+        fill=PHILLIES_NAVY,
+        outline=WHITE,
+        width=2,
+    )
+    draw.rounded_rectangle(
+        (3, 3, panel.width - 4, panel.height - 4),
+        radius=radius + 3,
+        outline=PHILLIES_RED,
+        width=4,
+    )
+    panel.alpha_composite(clipped, (border, border))
+    return panel
+
+
 def phillies_slide_offset(elapsed: float) -> int:
     value = max(0.0, float(elapsed))
     if value < SLIDE_IN_SECONDS:
@@ -405,6 +552,22 @@ def render_alert(alert) -> bytes:
         return _expand_standard(base._standard_render_alert(alert))
 
     elapsed = base._animation_elapsed(alert)
+    atv = (
+        _atv_frame(elapsed)
+        if str(alert.visual_variant or "").strip() == "phillies-atv"
+        else None
+    )
+    if atv is not None:
+        canvas = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
+        canvas.alpha_composite(_fireworks_layer(elapsed))
+        canvas.alpha_composite(_build_atv_header(alert))
+        panel = _framed_atv(atv)
+        canvas.alpha_composite(
+            panel,
+            (atv_x_offset(elapsed) - 7, ATV_TOP - 7),
+        )
+        return _encode_png(canvas)
+
     graphic = _build_graphic(alert)
     if graphic is None:
         return _expand_standard(base._standard_render_alert(alert))

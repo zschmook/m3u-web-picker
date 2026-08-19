@@ -16,16 +16,19 @@
       </div>
       <div class="d-flex gap-2 flex-wrap">
         <button class="btn ui-btn-primary" id="uiPhilliesAlertTestBtn" type="button">Show Phillies Score</button>
+        <button class="btn ui-btn-primary" id="uiAtvAlertTestBtn" type="button">Show ATV Phanatic</button>
         <button class="btn ui-btn-secondary" id="uiRandomAlertTestBtn" type="button">Show Random Team Score</button>
       </div>
       <div class="small-muted mt-2" id="uiPhilliesAlertTestStatus">Tune a generated sports base channel first, then hit the button whenever you want.</div>`;
     grid.appendChild(card);
 
     const button = document.getElementById("uiPhilliesAlertTestBtn");
+    const atvButton = document.getElementById("uiAtvAlertTestBtn");
     const randomButton = document.getElementById("uiRandomAlertTestBtn");
     const status = document.getElementById("uiPhilliesAlertTestStatus");
     async function trigger(endpoint, loadingText) {
       button.disabled = true;
+      atvButton.disabled = true;
       randomButton.disabled = true;
       status.textContent = loadingText;
       try {
@@ -44,6 +47,7 @@
         status.textContent = error?.message || "Could not trigger score alert.";
       } finally {
         button.disabled = false;
+        atvButton.disabled = false;
         randomButton.disabled = false;
       }
     }
@@ -52,6 +56,12 @@
       trigger(
         "/api/sports/generated-alerts/phillies-test",
         "Fetching current Phillies score…",
+      );
+    });
+    atvButton.addEventListener("click", () => {
+      trigger(
+        "/api/sports/generated-alerts/phillies-atv-test",
+        "Starting the ATV…",
       );
     });
     randomButton.addEventListener("click", () => {

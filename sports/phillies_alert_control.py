@@ -86,6 +86,7 @@ def _force_alert(
     away_score: int,
     home_score: int,
     play: str,
+    visual_variant: str = "",
 ) -> None:
     alert = demo.DemoAlert(
         league="MLB",
@@ -97,6 +98,7 @@ def _force_alert(
         play=play,
         source_channel=str(source_channel),
         show_on_source=True,
+        visual_variant=visual_variant,
     )
     forced = channel_one_alerts.MlbScoreAlert(
         event_key=event_key,
@@ -111,7 +113,11 @@ def _force_alert(
         tracker.active_until = now + channel_one_alerts.ALERT_VISIBLE_SECONDS
 
 
-def trigger_current_score(db_path: Path | str) -> dict:
+def trigger_current_score(
+    db_path: Path | str,
+    *,
+    visual_variant: str = "",
+) -> dict:
     """Show the current Phillies score on active generated sports wrappers."""
     tracker, active_channels = _active_tracker(db_path)
 
@@ -153,6 +159,7 @@ def trigger_current_score(db_path: Path | str) -> dict:
         away_score=away_score,
         home_score=home_score,
         play=play,
+        visual_variant=visual_variant,
     )
 
     return {
@@ -162,6 +169,12 @@ def trigger_current_score(db_path: Path | str) -> dict:
         "away": {"abbr": away.abbr, "name": away.name, "score": away_score},
         "home": {"abbr": home.abbr, "name": home.name, "score": home_score},
     }
+
+
+def trigger_atv_score(db_path: Path | str) -> dict:
+    payload = trigger_current_score(db_path, visual_variant="phillies-atv")
+    payload["visual_variant"] = "phillies-atv"
+    return payload
 
 
 def trigger_random_score(db_path: Path | str) -> dict:

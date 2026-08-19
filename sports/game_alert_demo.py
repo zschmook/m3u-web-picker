@@ -44,6 +44,7 @@ _LOCK = threading.RLock()
 _SESSION: "AlertDemoSession | None" = None
 _LOGO_LOCK = threading.RLock()
 _LOGO_CACHE: dict[str, Image.Image] = {}
+_DECODED_LOGO_CACHE: dict[str, Image.Image] = {}
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class DemoAlert:
     play: str
     source_channel: str
     show_on_source: bool = False
+    visual_variant: str = ""
 
 
 @dataclass
@@ -364,12 +366,40 @@ def _icon_from_payload(payload: bytes | None) -> Image.Image | None:
     return canvas
 
 
+def warm_cached_logos() -> int:
+    """Decode every raw logo already in the shared cache, regardless of sport."""
+    try:
+        logo_cache, _event_dir, _db_path = event_logos._paths()
+        paths = tuple(logo_cache.glob("*.bin"))
+    except OSError:
+        return 0
+
+    warmed = 0
+    for path in paths:
+        digest = path.stem
+        with _LOGO_LOCK:
+            if digest in _DECODED_LOGO_CACHE:
+                continue
+        try:
+            payload = path.read_bytes()
+        except OSError:
+            continue
+        image = _icon_from_payload(payload)
+        if image is None:
+            continue
+        with _LOGO_LOCK:
+            if digest not in _DECODED_LOGO_CACHE:
+                _DECODED_LOGO_CACHE[digest] = image
+                warmed += 1
+    return warmed
+
+
 def _fetch_logo(team: DemoTeam) -> Image.Image | None:
     team_id, preferred_url, fallback_url = _shared_logo_request(team)
     if not preferred_url:
         return None
     try:
-        payload, _digest = event_logos._resolve_team_asset(
+        payload, digest = event_logos._resolve_team_asset(
             {
                 "team_id": team_id,
                 "name": team.name,
@@ -380,7 +410,15 @@ def _fetch_logo(team: DemoTeam) -> Image.Image | None:
         )
     except Exception:
         return None
-    return _icon_from_payload(payload)
+    with _LOGO_LOCK:
+        cached = _DECODED_LOGO_CACHE.get(digest)
+        if cached is not None:
+            return cached.copy()
+    image = _icon_from_payload(payload)
+    if image is not None:
+        with _LOGO_LOCK:
+            _DECODED_LOGO_CACHE[digest] = image
+    return image
 
 
 def _team_icon(team: DemoTeam) -> Image.Image:
@@ -673,6 +711,8 @@ def start_session() -> AlertDemoSession:
             return current
     if current is not None:
         stop_session()
+
+    warm_cached_logos()
 
     directory = _directory()
     shutil.rmtree(directory, ignore_errors=True)

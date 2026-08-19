@@ -7,7 +7,7 @@ from sports import phillies_alert_control
 from .http import no_cache
 
 
-SCRIPT_TAG = '<script src="/static/js/ui_phillies_alert_test.js?v=generated-alerts-2"></script>'
+SCRIPT_TAG = '<script src="/static/js/ui_phillies_alert_test.js?v=generated-alerts-3"></script>'
 
 
 def register_phillies_alert_test_routes(app):
@@ -29,6 +29,15 @@ def register_phillies_alert_test_routes(app):
             return no_cache(jsonify(error=str(exc))), 409
         except Exception as exc:
             return no_cache(jsonify(error=f"Could not trigger random score alert: {exc}")), 502
+
+    @app.post("/api/sports/generated-alerts/phillies-atv-test")
+    def phillies_atv_alert_test():
+        try:
+            return no_cache(jsonify(phillies_alert_control.trigger_atv_score(core.DB_PATH)))
+        except RuntimeError as exc:
+            return no_cache(jsonify(error=str(exc))), 409
+        except Exception as exc:
+            return no_cache(jsonify(error=f"Could not trigger ATV Phanatic alert: {exc}")), 502
 
     @app.after_request
     def inject_phillies_alert_test_ui(response):
