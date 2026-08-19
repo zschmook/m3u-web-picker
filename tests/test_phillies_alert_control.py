@@ -1,0 +1,53 @@
+from types import SimpleNamespace
+
+from sports import channel_one_alerts
+from sports import phillies_alert_control
+
+
+def test_manual_phillies_trigger_uses_current_score(monkeypatch):
+    tracker = channel_one_alerts.MlbScoreTracker()
+    row = {
+        "assigned_number": 1070,
+        "event_key": "phillies-mets",
+        "league_id": "mlb",
+        "url": "http://provider.test/phillies",
+    }
+    game = {
+        "gamePk": 12345,
+        "status": {"abstractGameState": "Live"},
+        "teams": {
+            "away": {
+                "score": 3,
+                "team": {"name": "Philadelphia Phillies", "abbreviation": "PHI"},
+            },
+            "home": {
+                "score": 2,
+                "team": {"name": "New York Mets", "abbreviation": "NYM"},
+            },
+        },
+    }
+    monkeypatch.setattr(tracker, "_mlb_rows", lambda _db: [row])
+    monkeypatch.setattr(tracker, "_resolve_games", lambda _rows: {"phillies-mets": game})
+    monkeypatch.setattr(
+        phillies_alert_control.channel_three_alerts,
+        "get_session",
+        lambda: SimpleNamespace(tracker=tracker),
+    )
+    monkeypatch.setattr(
+        phillies_alert_control.mlb_live_source,
+        "fetch_live_state",
+        lambda _pk: {
+            "away": {"name": "Philadelphia Phillies", "abbr": "PHI", "score": 4},
+            "home": {"name": "New York Mets", "abbr": "NYM", "score": 2},
+            "last_play": "Phillies scored",
+        },
+    )
+
+    payload = phillies_alert_control.trigger_current_score("db.sqlite")
+
+    assert payload["away"]["abbr"] == "PHI"
+    assert payload["away"]["score"] == 4
+    assert payload["home"]["score"] == 2
+    assert payload["source_channel"] == 1070
+    assert tracker.active is not None
+    assert tracker.active.alert.scoring_team.abbr == "PHI"
