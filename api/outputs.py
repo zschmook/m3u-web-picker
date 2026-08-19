@@ -4,8 +4,6 @@ import core
 import public_epg_logos
 import sports
 from sports import alert_stream
-from sports import channel_one_alerts
-from sports import channel_three_alerts
 from sports import game_alert_demo
 from sports import live_stats
 from sports import mlb_fake_stats
@@ -48,10 +46,12 @@ def register_output_routes(app):
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
 
-        # For the current scoring-alert test, generated sports channels stay on
-        # their direct provider streams. Manual channels 1 and 3 carry the real
-        # MLB notifications so the experiment has predictable watched streams.
-        response = redirect(target, code=307)
+        # Generated sports base channels always enter the FFmpeg alert wrapper.
+        # Companion/stat channels have their own URLs and do not pass here.
+        response = redirect(
+            f"/sports/alert-stream/{assigned_number}/stream.m3u8",
+            code=307,
+        )
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -193,8 +193,8 @@ def register_output_routes(app):
         # ESPN -> renderer -> HLS path using a completed NFL game; 1.2 proves
         # that a single synthetic channel can keep changing game state without
         # any external sports feed at all. 0.10 remains the deterministic fake
-        # alert demo while real MLB scoring alerts are temporarily routed onto
-        # the actual saved channels 1 and 3 below.
+        # alert demo; real MLB scoring alerts now run on generated sports base
+        # channels through /sports/stream/<number>.
         text = nfl_demo_stats.inject_demo_channel(text, base_url)
         text = mlb_fake_stats.inject_demo_channel(text, base_url)
         text = game_alert_demo.inject_demo_channel(text, base_url)
@@ -209,10 +209,6 @@ def register_output_routes(app):
         # stream starts only when a client tunes it.
         text = live_stats.inject_stats_channels(text, core.DB_PATH, base_url)
 
-        # Temporary live test: keep channels 1 and 3 identity/guide rows but
-        # replace only their served media URLs with the MLB score-alert wrappers.
-        text = channel_one_alerts.route_channel_one(text, base_url)
-        text = channel_three_alerts.route_channel_three(text, base_url)
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

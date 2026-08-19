@@ -76,6 +76,41 @@ def test_alert_is_invalid_if_destination_channel_disappears():
     )
 
 
+def test_live_alert_is_shared_but_hidden_on_its_source_channel(monkeypatch):
+    alert = alert_stream.demo.DemoAlert(
+        league="MLB",
+        scoring_team=alert_stream._team("Phillies", "MLB"),
+        away=alert_stream._team("Phillies", "MLB"),
+        home=alert_stream._team("Mets", "MLB"),
+        away_score=4,
+        home_score=2,
+        play="Home run",
+        source_channel="1070",
+    )
+
+    class Tracker:
+        @staticmethod
+        def current(_db):
+            return alert
+
+    monkeypatch.setattr(alert_stream, "_live_tracker_for", lambda _db: Tracker())
+    source_session = alert_stream.AlertSession(
+        directory=alert_stream.Path("/tmp/source"),
+        parent_url="http://provider.test/source",
+        watched_number=1070,
+        watched_event_key="source-game",
+    )
+    other_session = alert_stream.AlertSession(
+        directory=alert_stream.Path("/tmp/other"),
+        parent_url="http://provider.test/other",
+        watched_number=1080,
+        watched_event_key="other-game",
+    )
+
+    assert alert_stream._live_alert_for(source_session, "db.sqlite") is None
+    assert alert_stream._live_alert_for(other_session, "db.sqlite") is alert
+
+
 def test_score_row_uses_real_team_icons_when_abbreviations_exist(monkeypatch):
     away = alert_stream.demo.DemoTeam("MLB", "Phillies", "PHI", (1, 2, 3), (4, 5, 6))
     home = alert_stream.demo.DemoTeam("MLB", "Mets", "NYM", (1, 2, 3), (4, 5, 6))

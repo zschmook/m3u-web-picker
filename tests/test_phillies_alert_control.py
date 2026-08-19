@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from sports import channel_one_alerts
 from sports import phillies_alert_control
 
@@ -29,9 +27,14 @@ def test_manual_phillies_trigger_uses_current_score(monkeypatch):
     monkeypatch.setattr(tracker, "_mlb_rows", lambda _db: [row])
     monkeypatch.setattr(tracker, "_resolve_games", lambda _rows: {"phillies-mets": game})
     monkeypatch.setattr(
-        phillies_alert_control.channel_three_alerts,
-        "get_session",
-        lambda: SimpleNamespace(tracker=tracker),
+        phillies_alert_control.alert_stream,
+        "live_tracker",
+        lambda _db: tracker,
+    )
+    monkeypatch.setattr(
+        phillies_alert_control.alert_stream,
+        "active_session_numbers",
+        lambda: [1000],
     )
     monkeypatch.setattr(
         phillies_alert_control.mlb_live_source,

@@ -7,10 +7,11 @@ from sports import phillies_alert_control
 from .http import no_cache
 
 
-SCRIPT_TAG = '<script src="/static/js/ui_phillies_alert_test.js?v=phanatic-score-1"></script>'
+SCRIPT_TAG = '<script src="/static/js/ui_phillies_alert_test.js?v=generated-alerts-1"></script>'
 
 
 def register_phillies_alert_test_routes(app):
+    @app.post("/api/sports/generated-alerts/phillies-test")
     @app.post("/api/sports/mlb-score-alerts/3/phillies-test")
     def phillies_score_alert_test():
         try:

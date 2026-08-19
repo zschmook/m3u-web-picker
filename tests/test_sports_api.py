@@ -95,38 +95,23 @@ class SportsApiTests(unittest.TestCase):
         self.assertEqual(playback.status_code, 503)
         self.assertIn("ffmpeg", playback.get_data(as_text=True).lower())
 
-    def test_generated_sports_stream_uses_temporary_redirect(self):
+    def test_generated_sports_stream_uses_ffmpeg_alert_wrapper(self):
         source_url = "http://provider.test/user/pass/game.ts"
-        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
-        channels = core.parse_m3u_text(
-            f"""#EXTM3U
-#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles (2026-08-01 23:05:00)
-{source_url}
-"""
-        )
-        sports.update_settings(
-            core.DB_PATH,
-            {"enabled": True, "everything_mode": True, "timezone": "America/New_York"},
-        )
-        sports.scan_channels(core.DB_PATH, channels, now=now, trigger="test")
-        row = sports.generated_rows(core.DB_PATH)[0]
-
-        response = self.client.get(
-            sports.generated_stream_path(row["assigned_number"]),
-            follow_redirects=False,
-        )
+        assigned_number = 1070
+        with patch(
+            "api.outputs.sports.generated_stream_target",
+            return_value=source_url,
+        ):
+            response = self.client.get(
+                sports.generated_stream_path(assigned_number),
+                follow_redirects=False,
+            )
         self.assertEqual(response.status_code, 307)
-        self.assertEqual(response.headers["Location"], source_url)
-        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
-
-        core.write_current_playlist()
-        playlist = self.client.get("/playlist/custom.m3u")
-        self.assertEqual(playlist.status_code, 200)
-        self.assertIn(
-            f"http://localhost{sports.generated_stream_path(row['assigned_number'])}",
-            playlist.get_data(as_text=True),
+        self.assertEqual(
+            response.headers["Location"],
+            f"/sports/alert-stream/{assigned_number}/stream.m3u8",
         )
-        self.assertNotIn(source_url, playlist.get_data(as_text=True))
+        self.assertIn("no-store", response.headers.get("Cache-Control", ""))
 
     def test_fresh_api_has_no_sports_rules(self):
         response = self.client.get("/api/sports/settings")

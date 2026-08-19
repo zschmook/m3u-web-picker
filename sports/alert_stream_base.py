@@ -23,6 +23,11 @@ from . import live_stats
 _LOCK = threading.RLock()
 _SESSIONS: dict[int, "AlertSession"] = {}
 
+_LIVE_TRACKER_LOCK = threading.RLock()
+_LIVE_TRACKER = None
+_LIVE_TRACKER_DB = ""
+_LIVE_TRACKER_THREAD: threading.Thread | None = None
+
 _RENDER_STATE_LOCK = threading.RLock()
 _RENDER_STATE: dict[int, tuple[tuple[object, ...], float, float]] = {}
 ALERT_BASE_SCALE = 0.75
@@ -264,6 +269,78 @@ def _routed_alert_valid(
         and str(row.get("url") or "").strip()
         for row in rows
     )
+
+
+def _live_tracker_for(db_path: Path | str):
+    """Return the one real MLB score tracker shared by all active wrappers."""
+    global _LIVE_TRACKER, _LIVE_TRACKER_DB
+    key = str(Path(db_path))
+    with _LIVE_TRACKER_LOCK:
+        if _LIVE_TRACKER is None or _LIVE_TRACKER_DB != key:
+            # Imported lazily because channel_one_alerts uses this module's
+            # renderer. At runtime both modules are fully initialized.
+            from .channel_one_alerts import MlbScoreTracker
+
+            _LIVE_TRACKER = MlbScoreTracker()
+            _LIVE_TRACKER_DB = key
+        return _LIVE_TRACKER
+
+
+def live_tracker(db_path: Path | str):
+    """Expose the active generated-channel tracker to diagnostics/test controls."""
+    with _LOCK:
+        if not _SESSIONS:
+            return None
+    return _live_tracker_for(db_path)
+
+
+def active_session_numbers() -> list[int]:
+    with _LOCK:
+        return sorted(_SESSIONS)
+
+
+def _poll_live_scores(db_path: Path | str) -> None:
+    global _LIVE_TRACKER_THREAD
+    tracker = _live_tracker_for(db_path)
+    try:
+        while True:
+            with _LOCK:
+                if not _SESSIONS:
+                    return
+            try:
+                tracker.poll(db_path)
+            except Exception as exc:
+                with tracker.state_lock:
+                    tracker.last_error = str(exc)
+            time.sleep(3.0)
+    finally:
+        with _LIVE_TRACKER_LOCK:
+            if _LIVE_TRACKER_THREAD is threading.current_thread():
+                _LIVE_TRACKER_THREAD = None
+
+
+def _ensure_live_score_polling(db_path: Path | str) -> None:
+    global _LIVE_TRACKER_THREAD
+    with _LIVE_TRACKER_LOCK:
+        if _LIVE_TRACKER_THREAD is not None and _LIVE_TRACKER_THREAD.is_alive():
+            return
+        _LIVE_TRACKER_THREAD = threading.Thread(
+            target=_poll_live_scores,
+            args=(db_path,),
+            name="sports-alert-live-mlb-poll",
+            daemon=True,
+        )
+        _LIVE_TRACKER_THREAD.start()
+
+
+def _live_alert_for(session: AlertSession, db_path: Path | str) -> demo.DemoAlert | None:
+    alert = _live_tracker_for(db_path).current(db_path)
+    if alert is None:
+        return None
+    # Do not announce the score from the same base channel already being watched.
+    if str(alert.source_channel) == str(session.watched_number):
+        return None
+    return alert
 
 
 def _fit_line(
@@ -564,18 +641,6 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
             ):
                 break
 
-            elapsed = time.monotonic() - session.started_monotonic
-            slot = int(max(0.0, elapsed) // demo.ALERT_SLOT_SECONDS)
-            within = max(0.0, elapsed) % demo.ALERT_SLOT_SECONDS
-            if slot != session.alert_slot:
-                session.alert_slot = slot
-                session.routed_alert = fake_alert_for_slot(
-                    db_path,
-                    session.watched_number,
-                    session.watched_event_key,
-                    slot,
-                )
-
             rows = _snapshot(db_path)
             watched = _watched_row(rows, session.watched_number)
             if (
@@ -584,14 +649,7 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
             ):
                 break
 
-            routed = session.routed_alert
-            alert = None
-            if (
-                within < demo.ALERT_VISIBLE_SECONDS
-                and routed is not None
-                and _routed_alert_valid(rows, session, routed)
-            ):
-                alert = routed.alert
+            alert = _live_alert_for(session, db_path)
 
             try:
                 process.stdin.write(render_alert(alert))
@@ -670,6 +728,7 @@ def start_session(db_path: Path | str, assigned_number: int) -> AlertSession:
     )
     with _LOCK:
         _SESSIONS[number] = session
+    _ensure_live_score_polling(db_path)
     session.thread.start()
 
     playlist = directory / "stream.m3u8"
