@@ -18,6 +18,7 @@ from .guide_debug import register_guide_debug_routes
 from .hdhr import register_hdhr_routes
 from .images import register_image_routes
 from .logo_cache_status import register_logo_cache_status_routes
+from .multiview import register_multiview_routes
 from .outputs import register_output_routes
 from .phillies_alert_test import register_phillies_alert_test_routes
 from .providers import register_provider_routes
@@ -37,6 +38,7 @@ def register_routes(app):
     register_group_routes(app)
     register_sports_routes(app)
     register_sports_stats_routes(app)
+    register_multiview_routes(app)
     register_phillies_alert_test_routes(app)
     install_stats_guide_demo()
     register_stats_guide_demo_routes(app)

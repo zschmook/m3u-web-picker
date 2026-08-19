@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ game.away_abbr }} @ {{ game.home_abbr }}</title>
+  <style>
+    html,body{margin:0;height:100%;background:#05080d;color:#fff;font-family:system-ui,sans-serif}body{display:grid;grid-template-rows:auto 1fr}.bar{display:flex;justify-content:space-between;padding:10px 14px;background:#111a28}.bar span:last-child{color:#aebbd0}video{width:100%;height:100%;background:#000;object-fit:contain}
+  </style>
+</head>
+<body>
+  <div class="bar"><strong>{{ game.away_abbr }} {{ game.away_score }} @ {{ game.home_score }} {{ game.home_abbr }}</strong><span>{{ game.clock }} - {{ game.period }} · stream five</span></div>
+  <video controls autoplay src="/sports/multiview/play/{{ game.id }}"></video>
+</body>
+</html>

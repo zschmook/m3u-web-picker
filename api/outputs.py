@@ -8,6 +8,7 @@ from sports import game_alert_demo
 from sports import live_stats
 from sports import mlb_fake_stats
 from sports import mlb_stats_pip
+from sports import multiview
 from sports import nfl_demo_stats
 
 
@@ -198,6 +199,7 @@ def register_output_routes(app):
         text = nfl_demo_stats.inject_demo_channel(text, base_url)
         text = mlb_fake_stats.inject_demo_channel(text, base_url)
         text = game_alert_demo.inject_demo_channel(text, base_url)
+        text = multiview.inject_channel(text, base_url)
 
         # Add N.2 first so the existing N.1 injector inserts between the parent
         # game and PiP channel. Final order is N, N.1, N.2. PiP rows are exposed
@@ -216,8 +218,11 @@ def register_output_routes(app):
 
     @app.get("/playlist/all.m3u")
     def playlist_all():
+        base_url = request.url_root.rstrip("/")
+        text = core.m3u_from_channels(core.all_grouped_channels())
+        text = multiview.inject_channel(text, base_url)
         return Response(
-            with_manual_epg_logos(core.m3u_from_channels(core.all_grouped_channels())),
+            with_manual_epg_logos(text),
             mimetype="audio/x-mpegurl",
         )
 

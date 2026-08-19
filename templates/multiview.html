@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multiview Director</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("m3u-picker.ui.theme")||"midnight";</script>
+  <link rel="stylesheet" href="/static/css/multiview.css?v=multiview-1">
+</head>
+<body>
+  <header class="mv-topbar">
+    <div><strong>Multiview Director</strong><span>NCAA · Week 5 test slate</span></div>
+    <nav>
+      <a href="/">Overview</a>
+      <a href="/playlist/multiview.m3u">M3U</a>
+      <a href="/sports/multiview/ncaa/stream.m3u8" target="_blank">Open output</a>
+      <button id="resetDirector" type="button">Resume auto</button>
+    </nav>
+  </header>
+  <main id="multiviewDirector">
+    <div class="mv-status">
+      <span>Subscribed team owns Primary · unlocked slots follow Week 5 weights</span>
+      <span id="connectionStatus">4 visible · 1 spare</span>
+    </div>
+    <section class="mv-screen" aria-label="1 plus 3 multiview layout">
+      <article class="mv-pane mv-primary" data-slot="0"></article>
+      <div class="mv-side">
+        <article class="mv-pane" data-slot="1"></article>
+        <article class="mv-pane" data-slot="2"></article>
+        <article class="mv-pane" data-slot="3"></article>
+      </div>
+    </section>
+    <section class="mv-scores" aria-labelledby="liveScoresTitle">
+      <div class="mv-section-title"><h2 id="liveScoresTitle">Live scores</h2><span>Drag into an unlocked slot · Open uses stream five</span></div>
+      <div id="scoreTicker" class="mv-ticker"></div>
+    </section>
+    <p id="directorMessage" class="mv-message" role="status"></p>
+  </main>
+  <script src="/static/js/multiview.js?v=multiview-1"></script>
+</body>
+</html>
