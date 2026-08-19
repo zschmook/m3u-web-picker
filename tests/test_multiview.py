@@ -67,8 +67,19 @@ def test_ffmpeg_command_builds_one_by_three_layout(monkeypatch, tmp_path):
     graph = command[command.index("-filter_complex") + 1]
     assert "pad=1920:1080" in graph
     assert "overlay=x=1280:y=720" in graph
+    assert command[command.index("-filter_complex_threads") + 1] == "2"
+    assert "64" in command
     map_positions = [index for index, value in enumerate(command) if value == "-map"]
     assert command[map_positions[1] + 1] == "2:a:0"
+
+
+def test_stub_channels_are_bounded_lightweight_inputs(monkeypatch, tmp_path):
+    monkeypatch.setattr(multiview, "ffmpeg_executable", lambda: "ffmpeg")
+    command = multiview.stub_ffmpeg_command(Path(tmp_path), multiview.GAME_BY_ID["wis-nd"])
+    source = command[command.index("-i") + 1]
+    assert source.startswith("color=")
+    assert "s=640x360:r=10" in source
+    assert command[command.index("-threads") + 1] == "1"
 
 
 def test_playlist_exposes_stable_jellyfin_channel():

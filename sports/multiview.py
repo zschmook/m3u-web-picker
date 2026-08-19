@@ -207,7 +207,7 @@ def ffmpeg_command(directory: Path, input_targets: list[str], audio_slot: int) -
     segments = directory / "segment_%06d.ts"
     command = [ffmpeg_executable(), "-nostdin", "-hide_banner", "-loglevel", "error"]
     for target in input_targets:
-        command.extend(["-thread_queue_size", "512", "-i", str(target)])
+        command.extend(["-thread_queue_size", "64", "-threads", "1", "-i", str(target)])
     filters = (
         "[0:v]scale=1280:1080,setsar=1[main];"
         "[1:v]scale=640:360,setsar=1[one];"
@@ -220,8 +220,10 @@ def ffmpeg_command(directory: Path, input_targets: list[str], audio_slot: int) -
     )
     audio_input = max(0, min(3, int(audio_slot)))
     command.extend([
-        "-filter_complex", filters, "-map", "[v]", "-map", f"{audio_input}:a:0",
+        "-filter_complex_threads", "2", "-filter_complex", filters,
+        "-map", "[v]", "-map", f"{audio_input}:a:0",
         "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+        "-threads", "4", "-r", "10", "-g", "20", "-keyint_min", "20", "-sc_threshold", "0",
         "-force_key_frames", "expr:gte(t,n_forced*2)", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000",
         "-f", "hls", "-hls_time", "2", "-hls_list_size", "8",
@@ -307,10 +309,10 @@ def stub_ffmpeg_command(directory: Path, game: dict) -> list[str]:
     label = _escape_drawtext(f'{game["away_abbr"]} {game["away_score"]}  @  {game["home_score"]} {game["home_abbr"]}')
     status = _escape_drawtext(f'{game["clock"]} - {game["period"]}   WEEK 5 WEIGHT {game["weight"]}')
     video = (
-        f'testsrc2=s=1280x720:r=30,'
-        f'drawbox=x=0:y=0:w=iw:h=150:color={game["color"]}@0.92:t=fill,'
-        f'drawtext=text=\'{label}\':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=35,'
-        f'drawtext=text=\'{status}\':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=100'
+        f'color=c={game["color"]}:s=640x360:r=10,'
+        f'drawbox=x=0:y=0:w=iw:h=92:color=black@0.28:t=fill,'
+        f'drawtext=text=\'{label}\':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=18,'
+        f'drawtext=text=\'{status}\':fontcolor=white:fontsize=18:x=(w-text_w)/2:y=62'
     )
     return [
         ffmpeg_executable(), "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -318,7 +320,8 @@ def stub_ffmpeg_command(directory: Path, game: dict) -> list[str]:
         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "ultrafast",
         "-tune", "zerolatency", "-force_key_frames", "expr:gte(t,n_forced*2)",
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000",
+        "-threads", "1", "-r", "10", "-g", "20", "-keyint_min", "20", "-sc_threshold", "0",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-ar", "48000",
         "-f", "hls", "-hls_time", "2", "-hls_list_size", "8", "-hls_delete_threshold", "4",
         "-hls_allow_cache", "0", "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+temp_file",
         "-hls_segment_filename", str(segments), str(playlist),
