@@ -70,6 +70,7 @@ class DemoAlert:
     home_score: int
     play: str
     source_channel: str
+    show_on_source: bool = False
 
 
 @dataclass

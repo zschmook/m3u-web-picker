@@ -33,6 +33,7 @@ _RENDER_STATE: dict[int, tuple[tuple[object, ...], float, float]] = {}
 ALERT_BASE_SCALE = 0.75
 ALERT_POOF_START_SECONDS = 6.0
 ALERT_POOF_DURATION_SECONDS = 1.5
+LOGO_BACKPLATE_PADDING = 8
 
 
 @dataclass(frozen=True)
@@ -338,7 +339,10 @@ def _live_alert_for(session: AlertSession, db_path: Path | str) -> demo.DemoAler
     if alert is None:
         return None
     # Do not announce the score from the same base channel already being watched.
-    if str(alert.source_channel) == str(session.watched_number):
+    if (
+        not alert.show_on_source
+        and str(alert.source_channel) == str(session.watched_number)
+    ):
         return None
     return alert
 
@@ -381,16 +385,21 @@ def _fit_line(
 def _with_logo_contrast(icon: Image.Image) -> Image.Image:
     """Put every team mark on the same subtle light disc for dark-panel contrast."""
     source = icon.convert("RGBA")
-    output = Image.new("RGBA", source.size, (0, 0, 0, 0))
+    padding = LOGO_BACKPLATE_PADDING
+    output = Image.new(
+        "RGBA",
+        (source.width + padding * 2, source.height + padding * 2),
+        (0, 0, 0, 0),
+    )
     draw = ImageDraw.Draw(output, "RGBA")
-    inset = max(3, source.width // 18)
+    inset = 2
     draw.ellipse(
-        (inset, inset, source.width - inset, source.height - inset),
+        (inset, inset, output.width - inset - 1, output.height - inset - 1),
         fill=(238, 242, 247, 78),
         outline=(255, 255, 255, 108),
         width=1,
     )
-    output.alpha_composite(source)
+    output.alpha_composite(source, (padding, padding))
     return output
 
 
@@ -490,10 +499,11 @@ def _score_row(
     )
     away_icon = _with_logo_contrast(away_icon)
     home_icon = _with_logo_contrast(home_icon)
-    image.alpha_composite(away_icon, (95, y - 20))
+    padding = LOGO_BACKPLATE_PADDING
+    image.alpha_composite(away_icon, (95 - padding, y - 20 - padding))
     image.alpha_composite(
         home_icon,
-        (demo.FRAME_WIDTH - 95 - demo.LOGO_SIZE, y - 20),
+        (demo.FRAME_WIDTH - 95 - demo.LOGO_SIZE - padding, y - 20 - padding),
     )
 
     score_font = demo._font(48, bold=True)

@@ -154,8 +154,9 @@ def test_logo_contrast_adds_consistent_light_disc_without_covering_mark():
 
     contrasted = alert_stream._with_logo_contrast(icon)
 
-    backing = contrasted.getpixel((10, 36))
-    center = contrasted.getpixel((36, 36))
+    assert contrasted.size == (88, 88)
+    backing = contrasted.getpixel((4, 44))
+    center = contrasted.getpixel((44, 44))
     assert backing[3] > 0
     assert min(backing[:3]) > 150
     assert center[:3] == (5, 8, 12)
