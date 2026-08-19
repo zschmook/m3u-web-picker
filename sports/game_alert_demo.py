@@ -32,7 +32,7 @@ PARENT_CHANNEL_NUMBER = "1"
 
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 220
-FRAME_RATE = 2
+FRAME_RATE = 10
 ALERT_SLOT_SECONDS = 10.0
 ALERT_VISIBLE_SECONDS = 7.0
 STARTUP_TIMEOUT = 24.0
@@ -222,8 +222,6 @@ def _demo_alert_for_slot(slot: int) -> DemoAlert:
             yards=rng.choice((1, 3, 6, 8, 12, 18, 24, 31, 42, 58, 73)),
         )
 
-    # Demo destinations intentionally stay in the generated sports-channel
-    # range. The production alert selector will be sports-only and UI-gated.
     source_channel = str(rng.choice((1000, 1001, 1010, 1020, 1100, 1200)))
     return DemoAlert(
         league=league,
@@ -278,8 +276,6 @@ def _fallback_team_icon(team: DemoTeam, size: int = LOGO_SIZE) -> Image.Image:
         outline=(*team.secondary, 255),
         width=max(3, size // 14),
     )
-    # Deliberately graphical only: no team abbreviation text. The real alert
-    # renderer can drop actual logos into this exact slot.
     inset = max(16, size // 4)
     draw.ellipse(
         (inset, inset, size - inset, size - inset),
@@ -332,8 +328,6 @@ def _shared_logo_request(team: DemoTeam) -> tuple[str, str, str]:
             fallback = ""
         return team_id or f"mlb:{_logo_key(canonical_name)}", preferred, fallback
 
-    # Non-MLB alerts still use the exact same cache/fetch path. Their stable
-    # taxonomy identity can replace this name-based key when live adapters land.
     return (
         f"{league.casefold()}:{_logo_key(team.name)}",
         team.logo_url,
@@ -402,9 +396,6 @@ def _team_icon(team: DemoTeam) -> Image.Image:
             _LOGO_CACHE[key] = fetched
         return fetched.copy()
 
-    # Failed lookups are deliberately not cached forever. The shared registry
-    # may be populated by the guide or a later icon warm-up while this process
-    # is still running, so a future alert gets another chance to resolve it.
     return _fallback_team_icon(team)
 
 
@@ -523,7 +514,6 @@ def render_overlay(elapsed: float) -> bytes:
 
 
 def parent_target() -> str:
-    # Import lazily to avoid making sports modules part of core's import cycle.
     import core
     import sports
 
