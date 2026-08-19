@@ -20,6 +20,21 @@ WHITE = (255, 255, 255, 255)
 SLIDE_IN_SECONDS = 0.9
 SLIDE_OUT_START_SECONDS = 6.6
 SLIDE_OUT_SECONDS = 1.0
+FIREWORK_CYCLE_SECONDS = 2.4
+FIREWORK_BURST_SECONDS = 1.35
+FIREWORK_COLORS = (
+    (232, 24, 40),
+    (255, 255, 255),
+    (0, 92, 184),
+    (255, 196, 37),
+)
+FIREWORK_SPECS = (
+    (115, 150, 0.10, 19, 142),
+    (815, 138, 0.55, 17, 132),
+    (245, 255, 1.05, 15, 115),
+    (715, 250, 1.45, 16, 118),
+    (475, 105, 1.85, 20, 150),
+)
 
 _ASSET_PATH = Path(__file__).resolve().parent / "assets" / "phillies_phanatic.png"
 _ASSET_LOCK = threading.RLock()
@@ -259,6 +274,108 @@ def phillies_slide_offset(elapsed: float) -> int:
     return int(round(CANVAS_HEIGHT * eased))
 
 
+def _firework_visibility(elapsed: float) -> float:
+    value = max(0.0, float(elapsed))
+    fade_in = min(1.0, value / 0.35)
+    fade_out = min(
+        1.0,
+        max(0.0, SLIDE_OUT_START_SECONDS + SLIDE_OUT_SECONDS - value) / 0.8,
+    )
+    return min(fade_in, fade_out)
+
+
+def _fireworks_layer(elapsed: float) -> Image.Image:
+    """Render deterministic animated fireworks behind the cached mascot art."""
+    layer = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
+    visibility = _firework_visibility(elapsed)
+    if visibility <= 0.0:
+        return layer
+
+    draw = ImageDraw.Draw(layer, "RGBA")
+    for index, (cx, cy, delay, particles, radius) in enumerate(FIREWORK_SPECS):
+        local = float(elapsed) - delay
+        if local < 0.0:
+            continue
+        cycle = local % FIREWORK_CYCLE_SECONDS
+        color = FIREWORK_COLORS[index % len(FIREWORK_COLORS)]
+
+        if cycle < 0.38:
+            rise = cycle / 0.38
+            rocket_y = int(round(CANVAS_HEIGHT - 24 - (CANVAS_HEIGHT - cy - 24) * rise))
+            trail = 34 + int(32 * rise)
+            alpha = int(210 * visibility)
+            draw.line(
+                (cx, rocket_y + trail, cx, rocket_y),
+                fill=(*color, max(20, alpha // 3)),
+                width=7,
+            )
+            draw.line(
+                (cx, rocket_y + trail // 2, cx, rocket_y),
+                fill=(*color, alpha),
+                width=2,
+            )
+            draw.ellipse(
+                (cx - 4, rocket_y - 4, cx + 4, rocket_y + 4),
+                fill=(255, 255, 255, alpha),
+            )
+            continue
+
+        burst_time = cycle - 0.38
+        if burst_time > FIREWORK_BURST_SECONDS:
+            continue
+        progress = burst_time / FIREWORK_BURST_SECONDS
+        expansion = math.sin(min(1.0, progress * 1.18) * math.pi / 2.0)
+        fade = (1.0 - progress) ** 1.35
+        alpha = int(255 * fade * visibility)
+        if alpha <= 0:
+            continue
+
+        flash_radius = max(1, int(11 * (1.0 - min(1.0, progress * 4.0))))
+        if flash_radius > 1:
+            draw.ellipse(
+                (
+                    cx - flash_radius,
+                    cy - flash_radius,
+                    cx + flash_radius,
+                    cy + flash_radius,
+                ),
+                fill=(255, 255, 255, alpha),
+            )
+
+        for particle in range(particles):
+            angle = (
+                math.tau * particle / particles
+                + index * 0.37
+                + math.sin(particle * 1.91 + index) * 0.075
+            )
+            distance = radius * expansion * (0.78 + 0.22 * ((particle * 7) % 11) / 10)
+            gravity = 42.0 * progress * progress
+            x = cx + math.cos(angle) * distance
+            y = cy + math.sin(angle) * distance + gravity
+            trail_distance = min(28.0, 12.0 + distance * 0.18)
+            tx = x - math.cos(angle) * trail_distance
+            ty = y - math.sin(angle) * trail_distance - gravity * 0.12
+            particle_color = FIREWORK_COLORS[
+                (index + particle // 5) % len(FIREWORK_COLORS)
+            ]
+            draw.line(
+                (tx, ty, x, y),
+                fill=(*particle_color, max(12, alpha // 4)),
+                width=7,
+            )
+            draw.line(
+                (tx, ty, x, y),
+                fill=(*particle_color, alpha),
+                width=2,
+            )
+            spark = 2 if progress < 0.72 else 1
+            draw.ellipse(
+                (x - spark, y - spark, x + spark, y + spark),
+                fill=(255, 255, 255, alpha),
+            )
+    return layer
+
+
 def _encode_png(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=False)
@@ -295,5 +412,6 @@ def render_alert(alert) -> bytes:
     canvas = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     offset = phillies_slide_offset(elapsed)
     if offset < CANVAS_HEIGHT:
+        canvas.alpha_composite(_fireworks_layer(elapsed))
         canvas.alpha_composite(graphic, (0, offset))
     return _encode_png(canvas)

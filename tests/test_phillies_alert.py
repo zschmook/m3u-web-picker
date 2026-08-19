@@ -63,6 +63,17 @@ def test_phillies_graphic_uses_large_transparent_canvas():
     assert graphic.getchannel("A").getbbox() is not None
 
 
+def test_phillies_fireworks_animate_and_remain_transparent():
+    first = phillies_alert._fireworks_layer(1.0)
+    later = phillies_alert._fireworks_layer(1.25)
+
+    assert first.size == (phillies_alert.CANVAS_WIDTH, phillies_alert.CANVAS_HEIGHT)
+    assert first.getchannel("A").getbbox() is not None
+    assert later.getchannel("A").getbbox() is not None
+    assert first.tobytes() != later.tobytes()
+    assert phillies_alert._fireworks_layer(0.0).getchannel("A").getbbox() is None
+
+
 def test_phillies_render_is_ffmpeg_ready_large_png(monkeypatch):
     alert = _alert(_team("Philadelphia Phillies", "PHI"))
     monkeypatch.setattr(alert_stream, "_animation_elapsed", lambda _alert: 2.0)
