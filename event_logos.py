@@ -24,6 +24,7 @@ SEPARATOR_WIDTH_PX = 32
 GAP_PX = 6
 EVENT_LOGO_RETENTION_DAYS = 14
 MAX_LOGO_BYTES = 2 * 1024 * 1024
+EVENT_LOGO_URL_VERSION = "3"
 _EVENT_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _last_purge_monotonic = 0.0
 
@@ -70,7 +71,10 @@ def _public_event_logo_url(digest: str) -> str:
         # callers should keep the ordinary provider/team logo when LAN host is
         # not configured.
         return ""
-    return f"http://{settings.lan_host}:{settings.external_port}/api/event-logo/{digest}.png"
+    return (
+        f"http://{settings.lan_host}:{settings.external_port}"
+        f"/api/event-logo/{digest}.png?v={EVENT_LOGO_URL_VERSION}"
+    )
 
 
 def _manifest_path(digest: str) -> Path:

@@ -52,6 +52,13 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertIn('/api/event-logo/<digest>.png', api_source)
         self.assertIn("Pillow", requirements)
 
+    def test_event_logo_urls_bust_old_guide_art_and_are_not_browser_pinned(self):
+        logo_source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        api_source = (ROOT / "api" / "event_images.py").read_text(encoding="utf-8")
+        self.assertIn("EVENT_LOGO_URL_VERSION", logo_source)
+        self.assertIn(".png?v={EVENT_LOGO_URL_VERSION}", logo_source)
+        self.assertIn("no-cache, no-store, must-revalidate", api_source)
+
     def test_guide_uses_same_sized_logo_boxes(self):
         source = (ROOT / "static" / "css" / "event_logo_normalization.css").read_text(encoding="utf-8")
         self.assertIn(".guide-logo", source)

@@ -37,10 +37,24 @@ class MlbScoreAlert:
     detected_monotonic: float = field(default_factory=time.monotonic)
 
 
+@dataclass(frozen=True)
+class MlbPendingScore:
+    event_key: str
+    game_pk: str
+    source_channel: int
+    away: demo.DemoTeam
+    home: demo.DemoTeam
+    away_score: int
+    home_score: int
+    scoring_is_away: bool
+    observed_last_play: str = ""
+
+
 @dataclass
 class MlbScoreTracker:
     baselines: dict[str, tuple[int, int]] = field(default_factory=dict)
     event_game_ids: dict[str, str] = field(default_factory=dict)
+    awaiting_play: dict[str, MlbPendingScore] = field(default_factory=dict)
     pending: deque[MlbScoreAlert] = field(default_factory=deque)
     active: MlbScoreAlert | None = None
     active_until: float = 0.0
@@ -176,6 +190,7 @@ class MlbScoreTracker:
             with self.state_lock:
                 self.baselines.clear()
                 self.event_game_ids.clear()
+                self.awaiting_play.clear()
                 self.pending.clear()
                 self.active = None
                 self.valid_destinations.clear()
@@ -192,6 +207,7 @@ class MlbScoreTracker:
 
         resolved = self._resolve_games(rows)
         current_game_ids: set[str] = set()
+        detected_this_poll: set[str] = set()
 
         for event_key, row in rows_by_event.items():
             game = resolved.get(event_key)
@@ -224,38 +240,79 @@ class MlbScoreTracker:
             away = self._team_from_game(game, "away")
             home = self._team_from_game(game, "home")
             scoring_is_away = away_delta > 0
-            play = f"{(away if scoring_is_away else home).name} scored"
+            observed_last_play = ""
             try:
                 state = mlb_live_source.fetch_live_state(game_pk)
                 away = self._team_from_live_state(state, "away", away)
                 home = self._team_from_live_state(state, "home", home)
-                latest = str(state.get("last_play") or "").strip()
-                if latest:
-                    play = latest
+                observed_last_play = str(state.get("last_play") or "").strip()
             except Exception as exc:
                 with self.state_lock:
                     self.last_error = str(exc)
-            scoring_team = away if scoring_is_away else home
 
             source_channel = int(row.get("assigned_number") or 0)
             if source_channel <= 0:
                 continue
+            with self.state_lock:
+                self.awaiting_play[game_pk] = MlbPendingScore(
+                    event_key=event_key,
+                    game_pk=game_pk,
+                    source_channel=source_channel,
+                    away=away,
+                    home=home,
+                    away_score=away_score,
+                    home_score=home_score,
+                    scoring_is_away=scoring_is_away,
+                    observed_last_play=observed_last_play,
+                )
+            detected_this_poll.add(game_pk)
+
+        # MLB's schedule score commonly advances before the live play feed.
+        # Never combine that new score with the previous plate appearance.
+        with self.state_lock:
+            awaiting = list(self.awaiting_play.items())
+        for game_pk, candidate in awaiting:
+            if game_pk in detected_this_poll:
+                continue
+            try:
+                state = mlb_live_source.fetch_live_state(game_pk)
+            except Exception as exc:
+                with self.state_lock:
+                    self.last_error = str(exc)
+                continue
+
+            live_away_score = self._score(state.get("away"))
+            live_home_score = self._score(state.get("home"))
+            latest = str(state.get("last_play") or "").strip()
+            if (
+                live_away_score < candidate.away_score
+                or live_home_score < candidate.home_score
+                or not latest
+                or latest == candidate.observed_last_play
+            ):
+                continue
+
+            away = self._team_from_live_state(state, "away", candidate.away)
+            home = self._team_from_live_state(state, "home", candidate.home)
             alert = demo.DemoAlert(
                 league="MLB",
-                scoring_team=scoring_team,
+                scoring_team=away if candidate.scoring_is_away else home,
                 away=away,
                 home=home,
-                away_score=away_score,
-                home_score=home_score,
-                play=play,
-                source_channel=str(source_channel),
+                away_score=live_away_score,
+                home_score=live_home_score,
+                play=latest,
+                source_channel=str(candidate.source_channel),
             )
             with self.state_lock:
+                if self.awaiting_play.get(game_pk) != candidate:
+                    continue
+                self.awaiting_play.pop(game_pk, None)
                 self.pending.append(
                     MlbScoreAlert(
-                        event_key=event_key,
+                        event_key=candidate.event_key,
                         game_pk=game_pk,
-                        source_channel=source_channel,
+                        source_channel=candidate.source_channel,
                         alert=alert,
                     )
                 )
@@ -266,6 +323,7 @@ class MlbScoreTracker:
             for game_pk in list(self.baselines):
                 if game_pk not in current_game_ids:
                     self.baselines.pop(game_pk, None)
+                    self.awaiting_play.pop(game_pk, None)
             for event_key in list(self.event_game_ids):
                 if event_key not in active_events:
                     self.event_game_ids.pop(event_key, None)
@@ -296,7 +354,7 @@ class MlbScoreTracker:
     def state_payload(self, db_path: Path | str) -> dict:
         current = self.current(db_path)
         with self.state_lock:
-            queued = len(self.pending)
+            queued = len(self.pending) + len(self.awaiting_play)
             tracked = len(self.baselines)
             last_error = self.last_error
         return {

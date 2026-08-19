@@ -73,20 +73,33 @@ def test_mlb_score_tracker_baselines_then_alerts(monkeypatch):
 
     tracker = channel_one_alerts.MlbScoreTracker()
     monkeypatch.setattr(tracker, "_resolve_games", lambda _rows: {"game-a": game})
+    live_states = iter(
+        (
+            {
+                "last_play": "Brandon Marsh strikes out swinging.",
+                "away": {"name": "Philadelphia Phillies", "abbr": "PHI", "score": 1},
+                "home": {"name": "New York Mets", "abbr": "NYM", "score": 0},
+            },
+            {
+                "last_play": "Kyle Schwarber homers to right field.",
+                "away": {"name": "Philadelphia Phillies", "abbr": "PHI", "score": 2},
+                "home": {"name": "New York Mets", "abbr": "NYM", "score": 0},
+            },
+        )
+    )
     monkeypatch.setattr(
         channel_one_alerts.mlb_live_source,
         "fetch_live_state",
-        lambda _game_pk: {
-            "last_play": "Kyle Schwarber homers to right field.",
-            "away": {"name": "Philadelphia Phillies", "abbr": "PHI"},
-            "home": {"name": "New York Mets", "abbr": "NYM"},
-        },
+        lambda _game_pk: next(live_states),
     )
 
     tracker.poll("db.sqlite")
     assert tracker.current("db.sqlite") is None
 
     game["teams"]["away"]["score"] = 2
+    tracker.poll("db.sqlite")
+    assert tracker.current("db.sqlite") is None
+
     tracker.poll("db.sqlite")
     alert = tracker.current("db.sqlite")
 
@@ -99,6 +112,38 @@ def test_mlb_score_tracker_baselines_then_alerts(monkeypatch):
     assert alert.home_score == 0
     assert alert.source_channel == "1000"
     assert "Schwarber" in alert.play
+
+
+def test_mlb_score_tracker_waits_while_last_play_and_live_score_are_stale(monkeypatch):
+    rows = [_row(1000)]
+    game = _game(away_score=1, home_score=0)
+    monkeypatch.setattr(channel_one_alerts.generated, "generated_rows", lambda _db: rows)
+    tracker = channel_one_alerts.MlbScoreTracker()
+    monkeypatch.setattr(tracker, "_resolve_games", lambda _rows: {"game-a": game})
+    states = iter(
+        (
+            {"last_play": "Boston batter strikes out.", "away": {"score": 1}, "home": {"score": 0}},
+            {"last_play": "Boston batter strikes out.", "away": {"score": 1}, "home": {"score": 0}},
+            {"last_play": "RBI double scores one run.", "away": {"score": 2}, "home": {"score": 0}},
+        )
+    )
+    monkeypatch.setattr(
+        channel_one_alerts.mlb_live_source,
+        "fetch_live_state",
+        lambda _game_pk: next(states),
+    )
+
+    tracker.poll("db.sqlite")
+    game["teams"]["away"]["score"] = 2
+    tracker.poll("db.sqlite")
+    tracker.poll("db.sqlite")
+    assert tracker.current("db.sqlite") is None
+
+    tracker.poll("db.sqlite")
+    alert = tracker.current("db.sqlite")
+    assert alert is not None
+    assert alert.away_score == 2
+    assert alert.play == "RBI double scores one run."
 
 
 def test_mlb_score_tracker_ignores_score_corrections(monkeypatch):
