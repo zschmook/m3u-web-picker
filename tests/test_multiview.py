@@ -82,3 +82,18 @@ def test_multiview_is_injected_into_main_jellyfin_playlist():
     value = multiview.inject_channel("#EXTM3U\n#EXTINF:-1,Existing\nhttp://existing\n", "http://picker.test:9998")
     assert value.splitlines()[1].endswith(",NCAA Multiview")
     assert value.splitlines()[2] == "http://picker.test:9998/sports/multiview/ncaa/stream.m3u8"
+
+
+def test_live_playlist_response_disables_conditional_caching(tmp_path):
+    from flask import Flask
+    from api.multiview import _media_response
+
+    playlist = tmp_path / "stream.m3u8"
+    playlist.write_text("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:2\n", encoding="utf-8")
+    app = Flask(__name__)
+    with app.test_request_context("/sports/multiview/ncaa/stream.m3u8"):
+        response = _media_response(playlist, "stream.m3u8")
+    assert response.status_code == 200
+    assert "ETag" not in response.headers
+    assert "Last-Modified" not in response.headers
+    assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"

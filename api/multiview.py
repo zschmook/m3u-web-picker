@@ -9,8 +9,17 @@ from .http import no_cache
 
 def _media_response(path, filename: str):
     mimetype = "application/x-mpegurl" if filename == "stream.m3u8" else "video/mp2t"
-    response = send_file(path, mimetype=mimetype, conditional=True)
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate" if filename == "stream.m3u8" else "public, max-age=30"
+    is_playlist = filename == "stream.m3u8"
+    # VLC may stop at the end of the first HLS window when a changing live
+    # manifest is served through conditional file responses. Always return a
+    # fresh 200 for playlists; media segments remain immutable and cacheable.
+    response = send_file(path, mimetype=mimetype, conditional=not is_playlist, etag=not is_playlist)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate" if is_playlist else "public, max-age=30"
+    if is_playlist:
+        response.headers.pop("ETag", None)
+        response.headers.pop("Last-Modified", None)
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["X-Accel-Buffering"] = "no"
     return response
