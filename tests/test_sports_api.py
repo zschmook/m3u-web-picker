@@ -12,6 +12,7 @@ os.environ["M3U_DISABLE_SCHEDULER"] = "true"
 
 import core  # noqa: E402
 import sports  # noqa: E402
+from api import guide as guide_api  # noqa: E402
 
 try:
     from app import app  # noqa: E402
@@ -112,6 +113,32 @@ class SportsApiTests(unittest.TestCase):
             f"/sports/alert-stream/{assigned_number}/stream.m3u8",
         )
         self.assertIn("no-store", response.headers.get("Cache-Control", ""))
+
+    def test_internal_guide_generated_channel_uses_same_alert_wrapper(self):
+        assigned_number = 1070
+        internal_hls = (
+            f"http://127.0.0.1:9999/sports/alert-stream/"
+            f"{assigned_number}/stream.m3u8"
+        )
+        with (
+            patch(
+                "api.guide.sports.generated_stream_target",
+                return_value="http://provider.test/game.ts",
+            ),
+            patch("api.guide.load_settings") as settings,
+            patch("api.guide.browser.response_for") as response_for,
+        ):
+            settings.return_value.port = 9999
+            response_for.return_value = app.response_class("ok", status=200)
+
+            target = guide_api._resolve_guide_play_target(
+                f"/guide/play/sports/{assigned_number}"
+            )
+            response = self.client.get(f"/guide/play/sports/{assigned_number}")
+
+        self.assertEqual(target, internal_hls)
+        self.assertEqual(response.status_code, 200)
+        response_for.assert_called_once_with(internal_hls)
 
     def test_fresh_api_has_no_sports_rules(self):
         response = self.client.get("/api/sports/settings")

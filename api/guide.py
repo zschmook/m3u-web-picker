@@ -13,6 +13,14 @@ from sports.generated import generated_publish_lock
 from .http import json_error, no_cache
 
 
+def _internal_generated_alert_hls_url(assigned_number: int) -> str:
+    settings = load_settings()
+    return (
+        f"http://127.0.0.1:{settings.port}"
+        f"/sports/alert-stream/{int(assigned_number)}/stream.m3u8"
+    )
+
+
 def _resolve_guide_play_target(play_url: str) -> str:
     """Resolve a guide-owned opaque play path without trusting arbitrary URLs."""
     value = str(play_url or "").split("?", 1)[0].strip()
@@ -21,7 +29,10 @@ def _resolve_guide_play_target(play_url: str) -> str:
         return core.manual_stream_target(manual.group(1))
     generated = re.fullmatch(r"/guide/play/sports/(\d+)", value)
     if generated:
-        return sports.generated_stream_target(core.DB_PATH, int(generated.group(1)))
+        assigned_number = int(generated.group(1))
+        if sports.generated_stream_target(core.DB_PATH, assigned_number):
+            return _internal_generated_alert_hls_url(assigned_number)
+        return ""
     return ""
 
 
@@ -306,4 +317,4 @@ def register_guide_routes(app):
         target = sports.generated_stream_target(core.DB_PATH, assigned_number)
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
-        return browser.response_for(target)
+        return browser.response_for(_internal_generated_alert_hls_url(assigned_number))
