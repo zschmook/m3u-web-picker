@@ -691,6 +691,7 @@ class _AsyncAlertRenderer:
 
     def _run(self) -> None:
         frame_period = 1.0 / demo.FRAME_RATE
+        next_frame = time.monotonic()
         while not self._stop_event.is_set() and not self._shutdown.is_set():
             with self._condition:
                 alert = self._desired_alert
@@ -702,6 +703,7 @@ class _AsyncAlertRenderer:
                 )
                 if signature is None:
                     self._condition.wait(timeout=frame_period)
+                    next_frame = time.monotonic()
                     continue
             elapsed = 0.0 if presented_at is None else time.monotonic() - presented_at
             frame = _render_at_elapsed(alert, elapsed)
@@ -709,7 +711,64 @@ class _AsyncAlertRenderer:
                 if signature == self._desired_signature:
                     self._completed_signature = signature
                     self._completed_frame = frame
-            self._shutdown.wait(frame_period)
+            next_frame += frame_period
+            delay = next_frame - time.monotonic()
+            if delay > 0:
+                self._shutdown.wait(delay)
+            elif delay < -frame_period:
+                next_frame = time.monotonic()
+
+
+class _AlertStateMonitor:
+    """Keep database and score-tracker work off the frame-delivery thread."""
+
+    POLL_SECONDS = 0.25
+
+    def __init__(self, session: AlertSession, db_path: Path | str):
+        self._session = session
+        self._db_path = db_path
+        self._shutdown = threading.Event()
+        self._lock = threading.RLock()
+        self._alert: demo.DemoAlert | None = None
+        self._valid = True
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"sports-alert-control-{session.watched_number}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._shutdown.set()
+        self._thread.join(timeout=2.0)
+
+    def snapshot(self) -> tuple[bool, demo.DemoAlert | None]:
+        with self._lock:
+            return self._valid, self._alert
+
+    def _run(self) -> None:
+        while not self._session.stop_event.is_set() and not self._shutdown.is_set():
+            try:
+                rows = _snapshot(self._db_path)
+                watched = _watched_row(rows, self._session.watched_number)
+                valid = (
+                    watched is not None
+                    and str(watched.get("event_key") or "")
+                    == self._session.watched_event_key
+                )
+                alert = _live_alert_for(self._session, self._db_path) if valid else None
+                with self._lock:
+                    self._valid = valid
+                    self._alert = alert
+                if not valid:
+                    return
+            except Exception as exc:
+                # A transient database read must not starve FFmpeg. Retain the
+                # last known alert/state and let the next control poll retry.
+                self._session.last_error = str(exc)
+            self._shutdown.wait(self.POLL_SECONDS)
 
 
 def _directory(assigned_number: int) -> Path:
@@ -741,7 +800,10 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
 
     frame_period = 1.0 / demo.FRAME_RATE
     renderer = _AsyncAlertRenderer(session.stop_event)
+    monitor = _AlertStateMonitor(session, db_path)
     renderer.start()
+    monitor.start()
+    next_frame = time.monotonic()
     try:
         while not session.stop_event.is_set():
             if process.poll() is not None:
@@ -752,15 +814,9 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
             ):
                 break
 
-            rows = _snapshot(db_path)
-            watched = _watched_row(rows, session.watched_number)
-            if (
-                watched is None
-                or str(watched.get("event_key") or "") != session.watched_event_key
-            ):
+            valid, alert = monitor.snapshot()
+            if not valid:
                 break
-
-            alert = _live_alert_for(session, db_path)
             renderer.request(alert)
 
             try:
@@ -769,8 +825,12 @@ def _run(session: AlertSession, db_path: Path | str) -> None:
             except (BrokenPipeError, OSError) as exc:
                 session.last_error = str(exc)
                 break
-            session.stop_event.wait(frame_period)
+            next_frame += frame_period
+            delay = next_frame - time.monotonic()
+            if delay > 0:
+                session.stop_event.wait(delay)
     finally:
+        monitor.stop()
         renderer.stop()
         try:
             process.stdin.close()

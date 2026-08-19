@@ -573,8 +573,10 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
     playlist = directory / "stream.m3u8"
     segments = directory / "segment_%06d.ts"
     filter_graph = (
-        "[1:v]format=rgba[alert];"
-        "[0:v][alert]overlay=x=(W-w)/2:y=H-h-48:format=auto:eof_action=pass[v]"
+        "[0:v]setpts=PTS-STARTPTS[base];"
+        "[1:v]format=rgba,setpts=PTS-STARTPTS[alert];"
+        "[base][alert]overlay=x=(W-w)/2:y=H-h-48:"
+        "format=auto:eof_action=pass:repeatlast=1[v]"
     )
     return [
         ffmpeg_executable(),
@@ -610,6 +612,8 @@ def _ffmpeg_command(parent_url: str, directory: Path) -> list[str]:
         "ultrafast",
         "-tune",
         "zerolatency",
+        "-force_key_frames",
+        "expr:gte(t,n_forced*2)",
         "-pix_fmt",
         "yuv420p",
         "-c:a",

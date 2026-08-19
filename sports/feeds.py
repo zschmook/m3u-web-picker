@@ -77,6 +77,18 @@ def _espn_team_logo(event: dict, *, team_name: str) -> str:
     if not team_name:
         return ""
     league_id = event.get("league_id") or _s._classification_id(event)
+
+    # MLB has a complete local taxonomy whose team codes map directly to
+    # ESPN's stable full/default CDN paths. Prefer it before the catalog API:
+    # ESPN's team-list endpoint can return 403 even while the CDN image (for
+    # example the Padres ``sd.png`` mark) remains healthy.
+    try:
+        known_logo = espn_known_logos.direct_full_default_url(league_id, team_name)
+    except Exception:
+        known_logo = ""
+    if known_logo:
+        return known_logo
+
     try:
         logo = espn_team_logos.espn_full_default_url(
             league_id,
@@ -88,14 +100,7 @@ def _espn_team_logo(event: dict, *, team_name: str) -> str:
     except Exception:
         pass
 
-    # The ESPN team-list API is still the primary resolver for every sport.
-    # MLB additionally has a complete local canonical team list, so if ESPN's
-    # catalog endpoint is unavailable or oddly omits one team we can still try
-    # the ordinary ESPN full/default CDN URL before falling back to provider art.
-    try:
-        return espn_known_logos.direct_full_default_url(league_id, team_name)
-    except Exception:
-        return ""
+    return ""
 
 
 def _preferred_feed_logo(
