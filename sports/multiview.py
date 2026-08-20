@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -59,10 +60,48 @@ class MultiviewSession:
 
 
 _LOCK = threading.RLock()
+_START_LOCK = threading.Lock()
+_STUB_START_LOCK = threading.Lock()
 _STATE = DirectorState()
 _SESSION: MultiviewSession | None = None
 _STUB_SESSIONS: dict[str, MultiviewSession] = {}
 _REAPER_STARTED = False
+_ENCODER_LOCK = threading.Lock()
+_ENCODER_ARGS: tuple[str, ...] | None = None
+
+
+def _video_encoder_args() -> list[str]:
+    """Select NVENC when usable, retaining a portable CPU fallback."""
+    global _ENCODER_ARGS
+    with _ENCODER_LOCK:
+        if _ENCODER_ARGS is not None:
+            return list(_ENCODER_ARGS)
+        preference = str(os.environ.get("M3U_MULTIVIEW_ENCODER", "auto") or "auto").strip().lower()
+        use_nvenc = preference in {"auto", "nvenc", "h264_nvenc"}
+        if use_nvenc:
+            probe = [
+                ffmpeg_executable(), "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=s=256x256:r=1", "-frames:v", "1",
+                "-c:v", "h264_nvenc", "-f", "null", "-",
+            ]
+            try:
+                use_nvenc = subprocess.run(
+                    probe,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=8,
+                    check=False,
+                ).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                use_nvenc = False
+        if use_nvenc:
+            _ENCODER_ARGS = (
+                "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+                "-rc", "cbr", "-b:v", "6M", "-maxrate", "6M", "-bufsize", "12M",
+            )
+        else:
+            _ENCODER_ARGS = ("-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-threads", "4")
+        return list(_ENCODER_ARGS)
 
 
 def _ensure_reaper() -> None:
@@ -165,15 +204,12 @@ def update_state(payload: dict) -> dict:
             _STATE.audio_slot = next_audio
             _STATE.upset_ids = next_upsets
             _STATE.revision += 1
-            old_session = _SESSION if stream_changed else None
-            if stream_changed:
-                _SESSION = None
-            elif _SESSION is not None:
+            # Keep the current compositor serving while the replacement input
+            # warms. Its stale revision causes the next manifest request to
+            # perform an in-place HLS handoff instead of tearing the channel
+            # down at the moment the director state changes.
+            if not stream_changed and _SESSION is not None:
                 _SESSION.revision = _STATE.revision
-        else:
-            old_session = None
-    if old_session is not None:
-        terminate(old_session.process)
     return state_payload()
 
 
@@ -186,13 +222,8 @@ def reset_state() -> dict:
         _STATE.audio_slot = 0
         _STATE.upset_ids = []
         _STATE.revision += 1
-        old_session = _SESSION if stream_changed else None
-        if stream_changed:
-            _SESSION = None
-        elif _SESSION is not None:
+        if not stream_changed and _SESSION is not None:
             _SESSION.revision = _STATE.revision
-    if old_session is not None:
-        terminate(old_session.process)
     return state_payload()
 
 
@@ -222,12 +253,14 @@ def ffmpeg_command(directory: Path, input_targets: list[str], audio_slot: int) -
     command.extend([
         "-filter_complex_threads", "2", "-filter_complex", filters,
         "-map", "[v]", "-map", f"{audio_input}:a:0",
-        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-        "-threads", "4", "-r", "10", "-g", "20", "-keyint_min", "20", "-sc_threshold", "0",
-        "-force_key_frames", "expr:gte(t,n_forced*2)", "-pix_fmt", "yuv420p",
+    ])
+    command.extend(_video_encoder_args())
+    command.extend([
+        "-r", "10", "-g", "10", "-keyint_min", "10", "-sc_threshold", "0",
+        "-force_key_frames", "expr:gte(t,n_forced*1)", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000",
-        "-f", "hls", "-hls_time", "2", "-hls_list_size", "8",
-        "-hls_delete_threshold", "4", "-hls_allow_cache", "0",
+        "-f", "hls", "-hls_time", "1", "-hls_list_size", "10",
+        "-hls_delete_threshold", "20", "-hls_allow_cache", "0",
         "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+temp_file",
         "-hls_segment_filename", str(segments), str(playlist),
     ])
@@ -239,6 +272,14 @@ def _directory() -> Path:
 
 
 def start_session() -> MultiviewSession:
+    # A player may retry the manifest while the first FFmpeg process is still
+    # producing its initial segment. Only one request may build the pipeline;
+    # followers reuse the session it publishes instead of spawning duplicates.
+    with _START_LOCK:
+        return _start_session()
+
+
+def _start_session() -> MultiviewSession:
     global _SESSION
     _ensure_reaper()
     with _LOCK:
@@ -247,11 +288,12 @@ def start_session() -> MultiviewSession:
             return _SESSION
         state = DirectorState(list(_STATE.slots), list(_STATE.locked), _STATE.audio_slot, list(_STATE.upset_ids), _STATE.revision)
         old = _SESSION
-        _SESSION = None
-    if old is not None:
-        terminate(old.process)
     directory = _directory()
-    shutil.rmtree(directory, ignore_errors=True)
+    # On first startup there is no timeline to preserve. During a director
+    # change, retain the playlist and segments so append_list can continue the
+    # media sequence and tell players about the discontinuity.
+    if old is None:
+        shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True, exist_ok=True)
     input_targets: list[str] = []
     for game_id in state.slots:
@@ -259,9 +301,14 @@ def start_session() -> MultiviewSession:
         if playlist is None:
             raise RuntimeError(f"Could not start generated test channel {game_id}")
         input_targets.append(str(playlist))
+    if old is not None:
+        terminate(old.process)
     try:
         process = subprocess.Popen(ffmpeg_command(directory, input_targets, state.audio_slot), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
+        with _LOCK:
+            if _SESSION is old:
+                _SESSION = None
         raise RuntimeError(f"Could not start multiview ffmpeg: {exc}") from exc
     session = MultiviewSession(directory, process, state.revision, source_ids=tuple(state.slots))
     with _LOCK:
@@ -316,19 +363,29 @@ def stub_ffmpeg_command(directory: Path, game: dict) -> list[str]:
     )
     return [
         ffmpeg_executable(), "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", video,
+        # Synthetic inputs otherwise run as fast as the CPU allows. Pace the
+        # video clock so HLS segments are produced in real time and players do
+        # not fall behind files that have already been deleted.
+        "-re", "-f", "lavfi", "-i", video,
         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "ultrafast",
-        "-tune", "zerolatency", "-force_key_frames", "expr:gte(t,n_forced*2)",
-        "-threads", "1", "-r", "10", "-g", "20", "-keyint_min", "20", "-sc_threshold", "0",
+        "-tune", "zerolatency", "-force_key_frames", "expr:gte(t,n_forced*1)",
+        "-threads", "1", "-r", "10", "-g", "10", "-keyint_min", "10", "-sc_threshold", "0",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-ar", "48000",
-        "-f", "hls", "-hls_time", "2", "-hls_list_size", "8", "-hls_delete_threshold", "4",
+        "-f", "hls", "-hls_time", "1", "-hls_list_size", "10", "-hls_delete_threshold", "20",
         "-hls_allow_cache", "0", "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+temp_file",
         "-hls_segment_filename", str(segments), str(playlist),
     ]
 
 
 def safe_stub_media_file(game_id: str, filename: str) -> Path | None:
+    if filename == "stream.m3u8":
+        with _STUB_START_LOCK:
+            return _safe_stub_media_file(game_id, filename)
+    return _safe_stub_media_file(game_id, filename)
+
+
+def _safe_stub_media_file(game_id: str, filename: str) -> Path | None:
     _ensure_reaper()
     if game_id not in GAME_BY_ID or not re.fullmatch(r"(?:stream\.m3u8|segment_\d{6}\.ts)", str(filename or "")):
         return None

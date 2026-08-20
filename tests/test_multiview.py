@@ -59,6 +59,7 @@ def test_resume_auto_unlocks_side_panes_and_restores_weighted_layout():
 
 def test_ffmpeg_command_builds_one_by_three_layout(monkeypatch, tmp_path):
     monkeypatch.setattr(multiview, "ffmpeg_executable", lambda: "ffmpeg")
+    monkeypatch.setattr(multiview, "_ENCODER_ARGS", ("-c:v", "libx264"))
     command = multiview.ffmpeg_command(
         Path(tmp_path),
         ["one.m3u8", "two.m3u8", "three.m3u8", "four.m3u8"],
@@ -73,12 +74,33 @@ def test_ffmpeg_command_builds_one_by_three_layout(monkeypatch, tmp_path):
     assert command[map_positions[1] + 1] == "2:a:0"
 
 
+def test_multiview_auto_selects_nvenc_when_gpu_probe_succeeds(monkeypatch):
+    class Result:
+        returncode = 0
+
+    monkeypatch.setenv("M3U_MULTIVIEW_ENCODER", "auto")
+    monkeypatch.setattr(multiview, "_ENCODER_ARGS", None)
+    monkeypatch.setattr(multiview.subprocess, "run", lambda *args, **kwargs: Result())
+    assert multiview._video_encoder_args()[1] == "h264_nvenc"
+
+
+def test_multiview_falls_back_to_cpu_when_nvenc_probe_fails(monkeypatch):
+    class Result:
+        returncode = 1
+
+    monkeypatch.setenv("M3U_MULTIVIEW_ENCODER", "auto")
+    monkeypatch.setattr(multiview, "_ENCODER_ARGS", None)
+    monkeypatch.setattr(multiview.subprocess, "run", lambda *args, **kwargs: Result())
+    assert multiview._video_encoder_args()[1] == "libx264"
+
+
 def test_stub_channels_are_bounded_lightweight_inputs(monkeypatch, tmp_path):
     monkeypatch.setattr(multiview, "ffmpeg_executable", lambda: "ffmpeg")
     command = multiview.stub_ffmpeg_command(Path(tmp_path), multiview.GAME_BY_ID["wis-nd"])
     source = command[command.index("-i") + 1]
     assert source.startswith("color=")
     assert "s=640x360:r=10" in source
+    assert "-re" in command[: command.index("-i")]
     assert command[command.index("-threads") + 1] == "1"
 
 

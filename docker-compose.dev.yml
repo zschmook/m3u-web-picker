@@ -14,6 +14,10 @@ services:
 
     container_name: m3u-picker-dev
 
+    # Docker Desktop/WSL exposes the Dell's NVIDIA GPU to FFmpeg. The
+    # application still probes NVENC and falls back to libx264 if unavailable.
+    gpus: all
+
     ports:
       - "${M3U_DEV_HOST_PORT:-9998}:9999"
 
@@ -21,6 +25,8 @@ services:
       PYTHONUNBUFFERED: "1"
       M3U_ONBOARDING_ENABLED: "true"
       M3U_DEBUG_TOOLS: "true"
+      M3U_MULTIVIEW_ENCODER: "${M3U_MULTIVIEW_ENCODER:-auto}"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility,video"
       M3U_BACKUP_ENABLED: "true"
       M3U_DATA_DIR: /app/data
       M3U_LAN_HOST: "${M3U_LAN_HOST:-}"
