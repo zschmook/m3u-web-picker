@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Response, jsonify, render_template, request, send_file
 
 from media import browser
+from settings import load_settings
 from sports import multiview
 from .http import no_cache
 
@@ -23,6 +24,11 @@ def _media_response(path, filename: str):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["X-Accel-Buffering"] = "no"
     return response
+
+
+def _internal_stub_hls_url(game_id: str) -> str:
+    settings = load_settings()
+    return f"http://127.0.0.1:{settings.port}/sports/multiview/stub/{game_id}/stream.m3u8"
 
 
 def register_multiview_routes(app):
@@ -68,8 +74,7 @@ def register_multiview_routes(app):
     def multiview_stub_browser_playback(game_id: str):
         if game_id not in multiview.GAME_BY_ID:
             return no_cache(jsonify(error="Unknown test game")), 404
-        target = f'{request.host_url.rstrip("/")}/sports/multiview/stub/{game_id}/stream.m3u8'
-        return browser.response_for(target)
+        return browser.response_for(_internal_stub_hls_url(game_id))
 
     @app.route("/sports/multiview/stub/<game_id>/<filename>", methods=["GET", "HEAD", "OPTIONS"])
     def multiview_stub_media(game_id: str, filename: str):

@@ -130,3 +130,15 @@ def test_live_playlist_response_disables_conditional_caching(tmp_path):
     assert "ETag" not in response.headers
     assert "Last-Modified" not in response.headers
     assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
+
+
+def test_fifth_stream_uses_container_internal_port(monkeypatch):
+    from api import multiview as multiview_api
+
+    class Settings:
+        port = 9999
+
+    monkeypatch.setattr(multiview_api, "load_settings", lambda: Settings())
+    assert multiview_api._internal_stub_hls_url("bay-aub") == (
+        "http://127.0.0.1:9999/sports/multiview/stub/bay-aub/stream.m3u8"
+    )
