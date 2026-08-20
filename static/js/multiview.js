@@ -5,8 +5,9 @@
   const ticker = document.getElementById("scoreTicker");
   let state = null;
   let draggedId = "";
+  let publicPoll = null;
 
-  const slotName = (index) => index === 0 ? "PRIMARY · SUBSCRIBED" : `${index}${index === 1 ? "ST" : index === 2 ? "ND" : "RD"}`;
+  const slotName = (index) => state?.mode === "public" ? `${index + 1}${index === 0 ? "ST" : index === 1 ? "ND" : index === 2 ? "RD" : "TH"}` : index === 0 ? "PRIMARY · SUBSCRIBED" : `${index}${index === 1 ? "ST" : index === 2 ? "ND" : "RD"}`;
   const escapeHtml = (value) => String(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 
   async function patch(payload) {
@@ -20,9 +21,10 @@
   }
 
   function renderPane(pane, game, index) {
+    const publicMode = state.mode === "public";
     pane.innerHTML = `
       <div class="mv-pane-head"><span>${slotName(index)}</span><span>Weight ${game.weight}</span></div>
-      <div class="mv-game"><div class="mv-matchup">${escapeHtml(game.score_text)}</div><div class="mv-game-meta">${escapeHtml(game.status_text)} · ${escapeHtml(game.away)} @ ${escapeHtml(game.home)}</div></div>
+      <div class="mv-game"><div class="mv-matchup">${escapeHtml(game.score_text)}</div><div class="mv-game-meta">${escapeHtml(game.status_text)}${publicMode ? "" : ` · ${escapeHtml(game.away)} @ ${escapeHtml(game.home)}`}</div></div>
       <div class="mv-pane-actions"><button class="mv-audio ${state.audio_slot === index ? "mv-on" : ""}" type="button">${state.audio_slot === index ? "🔊 Audio" : "Audio"}</button><button class="mv-lock ${state.locked[index] ? "mv-locked" : ""}" type="button">${state.locked[index] ? "🔒 Locked" : "Lock"}</button></div>`;
     pane.querySelector(".mv-audio").addEventListener("click", () => patch({audio_slot:index}).catch(showError));
     pane.querySelector(".mv-lock").addEventListener("click", () => {
@@ -53,6 +55,9 @@
     root.querySelectorAll(".mv-pane").forEach((pane, index) => renderPane(pane, state.slots[index], index));
     renderTicker();
     document.getElementById("connectionStatus").textContent = `${state.connections.visible} visible · ${state.connections.spare} spare${state.active ? " · output active" : ""}`;
+    const publicButton = document.getElementById("publicSlate");
+    publicButton.textContent = state.public.scanning ? "Finding stations…" : state.mode === "public" ? "Refresh public TV" : "Load public TV";
+    publicButton.disabled = state.public.scanning;
   }
 
   function showError(error) { message.textContent = error.message || String(error); }
@@ -74,6 +79,28 @@
     try {
       const response = await fetch("/api/sports/multiview", {method:"POST"});
       state = await response.json(); render(); message.textContent = "Automatic Week 5 layout restored.";
+    } catch (error) { showError(error); }
+  });
+
+  async function refreshPublicState() {
+    const response = await fetch("/api/sports/multiview", {cache:"no-store"});
+    const data = await response.json();
+    state = data; render();
+    if (data.public.error) {
+      clearInterval(publicPoll); publicPoll = null;
+      message.textContent = `Public TV scan failed: ${data.public.error}`;
+    } else if (!data.public.scanning && data.mode === "public") {
+      clearInterval(publicPoll); publicPoll = null;
+      message.textContent = `Loaded ${data.public.count} working public stations. The multiview will switch on its next manifest refresh.`;
+    }
+  }
+
+  document.getElementById("publicSlate").addEventListener("click", async () => {
+    try {
+      await patch({mode:"public"});
+      message.textContent = "Testing public local stations in the background…";
+      if (publicPoll) clearInterval(publicPoll);
+      publicPoll = setInterval(() => refreshPublicState().catch(showError), 1500);
     } catch (error) { showError(error); }
   });
 

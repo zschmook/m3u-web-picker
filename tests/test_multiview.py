@@ -13,6 +13,7 @@ def restore_director_state():
         multiview._STATE.audio_slot = 0
         multiview._STATE.upset_ids = []
         multiview._STATE.revision = 1
+        multiview._STATE.mode = "dummy"
         multiview._SESSION = None
     yield
 
@@ -68,6 +69,10 @@ def test_ffmpeg_command_builds_one_by_three_layout(monkeypatch, tmp_path):
     graph = command[command.index("-filter_complex") + 1]
     assert "pad=1920:1080" in graph
     assert "overlay=x=1280:y=720" in graph
+    assert "scale=1280:1080:force_original_aspect_ratio=decrease" in graph
+    assert "pad=1280:1080:(ow-iw)/2:(oh-ih)/2:black" in graph
+    assert graph.count("fps=30,setpts=N/(30*TB)") == 4
+    assert command[command.index("-r") + 1] == "30"
     assert command[command.index("-filter_complex_threads") + 1] == "2"
     assert "64" in command
     map_positions = [index for index, value in enumerate(command) if value == "-map"]
@@ -102,6 +107,37 @@ def test_stub_channels_are_bounded_lightweight_inputs(monkeypatch, tmp_path):
     assert "s=640x360:r=10" in source
     assert "-re" in command[: command.index("-i")]
     assert command[command.index("-threads") + 1] == "1"
+
+
+def test_public_channel_proxy_uses_remote_stream_and_reconnects(monkeypatch, tmp_path):
+    monkeypatch.setattr(multiview, "ffmpeg_executable", lambda: "ffmpeg")
+    game = {"stream_url": "https://public.test/live.m3u8"}
+    command = multiview.stub_ffmpeg_command(Path(tmp_path), game)
+    assert command[command.index("-i") + 1] == game["stream_url"]
+    assert "-reconnect" in command
+    assert command[command.index("-c:v") + 1] == "copy"
+
+
+def test_public_playlist_parser_extracts_station_metadata():
+    from sports import multiview_public
+
+    rows = multiview_public._parse(
+        '#EXTM3U\n#EXTINF:-1 tvg-id="WXYZ.us" group-title="News",WXYZ Detroit MI\n'
+        'https://station.test/live.m3u8\n'
+    )
+    assert rows == [{
+        "name": "WXYZ Detroit MI",
+        "group": "News",
+        "tvg_id": "WXYZ.us",
+        "url": "https://station.test/live.m3u8",
+    }]
+
+
+def test_public_discovery_rejects_community_channels():
+    from sports import multiview_public
+
+    assert not multiview_public._eligible({"name": "Bumble County Community TV", "group": "Local"})
+    assert multiview_public._eligible({"name": "WXYZ Detroit MI", "group": "News"})
 
 
 def test_playlist_exposes_stable_jellyfin_channel():

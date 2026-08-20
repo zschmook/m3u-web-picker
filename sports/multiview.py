@@ -12,6 +12,7 @@ from pathlib import Path
 from media.ffmpeg import executable as ffmpeg_executable
 from media.ffmpeg import terminate
 from . import live_stats
+from . import multiview_public
 
 
 STREAM_PATH = "/sports/multiview/ncaa/stream.m3u8"
@@ -37,6 +38,12 @@ WEEK_5_GAMES = (
 
 GAME_BY_ID = {game["id"]: dict(game) for game in WEEK_5_GAMES}
 DEFAULT_SLOTS = ["ore-psu", "lsu-miss", "ala-uga", "usc-ill"]
+for _fallback_index in range(4):
+    GAME_BY_ID[f"public-fallback-{_fallback_index}"] = {
+        "id": f"public-fallback-{_fallback_index}", "away": "Finding replacement", "away_abbr": "WAIT",
+        "away_score": "", "home": "Public TV", "home_abbr": "", "home_score": "", "clock": "Retrying",
+        "period": "Public", "weight": 0, "color": "0x20344f", "fallback": True,
+    }
 
 
 @dataclass
@@ -46,6 +53,7 @@ class DirectorState:
     audio_slot: int = 0
     upset_ids: list[str] = field(default_factory=list)
     revision: int = 1
+    mode: str = "dummy"
 
 
 @dataclass
@@ -136,19 +144,29 @@ def _ensure_reaper() -> None:
 
 def _game_payload(game_id: str) -> dict:
     game = dict(GAME_BY_ID[game_id])
-    game["score_text"] = f'{game["away_abbr"]} {game["away_score"]} @ {game["home_score"]} {game["home_abbr"]}'
-    game["status_text"] = f'{game["clock"]} - {game["period"]}'
+    if game.get("stream_url"):
+        game["score_text"] = game["name"]
+        resolution = f'{game.get("width") or "?"}×{game.get("height") or "?"}'
+        game["status_text"] = f'{game.get("group") or "Public TV"} · {resolution}'
+    else:
+        game["score_text"] = f'{game["away_abbr"]} {game["away_score"]} @ {game["home_score"]} {game["home_abbr"]}'
+        game["status_text"] = f'{game["clock"]} - {game["period"]}'
     game["upset_alert"] = game_id in _STATE.upset_ids
     return game
 
 
 def state_payload() -> dict:
     with _LOCK:
-        state = DirectorState(list(_STATE.slots), list(_STATE.locked), _STATE.audio_slot, list(_STATE.upset_ids), _STATE.revision)
+        state = DirectorState(list(_STATE.slots), list(_STATE.locked), _STATE.audio_slot, list(_STATE.upset_ids), _STATE.revision, _STATE.mode)
         session = _SESSION
     selected = set(state.slots)
+    available_ids = [
+        game_id for game_id in GAME_BY_ID
+        if game_id.startswith("public-") == (state.mode == "public")
+        and not GAME_BY_ID[game_id].get("fallback")
+    ]
     ticker = sorted(
-        (_game_payload(game_id) for game_id in GAME_BY_ID if game_id not in selected),
+        (_game_payload(game_id) for game_id in available_ids if game_id not in selected),
         key=lambda game: (not game["upset_alert"], -int(game["weight"])),
     )
     return {
@@ -160,6 +178,8 @@ def state_payload() -> dict:
         "audio_slot": state.audio_slot,
         "ticker": ticker,
         "revision": state.revision,
+        "mode": state.mode,
+        "public": multiview_public.status(),
         "active": bool(session and session.process.poll() is None),
         "last_error": session.last_error if session else "",
         "connections": {"visible": 4, "spare": 1},
@@ -168,6 +188,12 @@ def state_payload() -> dict:
 
 def update_state(payload: dict) -> dict:
     global _SESSION
+    requested_mode = str(payload.get("mode") or "").strip().lower()
+    if requested_mode == "public":
+        multiview_public.start(_apply_public_channels)
+        return state_payload()
+    if requested_mode == "dummy":
+        return reset_state()
     with _LOCK:
         next_slots = list(_STATE.slots)
         next_locked = list(_STATE.locked)
@@ -221,10 +247,47 @@ def reset_state() -> dict:
         _STATE.locked = [True, False, False, False]
         _STATE.audio_slot = 0
         _STATE.upset_ids = []
+        _STATE.mode = "dummy"
         _STATE.revision += 1
         if not stream_changed and _SESSION is not None:
             _SESSION.revision = _STATE.revision
     return state_payload()
+
+
+def _apply_public_channels(channels: list[dict], error: str) -> None:
+    global _SESSION
+    if error or len(channels) < 5:
+        return
+    with _LOCK:
+        for game_id in tuple(GAME_BY_ID):
+            if game_id.startswith("public-") and not GAME_BY_ID[game_id].get("fallback"):
+                GAME_BY_ID.pop(game_id, None)
+        for channel in channels:
+            GAME_BY_ID[channel["id"]] = {
+                **channel,
+                "away": channel["name"], "away_abbr": "LIVE", "away_score": "",
+                "home": channel.get("group") or "Public TV", "home_abbr": "", "home_score": "",
+                "clock": "Live", "period": "Public", "color": "0x20344f",
+                "stream_url": channel["url"],
+            }
+        _STATE.slots = [channel["id"] for channel in channels[:4]]
+        _STATE.locked = [False, False, False, False]
+        _STATE.audio_slot = 0
+        _STATE.upset_ids = []
+        _STATE.mode = "public"
+        _STATE.revision += 1
+
+
+def _replace_failed_public_source(game_id: str, slot_index: int) -> str:
+    with _LOCK:
+        used = set(_STATE.slots)
+        replacement = next((
+            candidate_id for candidate_id, game in GAME_BY_ID.items()
+            if candidate_id.startswith("public-") and game.get("stream_url") and candidate_id not in used
+        ), f"public-fallback-{slot_index}")
+        _STATE.slots[slot_index] = replacement
+        _STATE.revision += 1
+        return replacement
 
 
 def _escape_drawtext(value: str) -> str:
@@ -240,10 +303,14 @@ def ffmpeg_command(directory: Path, input_targets: list[str], audio_slot: int) -
     for target in input_targets:
         command.extend(["-thread_queue_size", "64", "-threads", "1", "-i", str(target)])
     filters = (
-        "[0:v]scale=1280:1080,setsar=1[main];"
-        "[1:v]scale=640:360,setsar=1[one];"
-        "[2:v]scale=640:360,setsar=1[two];"
-        "[3:v]scale=640:360,setsar=1[three];"
+        "[0:v]fps=30,setpts=N/(30*TB),scale=1280:1080:force_original_aspect_ratio=decrease,"
+        "pad=1280:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1[main];"
+        "[1:v]fps=30,setpts=N/(30*TB),scale=640:360:force_original_aspect_ratio=decrease,"
+        "pad=640:360:(ow-iw)/2:(oh-ih)/2:black,setsar=1[one];"
+        "[2:v]fps=30,setpts=N/(30*TB),scale=640:360:force_original_aspect_ratio=decrease,"
+        "pad=640:360:(ow-iw)/2:(oh-ih)/2:black,setsar=1[two];"
+        "[3:v]fps=30,setpts=N/(30*TB),scale=640:360:force_original_aspect_ratio=decrease,"
+        "pad=640:360:(ow-iw)/2:(oh-ih)/2:black,setsar=1[three];"
         "[main]pad=1920:1080:0:0:black[canvas];"
         "[canvas][one]overlay=x=1280:y=0[first];"
         "[first][two]overlay=x=1280:y=360[second];"
@@ -256,7 +323,7 @@ def ffmpeg_command(directory: Path, input_targets: list[str], audio_slot: int) -
     ])
     command.extend(_video_encoder_args())
     command.extend([
-        "-r", "10", "-g", "10", "-keyint_min", "10", "-sc_threshold", "0",
+        "-r", "30", "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
         "-force_key_frames", "expr:gte(t,n_forced*1)", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000",
         "-f", "hls", "-hls_time", "1", "-hls_list_size", "10",
@@ -286,7 +353,7 @@ def _start_session() -> MultiviewSession:
         if _SESSION is not None and _SESSION.process.poll() is None and _SESSION.revision == _STATE.revision:
             _SESSION.last_access_monotonic = time.monotonic()
             return _SESSION
-        state = DirectorState(list(_STATE.slots), list(_STATE.locked), _STATE.audio_slot, list(_STATE.upset_ids), _STATE.revision)
+        state = DirectorState(list(_STATE.slots), list(_STATE.locked), _STATE.audio_slot, list(_STATE.upset_ids), _STATE.revision, _STATE.mode)
         old = _SESSION
     directory = _directory()
     # On first startup there is no timeline to preserve. During a director
@@ -296,10 +363,18 @@ def _start_session() -> MultiviewSession:
         shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True, exist_ok=True)
     input_targets: list[str] = []
-    for game_id in state.slots:
-        playlist = safe_stub_media_file(game_id, "stream.m3u8")
+    for slot_index, game_id in enumerate(state.slots):
+        try:
+            playlist = safe_stub_media_file(game_id, "stream.m3u8")
+        except RuntimeError:
+            if state.mode != "public":
+                raise
+            game_id = _replace_failed_public_source(game_id, slot_index)
+            state.slots[slot_index] = game_id
+            state.revision = _STATE.revision
+            playlist = safe_stub_media_file(game_id, "stream.m3u8")
         if playlist is None:
-            raise RuntimeError(f"Could not start generated test channel {game_id}")
+            raise RuntimeError(f"Could not start test channel {game_id}")
         input_targets.append(str(playlist))
     if old is not None:
         terminate(old.process)
@@ -351,6 +426,8 @@ def safe_media_file(filename: str) -> Path | None:
 
 
 def stub_ffmpeg_command(directory: Path, game: dict) -> list[str]:
+    if game.get("stream_url"):
+        return public_ffmpeg_command(directory, game)
     playlist = directory / "stream.m3u8"
     segments = directory / "segment_%06d.ts"
     label = _escape_drawtext(f'{game["away_abbr"]} {game["away_score"]}  @  {game["home_score"]} {game["home_abbr"]}')
@@ -372,6 +449,21 @@ def stub_ffmpeg_command(directory: Path, game: dict) -> list[str]:
         "-tune", "zerolatency", "-force_key_frames", "expr:gte(t,n_forced*1)",
         "-threads", "1", "-r", "10", "-g", "10", "-keyint_min", "10", "-sc_threshold", "0",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-ar", "48000",
+        "-f", "hls", "-hls_time", "1", "-hls_list_size", "10", "-hls_delete_threshold", "20",
+        "-hls_allow_cache", "0", "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+temp_file",
+        "-hls_segment_filename", str(segments), str(playlist),
+    ]
+
+
+def public_ffmpeg_command(directory: Path, game: dict) -> list[str]:
+    playlist = directory / "stream.m3u8"
+    segments = directory / "segment_%06d.ts"
+    return [
+        ffmpeg_executable(), "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-rw_timeout", "8000000", "-reconnect", "1", "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "2", "-i", str(game["stream_url"]),
+        "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-c:a", "aac",
+        "-b:a", "128k", "-ac", "2", "-ar", "48000",
         "-f", "hls", "-hls_time", "1", "-hls_list_size", "10", "-hls_delete_threshold", "20",
         "-hls_allow_cache", "0", "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+temp_file",
         "-hls_segment_filename", str(segments), str(playlist),
@@ -406,7 +498,7 @@ def _safe_stub_media_file(game_id: str, filename: str) -> Path | None:
         if old is not None:
             terminate(old.process)
         playlist = directory / "stream.m3u8"
-        deadline = time.monotonic() + STARTUP_TIMEOUT
+        deadline = time.monotonic() + (12.0 if GAME_BY_ID[game_id].get("stream_url") else STARTUP_TIMEOUT)
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError("Test game ffmpeg stopped before the stream became ready")
