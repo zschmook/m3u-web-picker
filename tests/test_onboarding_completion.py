@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import onboarding
@@ -72,3 +73,58 @@ def test_failed_initial_refresh_rearms_gate_for_explicit_retry(tmp_path: Path):
     retried = onboarding.get_state(db_path, provider_configured=True)
     assert "initial_refresh_error" not in retried["answers"]
     assert retried["answers"]["initial_refresh_in_progress"] is True
+
+
+def test_stale_initial_refresh_is_rearmed_when_worker_is_idle(tmp_path: Path):
+    db_path = tmp_path / "picker.db"
+    onboarding.update_state(db_path, provider_configured=True, current_step=7)
+    onboarding.mark_complete(db_path, provider_configured=True)
+    assert onboarding.claim_initial_refresh(db_path, provider_configured=True) is True
+
+    stale = (datetime.now().astimezone() - timedelta(minutes=1)).isoformat(timespec="seconds")
+    onboarding.update_state(
+        db_path,
+        provider_configured=True,
+        answers={"initial_refresh_claimed_at": stale},
+    )
+    recovered = onboarding.recover_stale_initial_refresh(
+        db_path,
+        provider_configured=True,
+        worker_running=False,
+    )
+
+    assert recovered["answers"]["initial_refresh_pending"] is True
+    assert recovered["answers"]["initial_refresh_in_progress"] is False
+    assert "Retry" in recovered["answers"]["initial_refresh_error"]
+
+
+def test_live_initial_refresh_claim_is_not_rearmed(tmp_path: Path):
+    db_path = tmp_path / "picker.db"
+    onboarding.update_state(db_path, provider_configured=True, current_step=7)
+    onboarding.mark_complete(db_path, provider_configured=True)
+    assert onboarding.claim_initial_refresh(db_path, provider_configured=True) is True
+
+    state = onboarding.recover_stale_initial_refresh(
+        db_path,
+        provider_configured=True,
+        worker_running=True,
+    )
+
+    assert state["answers"]["initial_refresh_in_progress"] is True
+    assert state["answers"]["initial_refresh_pending"] is False
+
+
+def test_fresh_idle_claim_gets_race_grace_period(tmp_path: Path):
+    db_path = tmp_path / "picker.db"
+    onboarding.update_state(db_path, provider_configured=True, current_step=7)
+    onboarding.mark_complete(db_path, provider_configured=True)
+    assert onboarding.claim_initial_refresh(db_path, provider_configured=True) is True
+
+    state = onboarding.recover_stale_initial_refresh(
+        db_path,
+        provider_configured=True,
+        worker_running=False,
+    )
+
+    assert state["answers"]["initial_refresh_in_progress"] is True
+    assert state["answers"]["initial_refresh_pending"] is False

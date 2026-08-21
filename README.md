@@ -76,6 +76,8 @@ The built-in TV Guide uses the curated lineup and Combined XMLTV output. The Dev
 
 For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. The host installers attempt to detect this automatically. On macOS source/Docker installs, `scripts/detect-lan-host.sh` prints the address on the default route.
 
+On Windows Docker installs, use `powershell -ExecutionPolicy Bypass -File scripts/docker-windows.ps1` to detect the active LAN IPv4 address, update `.env`, rebuild, and start the normal stack. Add `-CleanVolumes` only when intentionally resetting all persisted application data.
+
 ## Roku receiver
 
 M3U Web Picker includes its own Roku developer receiver so channels from the built-in TV Guide can be sent directly to a Roku on the same LAN. Multiple Roku devices can be discovered and saved, and saved devices are reconciled by stable device identity when their DHCP address changes.

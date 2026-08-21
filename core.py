@@ -118,6 +118,8 @@ PUBLIC_EPG_CODES = {code for code, _name in PUBLIC_EPG_REGISTRY}
 public_epg_enabled_codes: set[str] = {"US"}
 public_epg_state: dict[str, dict] = {}
 MAX_PUBLIC_EPG_COMPRESSED_BYTES = SETTINGS.max_public_epg_compressed_bytes
+PUBLIC_EPG_DOWNLOAD_TIMEOUT_SECONDS = 180
+PUBLIC_EPG_SOCKET_TIMEOUT_SECONDS = 30
 
 scheduler_started = False
 
@@ -2358,11 +2360,26 @@ def refresh_public_epg_source(country_code: str, *, force: bool = False, cancel_
         },
     )
     total = 0
+    deadline = time.monotonic() + PUBLIC_EPG_DOWNLOAD_TIMEOUT_SECONDS
     try:
-        with urllib.request.urlopen(request, timeout=180) as response, temp.open("wb") as output:
+        with urllib.request.urlopen(
+            request,
+            timeout=min(PUBLIC_EPG_SOCKET_TIMEOUT_SECONDS, PUBLIC_EPG_DOWNLOAD_TIMEOUT_SECONDS),
+        ) as response, temp.open("wb") as output:
             while True:
                 if cancel_check and cancel_check():
                     raise sports.ScanCancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Public EPG download exceeded the 180-second time limit.")
+                try:
+                    response.fp.raw._sock.settimeout(
+                        max(0.1, min(PUBLIC_EPG_SOCKET_TIMEOUT_SECONDS, remaining))
+                    )
+                except (AttributeError, OSError):
+                    # urllib wrappers used by tests/proxies may not expose the
+                    # socket; urlopen's bounded socket timeout still applies.
+                    pass
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break

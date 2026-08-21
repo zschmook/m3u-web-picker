@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from database import connect as connect_database
@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS app_onboarding (
     completed_at TEXT
 )
 """
+
+_INITIAL_REFRESH_STALE_GRACE = timedelta(seconds=15)
 
 
 def _enabled_value(value: str | None) -> bool:
@@ -274,6 +276,37 @@ def claim_initial_refresh(
         )
         conn.commit()
     return True
+
+
+def recover_stale_initial_refresh(
+    db_path: Path | str,
+    *,
+    provider_configured: bool,
+    worker_running: bool,
+) -> dict:
+    """Re-arm a persisted refresh claim after its worker has disappeared."""
+    state = get_state(db_path, provider_configured=provider_configured)
+    answers = state.get("answers") or {}
+    if worker_running or not bool(answers.get("initial_refresh_in_progress")):
+        return state
+
+    claimed_at = str(answers.get("initial_refresh_claimed_at") or "").strip()
+    try:
+        claimed = datetime.fromisoformat(claimed_at)
+        now = datetime.now().astimezone()
+        if claimed.tzinfo is None:
+            claimed = claimed.astimezone()
+        if now - claimed < _INITIAL_REFRESH_STALE_GRACE:
+            return state
+    except (TypeError, ValueError):
+        pass
+
+    return finish_initial_refresh(
+        db_path,
+        provider_configured=provider_configured,
+        success=False,
+        error="The first Master Update stopped before setup finished. Retry the first update.",
+    )
 
 
 def finish_initial_refresh(

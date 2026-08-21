@@ -22,16 +22,24 @@ def _provider_configured() -> bool:
 
 def _payload() -> dict:
     enabled = onboarding.onboarding_enabled()
+    provider_configured = _provider_configured()
+    state = onboarding.get_state(
+        core.DB_PATH,
+        provider_configured=provider_configured,
+    )
+    if enabled:
+        state = onboarding.recover_stale_initial_refresh(
+            core.DB_PATH,
+            provider_configured=provider_configured,
+            worker_running=bool(master_update_worker.payload().get("running")),
+        )
     return {
         "enabled": enabled,
         # Compatibility for the first wizard implementation. New UI code should
         # prefer `enabled`; older cached clients can continue to read this key.
         "dev_enabled": enabled,
-        "state": onboarding.get_state(
-            core.DB_PATH,
-            provider_configured=_provider_configured(),
-        ),
-        "provider_configured": _provider_configured(),
+        "state": state,
+        "provider_configured": provider_configured,
         "sports": {
             "settings": sports.get_settings(core.DB_PATH),
             "rules": sports.get_rules(core.DB_PATH),
