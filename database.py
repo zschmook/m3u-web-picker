@@ -7,9 +7,22 @@ from pathlib import Path
 def connect(db_path: Path | str) -> sqlite3.Connection:
     """Open the application database and ensure the core schema exists."""
     conn = sqlite3.connect(db_path, timeout=30)
-    conn.execute("PRAGMA foreign_keys = ON")
-    _ensure_core_schema(conn)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        _ensure_core_schema(conn)
+    except Exception:
+        conn.close()
+        raise
     return conn
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, statement: str) -> None:
+    """Run an ALTER TABLE ... ADD COLUMN, tolerating only "already exists"."""
+    try:
+        conn.execute(statement)
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
 
 
 def _ensure_core_schema(conn: sqlite3.Connection) -> None:
@@ -29,10 +42,7 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
         "ALTER TABLE selections ADD COLUMN sort_order INTEGER",
         "ALTER TABLE selections ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''",
     ):
-        try:
-            conn.execute(statement)
-        except sqlite3.OperationalError:
-            pass
+        _add_column_if_missing(conn, statement)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS custom_groups (
@@ -57,10 +67,7 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    try:
-        conn.execute("ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
+    _add_column_if_missing(conn, "ALTER TABLE group_channels ADD COLUMN tvg_id TEXT NOT NULL DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS roku_devices (

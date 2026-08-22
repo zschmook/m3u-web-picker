@@ -36,6 +36,40 @@ class MediaPipelineTests(unittest.TestCase):
                 media_pipeline.acquire_session("mpegts")
             media_pipeline.release_session(token)
 
+    def test_stale_hardware_encoder_choice_falls_back_to_cpu_when_no_longer_functional(self):
+        """A saved non-auto encoder must not outlive the environment it was validated in."""
+        result = {
+            "ok": True,
+            "hardware_available": False,
+            "active_encoder": media_pipeline.CPU_ENCODER,
+            "mode": "cpu",
+            "attempts": [
+                {"encoder": "h264_nvenc", "ok": False, "duration_seconds": 0.1, "error": "no device"},
+                {"encoder": media_pipeline.CPU_ENCODER, "ok": True, "duration_seconds": 0.1, "error": ""},
+            ],
+        }
+        with patch.object(
+            media_pipeline,
+            "settings",
+            return_value={**media_pipeline.DEFAULTS, "enabled": True, "encoder": "h264_nvenc"},
+        ), patch.object(media_pipeline, "capability_test", return_value=result):
+            self.assertEqual(media_pipeline.active_encoder(), media_pipeline.CPU_ENCODER)
+
+    def test_hardware_encoder_choice_is_honored_when_still_functional(self):
+        result = {
+            "ok": True,
+            "hardware_available": True,
+            "active_encoder": "h264_nvenc",
+            "mode": "hardware",
+            "attempts": [{"encoder": "h264_nvenc", "ok": True, "duration_seconds": 0.1, "error": ""}],
+        }
+        with patch.object(
+            media_pipeline,
+            "settings",
+            return_value={**media_pipeline.DEFAULTS, "enabled": True, "encoder": "h264_nvenc"},
+        ), patch.object(media_pipeline, "capability_test", return_value=result):
+            self.assertEqual(media_pipeline.active_encoder(), "h264_nvenc")
+
 
 if __name__ == "__main__":
     unittest.main()

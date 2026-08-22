@@ -14,6 +14,7 @@ from flask import Response, request
 
 import core
 import logo_registry
+import net_safety
 import sports
 
 
@@ -256,7 +257,7 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     }
     upstream_request = urllib.request.Request(url, headers=request_headers)
-    with urllib.request.urlopen(upstream_request, timeout=6) as upstream:
+    with net_safety.open_safely(upstream_request, timeout=6) as upstream:
         length = int(upstream.headers.get("Content-Length", "0") or 0)
         if length > MAX_LOGO_BYTES:
             raise ValueError("Logo is too large.")
@@ -266,9 +267,6 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
         content_type = _sniff_image_type(payload, upstream.headers.get("Content-Type", ""))
         if not payload or not content_type:
             raise ValueError("Upstream response is not an image.")
-        final_url = urllib.parse.urlsplit(upstream.geturl())
-        if final_url.scheme not in {"http", "https"}:
-            raise ValueError("Invalid logo redirect.")
         return payload, content_type
 
 

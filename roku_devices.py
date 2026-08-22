@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def _row_to_dict(row) -> dict:
 
 
 def list_saved(db_path: Path | str) -> list[dict]:
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         rows = conn.execute(
             """
             SELECT device_key, device_id, serial_number, name, model,
@@ -55,7 +56,7 @@ def get_saved(db_path: Path | str, key: str) -> dict | None:
     normalized = str(key or "").strip()
     if not normalized:
         return None
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         row = conn.execute(
             """
             SELECT device_key, device_id, serial_number, name, model,
@@ -88,7 +89,7 @@ def save_device(db_path: Path | str, host: str, info: dict) -> dict:
     if not values["host"]:
         raise ValueError("Roku device address is missing.")
 
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         conn.execute(
             """
             INSERT INTO roku_devices (
@@ -124,7 +125,7 @@ def remove_device(db_path: Path | str, key: str) -> bool:
     normalized = str(key or "").strip()
     if not normalized:
         return False
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         cursor = conn.execute("DELETE FROM roku_devices WHERE device_key = ?", (normalized,))
         conn.commit()
         return cursor.rowcount > 0

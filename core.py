@@ -1673,10 +1673,14 @@ def epg_public_url(source_id: str) -> str:
 
 def redact_url_credentials(value: str) -> str:
     text = str(value or "")
-    # Remove complete URL query values and common credential-bearing path
-    # segments from errors before they reach the browser or logs.
-    text = re.sub(r"([?&](?:username|user|password|pass|token|auth)=)[^&\s]+", r"\1REDACTED", text, flags=re.I)
-    text = re.sub(r"(https?://[^/\s]+)/(?:[^/\s]+)/(?:[^/\s]+)(/[^\s]*)", r"\1/REDACTED/REDACTED\2", text, flags=re.I)
+    # Collapse the entire path/query of any http(s) URL to a fixed placeholder
+    # before errors reach the browser or logs. Xtream panels embed credentials
+    # either in query parameters (get.php?username=...&password=...) or
+    # directly in the path (.../live/<user>/<pass>/<id>.ts), so redacting a
+    # fixed number of path segments or a fixed set of query keys reliably
+    # misses one shape or the other; collapsing everything after the host
+    # does not.
+    text = re.sub(r"(https?://[^/\s?#]+)[^\s]*", r"\1/REDACTED", text, flags=re.I)
     return text
 
 
@@ -2126,7 +2130,8 @@ def _public_epg_relevant_matchers() -> tuple[set[str], set[str]]:
     for channel in channels:
         channel_id = str(channel.get("tvg_id", "") or "").strip()
         name_values = [str(channel.get("tvg_name", "") or "").strip(), str(channel.get("name", "") or "").strip()]
-        is_manual = int(channel.get("id", -1) or -1) in selected_ids
+        provider_channel_id = channel.get("id")
+        is_manual = provider_channel_id is not None and int(provider_channel_id) in selected_ids
         text = " ".join([str(channel.get("group", "") or ""), *name_values])
         is_sports_candidate = bool(
             sports._team_feed_identity(channel)

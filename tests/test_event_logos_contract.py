@@ -19,7 +19,7 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertNotIn("refresh_schedule_api", source)
         self.assertNotIn("schedule_api_requests", source)
         self.assertIn("logo_registry.lookup", source)
-        self.assertIn("urllib.request.urlopen", source)
+        self.assertIn("net_safety.open_safely", source)
 
     def test_all_generated_matchup_feeds_use_event_logo(self):
         source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")

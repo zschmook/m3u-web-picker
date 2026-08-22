@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -94,7 +95,7 @@ def _ensure_state(
     *,
     provider_configured: bool,
 ) -> None:
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute("SELECT id FROM app_onboarding WHERE id = 1").fetchone()
         if row:
             return
@@ -124,7 +125,7 @@ def get_state(
     provider_configured: bool,
 ) -> dict:
     _ensure_state(db_path, provider_configured=provider_configured)
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             """
             SELECT required, completed, current_step, answers_json,
@@ -180,7 +181,7 @@ def update_state(
     answers: dict | None = None,
 ) -> dict:
     _ensure_state(db_path, provider_configured=provider_configured)
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             "SELECT current_step, answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()
@@ -212,7 +213,7 @@ def mark_complete(
 ) -> dict:
     _ensure_state(db_path, provider_configured=provider_configured)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             "SELECT completed, completed_at, answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()
@@ -251,7 +252,7 @@ def claim_initial_refresh(
     """Atomically claim the one-shot post-onboarding Master Update."""
     _ensure_state(db_path, provider_configured=provider_configured)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             "SELECT completed, answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()
@@ -319,7 +320,7 @@ def finish_initial_refresh(
     """Release or re-arm the first-run guide gate after the onboarding update."""
     _ensure_state(db_path, provider_configured=provider_configured)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             "SELECT answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()

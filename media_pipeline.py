@@ -149,9 +149,22 @@ def active_encoder() -> str:
         return CPU_ENCODER
     requested = current["encoder"]
     test = dict(_last_test) or capability_test()
-    if requested != "auto":
+    if requested == "auto":
+        return str(test.get("active_encoder") or CPU_ENCODER)
+    if requested == CPU_ENCODER:
+        return CPU_ENCODER
+    # A specific hardware encoder was requested, but that setting can outlive
+    # the environment it was validated in (e.g. the container moves to a host
+    # or compose file without GPU passthrough). Only honor it if the most
+    # recent functional test actually confirmed it still works here; otherwise
+    # ffmpeg would be launched with an encoder that fails to even initialize.
+    attempt = next(
+        (item for item in test.get("attempts", []) if item.get("encoder") == requested),
+        None,
+    )
+    if attempt and attempt.get("ok"):
         return requested
-    return str(test.get("active_encoder") or CPU_ENCODER)
+    return CPU_ENCODER
 
 
 def acquire_session(output: str) -> str:

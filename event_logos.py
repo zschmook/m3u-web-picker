@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 import logo_registry
+import net_safety
 from settings import load_settings
 
 
@@ -229,7 +230,7 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
             "Referer": "https://www.espn.com/" if "espn" in urllib.parse.urlsplit(url).netloc.casefold() else "",
         },
     )
-    with urllib.request.urlopen(request, timeout=6) as response:
+    with net_safety.open_safely(request, timeout=6) as response:
         length = int(response.headers.get("Content-Length", "0") or 0)
         if length > MAX_LOGO_BYTES:
             raise ValueError("Logo is too large.")
@@ -239,9 +240,6 @@ def _fetch_logo(url: str) -> tuple[bytes, str]:
         content_type = _sniff_image_type(payload, response.headers.get("Content-Type", ""))
         if not payload or not content_type:
             raise ValueError("Upstream response is not an image.")
-        final_url = urllib.parse.urlsplit(response.geturl())
-        if final_url.scheme not in {"http", "https"}:
-            raise ValueError("Invalid logo redirect.")
         return payload, content_type
 
 

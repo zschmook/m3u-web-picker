@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS master_update_runs (
 
 
 def _ensure_table(db_path: Path | str) -> None:
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         conn.execute(_TABLE_SQL)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_master_update_runs_finished ON master_update_runs(finished_at DESC)")
         conn.commit()
@@ -42,7 +43,7 @@ def record(
 ) -> None:
     _ensure_table(db_path)
     payload = json.dumps(details or {}, ensure_ascii=False, default=str)
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         conn.execute(
             """
             INSERT INTO master_update_runs
@@ -64,7 +65,7 @@ def record(
 
 def latest(db_path: Path | str) -> dict | None:
     _ensure_table(db_path)
-    with connect_database(db_path) as conn:
+    with closing(connect_database(db_path)) as conn:
         row = conn.execute(
             """
             SELECT id, started_at, finished_at, trigger, status,
