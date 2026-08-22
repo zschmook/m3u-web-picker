@@ -274,7 +274,7 @@ function render() {
 
   const savedMode = els.selectedOnly.checked;
   if (selectButton) selectButton.disabled = savedMode || manualVisible.length === 0;
-  if (clearButton) clearButton.disabled = savedMode || manualVisible.length === 0;
+  if (clearButton) clearButton.disabled = manualVisible.length === 0;
   if (showSelectedButton) {
     showSelectedButton.disabled = selected.size === 0 && !savedMode;
     showSelectedButton.classList.toggle("btn-success", savedMode);
