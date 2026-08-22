@@ -142,7 +142,7 @@ def get_state(
     return {
         "required": bool(row["required"]),
         "completed": bool(row["completed"]),
-        "current_step": min(7, max(1, int(row["current_step"] or 1))),
+        "current_step": min(8, max(1, int(row["current_step"] or 1))),
         "answers": _decode_answers(row["answers_json"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -191,7 +191,7 @@ def update_state(
             merged.update(answers)
         step = int(row["current_step"] or 1)
         if current_step is not None:
-            step = min(7, max(1, int(current_step)))
+            step = min(8, max(1, int(current_step)))
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         conn.execute(
             """
@@ -233,7 +233,7 @@ def mark_complete(
         conn.execute(
             """
             UPDATE app_onboarding
-            SET completed = 1, current_step = 7, answers_json = ?,
+            SET completed = 1, current_step = 8, answers_json = ?,
                 updated_at = ?, completed_at = ?
             WHERE id = 1
             """,

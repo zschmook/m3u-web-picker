@@ -10,6 +10,7 @@
 
 ### Remaining hardening
 
+1. Investigate the channel-picker issue discovered during FFmpeg/Jellyfin testing; capture exact reproduction steps after the current playback test.
 1. Add CI for Python tests and JavaScript syntax checks on pushes and pull requests.
 2. Replace the injected/legacy UI shell with the modern UI as the real application template.
 3. Close remaining SQLite connections explicitly, especially in onboarding paths used by Windows.

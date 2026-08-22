@@ -46,6 +46,9 @@
     const modernM3u = document.getElementById("uiM3uOutputUrl");
     if (modernM3u) modernM3u.value = `${base}/playlist/channels.m3u`;
 
+    const directM3u = document.getElementById("uiDirectM3uOutputUrl");
+    if (directM3u) directM3u.value = `${base}/playlist/channels.direct.m3u`;
+
     const modernEpg = document.getElementById("uiEpgOutputUrl");
     if (modernEpg) modernEpg.value = `${base}/epg/epg.xml`;
 

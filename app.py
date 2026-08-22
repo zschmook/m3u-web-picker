@@ -102,6 +102,7 @@ def index():
         '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
         '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
         '<script src="/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1"></script>\n'
+        '<script src="/static/js/ui_encoding_settings.js?v=encoding-settings-1"></script>\n'
         '<script src="/static/js/ui_sidebar_brand_links.js?v=sidebar-brand-links-1"></script>\n'
         '<script src="/static/js/update_lifecycle.js?v=update-lifecycle-1"></script>\n'
         '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'

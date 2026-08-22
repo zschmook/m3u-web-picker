@@ -38,6 +38,8 @@ The two normal client-facing outputs are:
 - M3U: `/playlist/channels.m3u`
 - Combined XMLTV: `/epg/epg.xml`
 
+When application-wide FFmpeg encoding is enabled under **Settings → Encoding**, the normal M3U routes every curated channel through Picker. The permanent fallback `/playlist/channels.direct.m3u` always bypasses Picker encoding. Enabling encoding runs a functional hardware test; when acceleration is unavailable, CPU fallback requires an explicit performance-risk acknowledgment.
+
 Sports-only output and additional diagnostic/status endpoints are also exposed by the application.
 
 ## Sports Automation

@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import media_pipeline
+
 
 def executable() -> str:
     configured = str(os.environ.get("M3U_FFMPEG", "") or "").strip()
@@ -26,6 +28,7 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
     Browser fMP4 and remote HLS intentionally share these settings so device
     adapters only choose their container/muxer details.
     """
+    encoder = media_pipeline.active_encoder()
     return [
         executable(),
         "-nostdin",
@@ -41,11 +44,8 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         "-map",
         "0:a:0?",
         "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-tune",
-        "zerolatency",
+        encoder,
+        *(["-preset", "ultrafast", "-tune", "zerolatency"] if encoder == "libx264" else []),
         "-pix_fmt",
         "yuv420p",
         *video_extra,

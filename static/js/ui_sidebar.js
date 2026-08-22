@@ -278,8 +278,35 @@
 
     const settings = makePage("settings", "Settings", "Manage optional integrations and application behavior after initial setup.");
     settings.innerHTML += `
+      <div class="ui-settings-tabs" role="tablist">
+        <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
+      </div>
       <div class="ui-settings-grid">
-        <section class="ui-modern-card ui-jellyfin-settings-card" aria-labelledby="uiJellyfinSettingsTitle">
+        <section class="ui-modern-card ui-settings-panel is-active" data-settings-panel-content="encoding" aria-labelledby="uiEncodingTitle">
+          <div class="ui-card-heading">
+            <div><span id="uiEncodingTitle">FFmpeg Encoding</span><small>Normalize every curated channel for browser, M3U, HDHomeRun, Roku, and Cast clients.</small></div>
+            <span class="ui-count-badge" id="uiEncodingBadge">Loading</span>
+          </div>
+          <div class="ui-settings-form">
+            <label class="ui-settings-toggle" for="uiEncodingEnabled">
+              <input id="uiEncodingEnabled" type="checkbox" role="switch">
+              <span><strong>Enable FFmpeg for all channels</strong><small>The normal M3U uses Picker encoding; the direct fallback M3U remains available.</small></span>
+            </label>
+            <div class="ui-settings-warning" id="uiEncodingWarning">Run the hardware check before enabling encoding.</div>
+            <label class="ui-settings-toggle" for="uiEncodingAcknowledge">
+              <input id="uiEncodingAcknowledge" type="checkbox" role="switch">
+              <span><strong>I understand the performance risk</strong><small>CPU fallback may buffer or fail, especially with multiple clients. Hardware acceleration can still be overloaded.</small></span>
+            </label>
+            <label class="ui-settings-field" for="uiEncodingEncoder"><span>Encoder</span><select id="uiEncodingEncoder" class="form-select"><option value="auto">Auto (recommended)</option><option value="h264_nvenc">NVIDIA NVENC</option><option value="h264_qsv">Intel Quick Sync</option><option value="h264_vaapi">VA-API</option><option value="libx264">CPU (libx264)</option></select></label>
+            <label class="ui-settings-field" for="uiEncodingMaxSessions"><span>Maximum simultaneous streams</span><input id="uiEncodingMaxSessions" class="form-control" type="number" min="1" max="16" value="2"></label>
+            <div class="ui-settings-runtime" id="uiEncodingRuntime">FFmpeg has not been checked yet.</div>
+            <div class="ui-output-summary"><div><span>Normal M3U</span><code>/playlist/channels.m3u</code></div><div><span>Always-direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
+            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiEncodingTest" type="button">Run Hardware Check</button><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
+            <div class="ui-settings-status" id="uiEncodingStatus" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+        <section class="ui-modern-card ui-jellyfin-settings-card ui-settings-panel" data-settings-panel-content="jellyfin" aria-labelledby="uiJellyfinSettingsTitle">
           <div class="ui-card-heading">
             <div><span id="uiJellyfinSettingsTitle">Jellyfin Cache Cleanup</span><small>Clear Jellyfin's mounted cache only after a successful Picker update.</small></div>
             <span class="ui-count-badge" id="uiJellyfinSettingsBadge">Loading</span>
@@ -315,6 +342,12 @@
       </div>`;
     root.appendChild(settings);
 
+    settings.querySelectorAll("[data-settings-panel]").forEach(button => button.addEventListener("click", () => {
+      const panel = button.dataset.settingsPanel;
+      settings.querySelectorAll("[data-settings-panel]").forEach(item => item.classList.toggle("is-active", item === button));
+      settings.querySelectorAll("[data-settings-panel-content]").forEach(item => item.classList.toggle("is-active", item.dataset.settingsPanelContent === panel));
+    }));
+
     const hdhrPanel = document.querySelector(".hdhr-support-panel");
     if (hdhrPanel) {
       el("uiHdhrDeviceSlot")?.appendChild(hdhrPanel);
@@ -343,6 +376,10 @@
             <div class="ui-output-copy-row">
               <label for="uiM3uOutputUrl">M3U Playlist</label>
               <div class="ui-copy-control"><input id="uiM3uOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiM3uOutputUrl">Copy</button></div>
+            </div>
+            <div class="ui-output-copy-row">
+              <label for="uiDirectM3uOutputUrl">Direct fallback M3U</label>
+              <div class="ui-copy-control"><input id="uiDirectM3uOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiDirectM3uOutputUrl">Copy</button></div>
             </div>
             <div class="ui-output-copy-row">
               <label for="uiEpgOutputUrl">Combined EPG</label>
@@ -513,6 +550,7 @@
   function openOutputsModal() {
     const outputs = state.status?.outputs || {m3u: "/playlist/channels.m3u", epg: "/epg/epg.xml"};
     el("uiM3uOutputUrl").value = `${location.origin}${outputs.m3u || "/playlist/channels.m3u"}`;
+    el("uiDirectM3uOutputUrl").value = `${location.origin}${outputs.m3u_direct || "/playlist/channels.direct.m3u"}`;
     el("uiEpgOutputUrl").value = `${location.origin}${outputs.epg || "/epg/epg.xml"}`;
     bootstrap.Modal.getOrCreateInstance(el("uiOutputsModal")).show();
   }
