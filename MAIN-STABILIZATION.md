@@ -6,9 +6,7 @@
 
 ### Priority 1 — Remote playback reliability
 
-1.1. Restore Roku manual IP/hostname entry alongside automatic discovery and saved devices. Distinguish a missing LAN relay configuration from a completed scan that found no Roku devices.
-
-1.2. Windows LAN relay configuration: resolved by writing `M3U_LAN_HOST` to `.env` and recreating the container, with Roku and Google Cast working afterward. The cross-platform Docker bootstrap now automates that path. Follow-up cleanup should correct stale localhost port guidance and keep configuration failures distinct from device-discovery failures.
+1.2. [x] Windows LAN relay configuration — resolved by writing `M3U_LAN_HOST` to `.env` and recreating the container. Roku and Google Cast were verified working afterward, and the cross-platform Docker bootstrap now automates that path.
 
 ### Remaining hardening
 
@@ -18,6 +16,10 @@
 4. Consolidate persisted application settings into the shared `data/config.json` document.
 5. Remove experimental branding and stale compatibility layers only after their callers are migrated and covered.
 6. Split oversized modules and tests (`core.py`, `static/js/app.js`, `static/js/ui_sidebar.js`, and `tests/test_sports.py`) along existing domain boundaries.
+
+## Deferred device work
+
+- Roku manual IP entry and multiple-device behavior are deferred until a Roku stick is available for end-to-end testing. When resumed, distinguish a missing LAN relay configuration from a completed scan that found no Roku devices.
 
 ## Global FFmpeg foundation
 
