@@ -53,6 +53,21 @@ class SharedMediaSessionTests(unittest.TestCase):
             terminate.assert_called_once_with(process)
             release.assert_called_once_with("pipeline")
 
+    def test_full_inactive_mpegts_subscriber_is_evicted(self):
+        process = Mock()
+        subscriber = mpegts.Subscriber(last_consumed_monotonic=10.0)
+        for _ in range(subscriber.output.maxsize):
+            subscriber.output.put_nowait(b"data")
+        stream = mpegts.SharedMpegtsStream("target", process, "pipeline", {"viewer": subscriber})
+        mpegts._STREAMS[stream.target] = stream
+
+        abandoned = mpegts._evict_stale_subscribers(
+            stream, 10.0 + mpegts.STALE_SUBSCRIBER_SECONDS
+        )
+
+        self.assertTrue(abandoned)
+        self.assertEqual(stream.subscribers, {})
+
 
 if __name__ == "__main__":
     unittest.main()

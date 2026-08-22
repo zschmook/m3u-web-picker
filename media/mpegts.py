@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -15,6 +16,13 @@ import media_pipeline
 _LOCK = threading.RLock()
 _STREAMS: dict[str, "SharedMpegtsStream"] = {}
 _END = object()
+STALE_SUBSCRIBER_SECONDS = 15.0
+
+
+@dataclass
+class Subscriber:
+    output: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=8))
+    last_consumed_monotonic: float = field(default_factory=time.monotonic)
 
 
 @dataclass
@@ -22,7 +30,7 @@ class SharedMpegtsStream:
     target: str
     process: subprocess.Popen
     pipeline_token: str
-    subscribers: dict[str, queue.Queue] = field(default_factory=dict)
+    subscribers: dict[str, Subscriber] = field(default_factory=dict)
     finished: bool = False
 
 
@@ -42,7 +50,8 @@ def _finish(stream: SharedMpegtsStream) -> None:
             _STREAMS.pop(stream.target, None)
         subscribers = list(stream.subscribers.values())
         stream.subscribers.clear()
-    for output in subscribers:
+    for subscriber in subscribers:
+        output = subscriber.output
         try:
             output.put_nowait(_END)
         except queue.Full:
@@ -55,6 +64,18 @@ def _finish(stream: SharedMpegtsStream) -> None:
     media_pipeline.release_session(stream.pipeline_token)
 
 
+def _evict_stale_subscribers(stream: SharedMpegtsStream, now: float) -> bool:
+    with _LOCK:
+        stale = [
+            subscriber_id for subscriber_id, subscriber in stream.subscribers.items()
+            if subscriber.output.full()
+            and now - subscriber.last_consumed_monotonic >= STALE_SUBSCRIBER_SECONDS
+        ]
+        for subscriber_id in stale:
+            stream.subscribers.pop(subscriber_id, None)
+        return not stream.subscribers and _STREAMS.get(stream.target) is stream
+
+
 def _broadcast(stream: SharedMpegtsStream) -> None:
     try:
         if stream.process.stdout is None:
@@ -63,9 +84,12 @@ def _broadcast(stream: SharedMpegtsStream) -> None:
             chunk = stream.process.stdout.read(64 * 1024)
             if not chunk:
                 break
+            if _evict_stale_subscribers(stream, time.monotonic()):
+                return
             with _LOCK:
                 subscribers = list(stream.subscribers.values())
-            for output in subscribers:
+            for subscriber in subscribers:
+                output = subscriber.output
                 try:
                     output.put_nowait(chunk)
                 except queue.Full:
@@ -80,7 +104,7 @@ def _broadcast(stream: SharedMpegtsStream) -> None:
         _finish(stream)
 
 
-def _subscribe(target: str) -> tuple[SharedMpegtsStream, str, queue.Queue]:
+def _subscribe(target: str) -> tuple[SharedMpegtsStream, str, Subscriber]:
     with _LOCK:
         stream = _STREAMS.get(target)
         created = False
@@ -98,11 +122,11 @@ def _subscribe(target: str) -> tuple[SharedMpegtsStream, str, queue.Queue]:
             _STREAMS[target] = stream
             created = True
         subscriber_id = uuid.uuid4().hex
-        output: queue.Queue = queue.Queue(maxsize=32)
-        stream.subscribers[subscriber_id] = output
+        subscriber = Subscriber()
+        stream.subscribers[subscriber_id] = subscriber
         if created:
             threading.Thread(target=_broadcast, args=(stream,), daemon=True).start()
-        return stream, subscriber_id, output
+        return stream, subscriber_id, subscriber
 
 
 def _unsubscribe(stream: SharedMpegtsStream, subscriber_id: str) -> None:
@@ -116,7 +140,7 @@ def _unsubscribe(stream: SharedMpegtsStream, subscriber_id: str) -> None:
 def response_for(target: str) -> Response:
     """Serve a shared per-channel MPEG-TS encoder to one downstream client."""
     try:
-        stream, subscriber_id, output = _subscribe(target)
+        stream, subscriber_id, subscriber = _subscribe(target)
     except RuntimeError as exc:
         return Response(f"MPEG-TS playback is unavailable: {exc}\n", status=503, content_type="text/plain; charset=utf-8")
     except OSError as exc:
@@ -129,11 +153,12 @@ def response_for(target: str) -> Response:
                 if callable(client_disconnected) and client_disconnected():
                     break
                 try:
-                    chunk = output.get(timeout=1.0)
+                    chunk = subscriber.output.get(timeout=1.0)
                 except queue.Empty:
                     continue
                 if chunk is _END:
                     break
+                subscriber.last_consumed_monotonic = time.monotonic()
                 yield chunk
         finally:
             _unsubscribe(stream, subscriber_id)
