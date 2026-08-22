@@ -40,6 +40,44 @@ The two normal client-facing outputs are:
 
 When application-wide FFmpeg encoding is enabled under **Settings → Encoding**, the normal M3U routes every curated channel through Picker. The permanent fallback `/playlist/channels.direct.m3u` always bypasses Picker encoding. Enabling encoding runs a functional hardware test; when acceleration is unavailable, CPU fallback requires an explicit performance-risk acknowledgment.
 
+### FFmpeg playback path
+
+```text
+IPTV PROVIDER
+|
++-- FFmpeg disabled
+|   `-- Direct provider stream
+|       `-- /playlist/channels.direct.m3u
+|
+`-- FFmpeg enabled
+    |
+    +-- Run encoder check
+    |   +-- Hardware works -> NVENC / QSV / VAAPI
+    |   `-- Hardware unavailable -> warning -> CPU libx264
+    |
+    `-- Client requests channel
+        |
+        +-- Browser / TV Guide
+        |   `-- FFmpeg -> fragmented MP4 -> browser player
+        |
+        +-- Jellyfin / HDHomeRun / encoded M3U client
+        |   `-- Same channel already encoded as MPEG-TS?
+        |       +-- Yes -> join shared stream
+        |       `-- No  -> provider -> FFmpeg -> shared MPEG-TS
+        |
+        `-- Roku / Chromecast
+            `-- Same channel already encoded as HLS?
+                +-- Yes -> reuse shared HLS session
+                `-- No  -> provider -> FFmpeg -> shared HLS
+
+SESSION CLEANUP
+|
++-- Another viewer remains -> keep FFmpeg/provider connection alive
+`-- Last viewer disconnects -> stop FFmpeg and close provider connection
+```
+
+Browser fragmented MP4, shared MPEG-TS, and shared HLS are separate output sessions. Clients using different output formats can therefore still open separate FFmpeg processes and provider connections for the same channel.
+
 Sports-only output and additional diagnostic/status endpoints are also exposed by the application.
 
 ## Sports Automation
