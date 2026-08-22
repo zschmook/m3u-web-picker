@@ -68,6 +68,11 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn("register_ui_status_routes", routes)
         self.assertIn("register_ui_status_routes(app)", routes)
 
+    def test_saved_channels_remain_visible_when_sd_catalog_filter_is_enabled(self):
+        script = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("const isSaved = selected.has(Number(channel.id));", script)
+        self.assertIn("excludeSd && !(selectedOnly && isSaved)", script)
+
 
 if __name__ == "__main__":
     unittest.main()

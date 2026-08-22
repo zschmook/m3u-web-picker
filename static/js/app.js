@@ -202,9 +202,13 @@ function filteredChannels() {
   const excludeSd = Boolean(els.excludeSdChannels?.checked);
 
   return channels.filter(channel => {
-    if (excludeSd && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
+    const isSaved = selected.has(Number(channel.id));
+    // Discovery filters must never make a saved channel impossible to remove.
+    // In Saved Channels mode, retain selected SD/low-bandwidth entries even
+    // when the normal catalog view hides them.
+    if (excludeSd && !(selectedOnly && isSaved) && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
     if (group && channel.group !== group) return false;
-    if (selectedOnly && !selected.has(Number(channel.id))) return false;
+    if (selectedOnly && !isSaved) return false;
     if (showGroupOnly && activeGroupSlug && !activeGroupMembers.has(channelKey(channel))) return false;
     if (query) {
       const haystack = `${channel.name} ${channel.group} ${channel.url} ${channel.sports_subtitle || ""}`.toLowerCase();
