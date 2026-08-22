@@ -664,9 +664,14 @@ function initializeCastApi() {
         } else if (ended) {
           guideState.cast.lastMediaUrl = "";
           stopCastRelay();
-          showLocalPlayer();
           updateCastStatus("Chromecast disconnected.");
-          if (guideState.currentChannel) {
+          if (guideState.roku.active) {
+            showRokuPlayer();
+            guideEls.playerMessage.textContent = `Chromecast disconnected. ${guideState.roku.deviceName || "Roku"} playback continues.`;
+          } else {
+            showLocalPlayer();
+          }
+          if (guideState.currentChannel && !guideState.roku.active) {
             guideEls.playerMessage.textContent = "Chromecast disconnected. Press Play to resume locally.";
           }
           renderGuide();

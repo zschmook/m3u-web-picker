@@ -272,11 +272,21 @@
       function finishCastDisconnectHandoff(id) {
         const pending = castDisconnectHandoff;
         if (!pending || pending.id !== id) return;
+        if (currentCastSession()) return;
         castDisconnectHandoff = null;
         if (!pending.channel) return;
-        if (currentCastSession()) return;
         if (!sameChannel(guideState.currentChannel, pending.channel)) return;
         playLocalChannel(pending.channel);
+      }
+
+      function resumeLocalAfterExternalCastDisconnect() {
+        const channel = guideState.currentChannel;
+        if (!channel || remoteTransitionBusy || guideState.roku.active) return;
+        window.setTimeout(() => {
+          if (currentCastSession() || remoteTransitionBusy || guideState.roku.active) return;
+          if (!sameChannel(guideState.currentChannel, channel)) return;
+          playLocalChannel(channel);
+        }, 0);
       }
 
       async function disconnectRokuToLocal() {
@@ -355,8 +365,11 @@
             event => {
               if (event.sessionState !== cast.framework.SessionState.SESSION_ENDED) return;
               const pending = castDisconnectHandoff;
-              if (!pending) return;
-              finishCastDisconnectHandoff(pending.id);
+              if (pending) {
+                finishCastDisconnectHandoff(pending.id);
+                return;
+              }
+              resumeLocalAfterExternalCastDisconnect();
             }
           );
           return;
