@@ -274,7 +274,12 @@ function render() {
 
   const savedMode = els.selectedOnly.checked;
   if (selectButton) selectButton.disabled = savedMode || manualVisible.length === 0;
-  if (clearButton) clearButton.disabled = manualVisible.length === 0;
+  if (clearButton) {
+    const canRemove = manualVisible.length > 0;
+    clearButton.disabled = !canRemove;
+    clearButton.classList.toggle("btn-outline-danger", canRemove);
+    clearButton.classList.toggle("btn-outline-secondary", !canRemove);
+  }
   if (showSelectedButton) {
     showSelectedButton.disabled = selected.size === 0 && !savedMode;
     showSelectedButton.classList.toggle("btn-success", savedMode);
