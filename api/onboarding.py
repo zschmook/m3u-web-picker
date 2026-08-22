@@ -5,6 +5,7 @@ from flask import jsonify, request
 import core
 import jellyfin_cache
 import master_update_worker
+import media_pipeline
 import onboarding
 import sports
 
@@ -46,6 +47,7 @@ def _payload() -> dict:
             "schedule_api": sports.schedule_api_status_payload(core.DB_PATH),
         },
         "jellyfin": jellyfin_cache.get_settings(core.DB_PATH),
+        "media_pipeline": media_pipeline.status(),
     }
 
 

@@ -31,8 +31,15 @@ fi
 "$INSTALL_DIR/scripts/detect-lan-host.sh" --write-env
 
 cd "$INSTALL_DIR"
-docker compose -f docker-compose.yml up -d --build --force-recreate
-docker compose -f docker-compose.yml ps
+compose_files="-f docker-compose.yml"
+if command -v nvidia-smi >/dev/null 2>&1 || command -v nvidia-smi.exe >/dev/null 2>&1; then
+  compose_files="$compose_files -f docker-compose.gpu.yml"
+  echo "NVIDIA GPU detected; requesting Docker GPU passthrough."
+fi
+# shellcheck disable=SC2086
+docker compose $compose_files up -d --build --force-recreate
+# shellcheck disable=SC2086
+docker compose $compose_files ps
 
 printf '\nM3U Web Picker is ready at http://localhost:9999\n'
 printf 'Installed in %s\n' "$INSTALL_DIR"

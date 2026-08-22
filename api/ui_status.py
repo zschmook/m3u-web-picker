@@ -6,6 +6,7 @@ import core
 import hdhr_config
 import master_update_reports
 import master_update_worker
+import media_pipeline
 import roku_devices
 import sports
 from media import hls
@@ -206,8 +207,10 @@ def ui_status_payload() -> dict:
         "update": _update_health(),
         "outputs": {
             "m3u": "/playlist/channels.m3u",
+            "m3u_direct": "/playlist/channels.direct.m3u",
             "epg": "/epg/epg.xml",
         },
+        "playback": media_pipeline.status(),
     }
 
 

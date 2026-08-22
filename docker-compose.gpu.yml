@@ -1,0 +1,5 @@
+services:
+  m3u-picker:
+    gpus: all
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: "compute,video,utility"

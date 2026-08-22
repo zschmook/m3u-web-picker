@@ -1054,3 +1054,4 @@ body {
     width: 100%;
   }
 }
+.ui-settings-tabs{display:flex;gap:.5rem;margin-bottom:1rem}.ui-settings-tab{border:1px solid var(--ui-border,#334155);background:transparent;color:inherit;border-radius:.5rem;padding:.55rem .9rem}.ui-settings-tab.is-active{background:#2563eb;border-color:#2563eb;color:#fff}.ui-settings-panel{display:none}.ui-settings-panel.is-active{display:block}

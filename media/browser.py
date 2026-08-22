@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import subprocess
 
-from flask import Response, stream_with_context
+from flask import Response, request, stream_with_context
 
 from .ffmpeg import normalized_live_input_args, terminate
+import media_pipeline
 
 
 def response_for(target: str) -> Response:
     """Transcode one curated IPTV stream to browser-friendly fragmented MP4."""
+    session_token = ""
     try:
+        session_token = media_pipeline.acquire_session("browser")
         command = normalized_live_input_args(target) + [
             "-f",
             "mp4",
@@ -19,9 +22,10 @@ def response_for(target: str) -> Response:
             "1000000",
             "pipe:1",
         ]
-    except RuntimeError:
+    except RuntimeError as exc:
+        media_pipeline.release_session(session_token)
         return Response(
-            "Browser playback is unavailable because ffmpeg is not installed.\n",
+            f"Browser playback is unavailable: {exc}\n",
             status=503,
             content_type="text/plain; charset=utf-8",
         )
@@ -34,17 +38,21 @@ def response_for(target: str) -> Response:
             bufsize=0,
         )
     except OSError as exc:
+        media_pipeline.release_session(session_token)
         return Response(
             f"Could not start ffmpeg: {exc}\n",
             status=502,
             content_type="text/plain; charset=utf-8",
         )
+    client_disconnected = request.environ.get("waitress.client_disconnected")
 
     def generate():
         try:
             if process.stdout is None:
                 return
             while True:
+                if callable(client_disconnected) and client_disconnected():
+                    break
                 chunk = process.stdout.read(64 * 1024)
                 if not chunk:
                     break
@@ -56,6 +64,7 @@ def response_for(target: str) -> Response:
                 except Exception:
                     pass
             terminate(process)
+            media_pipeline.release_session(session_token)
 
     response = Response(
         stream_with_context(generate()),

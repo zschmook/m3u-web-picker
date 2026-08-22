@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const STEP_COUNT = 7;
+  const STEP_COUNT = 8;
   const ctx = {
     payload: null,
     step: 1,
@@ -408,6 +408,11 @@
     }
   }
 
+  async function continueToEncoding() {
+    await saveProgress(8, {});
+    await render();
+  }
+
   async function chooseJellyfin(usingJellyfin) {
     setBusy(true, usingJellyfin ? "Configuring Jellyfin integration…" : "Leaving Jellyfin integration disabled…");
     try {
@@ -426,7 +431,7 @@
         render();
       } else {
         await saveProgress(7, {using_jellyfin: false, jellyfin_cache_cleanup: false});
-        completeSetup();
+        await continueToEncoding();
       }
     } catch (error) {
       setBusy(false);
@@ -537,12 +542,60 @@
           jellyfin_cache_cleanup: true,
           jellyfin_cache_path: hostPath,
         });
-        setStatus("Jellyfin cache path validated. Finishing setup…", "success");
-        await completeSetup();
+        setStatus("Jellyfin cache path validated. Continuing to encoding…", "success");
+        await continueToEncoding();
       } catch (error) {
         setBusy(false);
         setStatus(error.message, "error");
       }
+    });
+  }
+
+  function renderEncoding() {
+    const pipeline = ctx.payload?.media_pipeline || {};
+    const capability = pipeline.capability || {};
+    body().innerHTML = `
+      <h2>FFmpeg Encoding</h2>
+      <div class="dev-onboarding-help">Encoding can normalize every curated channel for browser, M3U, HDHomeRun, Roku, and Cast clients. Direct streaming is the safest default and encoding can be enabled later under Settings → Encoding.</div>
+      <div class="dev-onboarding-warning" id="devEncodingWarning">${capability.tested_at
+        ? (capability.hardware_available
+          ? `Hardware encoding passed using <code>${esc(capability.active_encoder)}</code>. Multiple simultaneous streams may still exceed this system's capacity.`
+          : "GPU acceleration was not detected or failed its test. CPU encoding may cause buffering or playback failures, especially with multiple clients.")
+        : "Run the hardware check before enabling FFmpeg encoding."}</div>
+      <label class="dev-onboarding-ack" for="devEncodingUnderstand">
+        <input id="devEncodingUnderstand" type="checkbox" role="switch">
+        <span><strong>I understand the performance risk</strong><br><span class="dev-onboarding-muted">Required before enabling application-wide encoding.</span></span>
+      </label>
+      <div class="dev-onboarding-summary">The direct fallback playlist always remains available at <code>/playlist/channels.direct.m3u</code>.</div>
+      <div class="dev-onboarding-actions"><button class="dev-onboarding-btn" id="devEncodingBack" type="button">Back</button><span></span><button class="dev-onboarding-btn" id="devEncodingTest" type="button">Run Hardware Check</button><button class="dev-onboarding-btn" id="devEncodingDirect" type="button">Keep Direct Streaming</button><button class="dev-onboarding-btn primary" id="devEncodingEnable" type="button" disabled>Enable Encoding</button></div>`;
+    const encodingAck = document.getElementById("devEncodingUnderstand");
+    const enableEncoding = document.getElementById("devEncodingEnable");
+    const syncEnableEncoding = () => { if (enableEncoding) enableEncoding.disabled = !encodingAck?.checked; };
+    encodingAck?.addEventListener("change", syncEnableEncoding);
+    syncEnableEncoding();
+    document.getElementById("devEncodingBack")?.addEventListener("click", async () => { await saveProgress(6, {}); render(); });
+    document.getElementById("devEncodingTest")?.addEventListener("click", async () => {
+      setBusy(true, "Testing FFmpeg and available encoders…");
+      try {
+        ctx.payload.media_pipeline = await api("/api/media-pipeline/test", {method: "POST"});
+        setBusy(false);
+        renderEncoding();
+      } catch (error) { setBusy(false); setStatus(error.message, "error"); }
+    });
+    document.getElementById("devEncodingDirect")?.addEventListener("click", async () => {
+      setBusy(true, "Saving direct-streaming preference…");
+      try {
+        await api("/api/media-pipeline", {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled: false})});
+        await completeSetup();
+      } catch (error) { setBusy(false); setStatus(error.message, "error"); }
+    });
+    enableEncoding?.addEventListener("click", async () => {
+      if (!encodingAck?.checked) { setStatus("Acknowledge the performance warning before enabling encoding.", "error"); return; }
+      setBusy(true, "Enabling FFmpeg encoding…");
+      try {
+        await api("/api/media-pipeline", {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled: true, warning_acknowledged: true, encoder: "auto"})});
+        await completeSetup();
+      } catch (error) { setBusy(false); setStatus(error.message, "error"); }
     });
   }
 
@@ -557,7 +610,8 @@
       else if (ctx.step === 4) renderSportsApiChoice();
       else if (ctx.step === 5) renderSportsApiInfo();
       else if (ctx.step === 6) renderJellyfinChoice();
-      else renderJellyfinCache();
+      else if (ctx.step === 7) renderJellyfinCache();
+      else renderEncoding();
       updateStepCount();
     } catch (error) {
       body().innerHTML = `

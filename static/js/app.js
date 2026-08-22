@@ -202,9 +202,13 @@ function filteredChannels() {
   const excludeSd = Boolean(els.excludeSdChannels?.checked);
 
   return channels.filter(channel => {
-    if (excludeSd && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
+    const isSaved = selected.has(Number(channel.id));
+    // Discovery filters must never make a saved channel impossible to remove.
+    // In Saved Channels mode, retain selected SD/low-bandwidth entries even
+    // when the normal catalog view hides them.
+    if (excludeSd && !(selectedOnly && isSaved) && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
     if (group && channel.group !== group) return false;
-    if (selectedOnly && !selected.has(Number(channel.id))) return false;
+    if (selectedOnly && !isSaved) return false;
     if (showGroupOnly && activeGroupSlug && !activeGroupMembers.has(channelKey(channel))) return false;
     if (query) {
       const haystack = `${channel.name} ${channel.group} ${channel.url} ${channel.sports_subtitle || ""}`.toLowerCase();
@@ -212,6 +216,12 @@ function filteredChannels() {
     }
     return true;
   });
+}
+
+function removableVisibleChannels() {
+  return filteredChannels().filter(channel =>
+    !isGeneratedSportsChannel(channel) && selected.has(Number(channel.id))
+  );
 }
 
 function rebuildProviderGroupFilter() {
@@ -259,9 +269,10 @@ function render() {
   const clearButton = document.getElementById("clearVisibleBtn");
   const showSelectedButton = document.getElementById("showSelectedBtn");
   const manualVisible = visible.filter(channel => !isGeneratedSportsChannel(channel));
+  const removableVisible = manualVisible.filter(channel => selected.has(Number(channel.id)));
 
   if (selectButton) selectButton.textContent = `Add all ${manualVisible.length}`;
-  if (clearButton) clearButton.textContent = `Remove all ${manualVisible.length}`;
+  if (clearButton) clearButton.textContent = `Remove all ${removableVisible.length}`;
   if (showSelectedButton) {
     showSelectedButton.textContent = els.selectedOnly.checked
       ? `Show all (${selected.size} saved)`
@@ -270,7 +281,12 @@ function render() {
 
   const savedMode = els.selectedOnly.checked;
   if (selectButton) selectButton.disabled = savedMode || manualVisible.length === 0;
-  if (clearButton) clearButton.disabled = savedMode || manualVisible.length === 0;
+  if (clearButton) {
+    const canRemove = removableVisible.length > 0;
+    clearButton.disabled = !canRemove;
+    clearButton.classList.toggle("btn-outline-danger", canRemove);
+    clearButton.classList.toggle("btn-outline-secondary", !canRemove);
+  }
   if (showSelectedButton) {
     showSelectedButton.disabled = selected.size === 0 && !savedMode;
     showSelectedButton.classList.toggle("btn-success", savedMode);
@@ -1134,11 +1150,11 @@ document.getElementById("selectVisibleBtn").addEventListener("click", () => {
 });
 
 document.getElementById("clearVisibleBtn").addEventListener("click", () => {
-  const visible = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel));
-  for (const channel of visible) selected.delete(Number(channel.id));
+  const removable = removableVisibleChannels();
+  for (const channel of removable) selected.delete(Number(channel.id));
   render();
   scheduleSaveSelected();
-  setStatus(`Removed ${visible.length} channels from current search.`);
+  setStatus(`Removed ${removable.length} channels from current search.`);
 });
 
 document.getElementById("showSelectedBtn").addEventListener("click", () => {

@@ -1,11 +1,55 @@
 from flask import Response, redirect, request, send_file
 
 import core
+import media_pipeline
 import public_epg_logos
 import sports
+from media import mpegts
 
 
 def register_output_routes(app):
+    def curated_playlist_text(*, encoded: bool) -> str:
+        lines = ["#EXTM3U"]
+        base_url = request.url_root.rstrip("/")
+        for number, channel in enumerate(core.selected_channels_from_selected_ids_in_order(), start=1):
+            raw = core.apply_channel_number(channel, number)
+            if not raw:
+                continue
+            key = core.channel_key(channel)
+            token = key.split(":", 1)[1] if key.startswith("manual:") else ""
+            raw[-1] = (
+                f"{base_url}/stream/channel/manual/{token}/mpegts"
+                if encoded and token else str(channel.get("url", "") or "")
+            )
+            lines.extend(raw)
+        for row in sports.generated_rows(core.DB_PATH):
+            raw = list(row.get("raw", []))
+            if not raw:
+                continue
+            number = int(row.get("assigned_number") or 0)
+            raw[-1] = (
+                f"{base_url}/stream/channel/sports/{number}/mpegts"
+                if encoded else str(row.get("url", "") or "")
+            )
+            lines.extend(raw)
+        return "\n".join(lines) + "\n"
+
+    def resolve_stream(kind: str, identity: str) -> str:
+        if kind == "manual":
+            return core.manual_stream_target(identity)
+        if kind == "sports" and str(identity).isdigit():
+            return sports.generated_stream_target(core.DB_PATH, int(identity))
+        return ""
+
+    @app.route("/stream/channel/<kind>/<identity>/mpegts", methods=["GET", "HEAD"])
+    def encoded_channel_stream(kind: str, identity: str):
+        target = resolve_stream(kind, identity)
+        if not target:
+            return Response("Channel stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        if request.method == "HEAD":
+            return Response(status=200, content_type="video/mp2t")
+        return mpegts.response_for(target)
+
     def serve_named_epg(source_id: str):
         source = core.find_epg_source(source_id)
         if not source:
@@ -96,24 +140,21 @@ def register_output_routes(app):
     @app.get("/playlist/custom.m3u")
     def playlist():
         guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
-        if not core.PLAYLIST_PATH.exists():
-            text = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"\n'
-        else:
-            text = core.PLAYLIST_PATH.read_text(encoding="utf-8-sig", errors="replace")
-            lines = text.splitlines()
-            header = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
-            if lines and lines[0].startswith("#EXTM3U"):
-                lines[0] = header
-            else:
-                lines.insert(0, header)
-            base_url = request.url_root.rstrip("/")
-            lines = [
-                f"{base_url}{line}" if line.startswith("/sports/stream/") else line
-                for line in lines
-            ]
-            text = "\n".join(lines) + "\n"
+        text = curated_playlist_text(encoded=media_pipeline.settings()["enabled"])
+        lines = text.splitlines()
+        lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
+        text = "\n".join(lines) + "\n"
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    @app.get("/playlist/channels.direct.m3u")
+    def playlist_direct():
+        guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
+        lines = curated_playlist_text(encoded=False).splitlines()
+        lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
+        response = Response(with_manual_epg_logos("\n".join(lines) + "\n"), mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 

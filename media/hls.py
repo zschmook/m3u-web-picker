@@ -10,6 +10,7 @@ from pathlib import Path
 
 from settings import SETTINGS
 from .ffmpeg import normalized_live_input_args, terminate
+import media_pipeline
 
 
 HLS_ROOT = SETTINGS.cast_hls_dir
@@ -18,15 +19,19 @@ CAST_ROOT = HLS_ROOT
 
 _LOCK = threading.RLock()
 _SESSIONS: dict[str, "HlsSession"] = {}
+_TARGETS: dict[str, str] = {}
+_REFERENCES: dict[str, int] = {}
 
 
 @dataclass
 class HlsSession:
     token: str
+    target: str
     directory: Path
     process: subprocess.Popen
     created_monotonic: float
     last_access_monotonic: float
+    pipeline_token: str
 
 
 # Backward-compatible name for callers from the original Chromecast-only experiment.
@@ -42,10 +47,19 @@ def _remove_session_files(directory: Path) -> None:
 
 def stop_session(token: str) -> bool:
     with _LOCK:
-        session = _SESSIONS.pop(str(token or ""), None)
+        key = str(token or "")
+        session = _SESSIONS.get(key)
+        if session is not None and _REFERENCES.get(key, 1) > 1:
+            _REFERENCES[key] -= 1
+            return True
+        session = _SESSIONS.pop(key, None)
+        _REFERENCES.pop(key, None)
+        if session is not None and _TARGETS.get(session.target) == key:
+            _TARGETS.pop(session.target, None)
     if session is None:
         return False
     terminate(session.process)
+    media_pipeline.release_session(session.pipeline_token)
     _remove_session_files(session.directory)
     return True
 
@@ -54,8 +68,11 @@ def stop_all_sessions() -> int:
     with _LOCK:
         sessions = list(_SESSIONS.values())
         _SESSIONS.clear()
+        _TARGETS.clear()
+        _REFERENCES.clear()
     for session in sessions:
         terminate(session.process)
+        media_pipeline.release_session(session.pipeline_token)
         _remove_session_files(session.directory)
     return len(sessions)
 
@@ -64,6 +81,8 @@ def _cleanup_dead_sessions() -> None:
     with _LOCK:
         dead = [token for token, session in _SESSIONS.items() if session.process.poll() is not None]
     for token in dead:
+        with _LOCK:
+            _REFERENCES[token] = 1
         stop_session(token)
 
 
@@ -77,12 +96,23 @@ def start_session(target: str, *, startup_timeout: float = 12.0) -> HlsSession:
     """
     if not str(target or "").strip():
         raise RuntimeError("Curated stream was not found.")
+    target = str(target).strip()
+    _cleanup_dead_sessions()
+    with _LOCK:
+        shared_token = _TARGETS.get(target)
+        shared = _SESSIONS.get(shared_token or "")
+        if shared is not None and shared.process.poll() is None:
+            _REFERENCES[shared.token] = _REFERENCES.get(shared.token, 1) + 1
+            shared.last_access_monotonic = time.monotonic()
+            return shared
+    pipeline_token = media_pipeline.acquire_session("hls")
     try:
         base_command = normalized_live_input_args(
             target,
             video_extra=("-force_key_frames", "expr:gte(t,n_forced*2)"),
         )
     except RuntimeError as exc:
+        media_pipeline.release_session(pipeline_token)
         # Keep the original user-facing error text while sharing ffmpeg setup.
         raise RuntimeError("Cast playback is unavailable because ffmpeg is not installed.") from exc
 
@@ -90,7 +120,6 @@ def start_session(target: str, *, startup_timeout: float = 12.0) -> HlsSession:
     # stream warms up. The sender tears the old relay down only after the
     # receiver successfully loads the new playlist, avoiding a dead-air gap on
     # channel switches. Clean dead/old experimental sessions opportunistically.
-    _cleanup_dead_sessions()
     with _LOCK:
         oldest = sorted(_SESSIONS.values(), key=lambda item: item.created_monotonic)[:-3]
     for old in oldest:
@@ -130,19 +159,24 @@ def start_session(target: str, *, startup_timeout: float = 12.0) -> HlsSession:
             bufsize=0,
         )
     except OSError as exc:
+        media_pipeline.release_session(pipeline_token)
         _remove_session_files(directory)
         raise RuntimeError(f"Could not start Cast ffmpeg: {exc}") from exc
 
     now = time.monotonic()
     session = HlsSession(
         token=token,
+        target=target,
         directory=directory,
         process=process,
         created_monotonic=now,
         last_access_monotonic=now,
+        pipeline_token=pipeline_token,
     )
     with _LOCK:
         _SESSIONS[token] = session
+        _TARGETS[target] = token
+        _REFERENCES[token] = 1
 
     deadline = time.monotonic() + max(1.0, startup_timeout)
     while time.monotonic() < deadline:
