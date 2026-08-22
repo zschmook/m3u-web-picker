@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
-import os
 import threading
 from pathlib import Path
 
+import app_config
 from settings import SETTINGS
 
 
-HDHR_CONFIG_PATH = Path(SETTINGS.data_dir) / "hdhr.json"
+HDHR_CONFIG_PATH = app_config.CONFIG_PATH
+LEGACY_HDHR_CONFIG_PATH = Path(SETTINGS.data_dir) / "hdhr.json"
 _LOCK = threading.RLock()
 
 
@@ -20,29 +20,20 @@ def is_enabled() -> bool:
     changes the switch, the explicit value is persisted across rebuilds.
     """
     with _LOCK:
-        if not HDHR_CONFIG_PATH.exists():
-            return True
-        try:
-            payload = json.loads(HDHR_CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return True
-        if not isinstance(payload, dict):
-            return True
-        return bool(payload.get("enabled", True))
+        settings = app_config.section("hdhr", path=HDHR_CONFIG_PATH)
+        if "enabled" in settings:
+            return bool(settings["enabled"])
+
+        # One-time compatibility migration from the original dedicated file.
+        if HDHR_CONFIG_PATH == app_config.CONFIG_PATH and LEGACY_HDHR_CONFIG_PATH.exists():
+            legacy = app_config.load(LEGACY_HDHR_CONFIG_PATH)
+            if "enabled" in legacy:
+                return set_enabled(bool(legacy["enabled"]))
+        return True
 
 
 def set_enabled(enabled: bool) -> bool:
     value = bool(enabled)
     with _LOCK:
-        HDHR_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        temporary = HDHR_CONFIG_PATH.with_name(f".{HDHR_CONFIG_PATH.name}.tmp")
-        temporary.write_text(
-            json.dumps({"enabled": value}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, HDHR_CONFIG_PATH)
-        try:
-            HDHR_CONFIG_PATH.chmod(0o600)
-        except OSError:
-            pass
+        app_config.update_section("hdhr", {"enabled": value}, path=HDHR_CONFIG_PATH)
     return value

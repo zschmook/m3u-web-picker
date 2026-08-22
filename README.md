@@ -2,39 +2,17 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v31**. Windows has a packaged Python-host installer, macOS has a convenience host installer, and Docker remains available for source-based installs.
-
-## Downloads
-
-Packaged installers are published through **GitHub Releases**. No Git checkout is required for either installer:
-
-- **Windows:** [Download `M3U-Web-Picker-Windows-Setup.exe`](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe) — Python/Waitress host runtime, private venv and FFmpeg, no Docker/WSL/Git required.
-- **macOS:** [Download `M3U-Web-Picker-macOS.dmg`](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — user-scoped host-Python installer with install/uninstall command files.
-- **Linux:** you're on your own. The Docker/source path is there if you want it.
-
-The installer packaging workflow is manual/release-triggered only; it does not run on every push.
-
-## Windows Python installer
-
-The Windows installer runs M3U Web Picker directly on the host with Python 3.12 + Waitress. Application state lives below `%LOCALAPPDATA%\M3U-Web-Picker`, outside the downloaded source tree. The installer can install Python 3.12 when needed, downloads a pinned FFmpeg build, creates a private virtual environment, registers startup/uninstall integration, and opens the setup wizard at `http://localhost:9999`.
-
-The implementation and build files live under `installer/windows-python/`.
-
-## macOS installer
-
-The macOS package installs the same host-Python runtime below `~/Library/Application Support/M3U-Web-Picker`, registers a per-user LaunchAgent, and opens the setup wizard on port 9999. If Homebrew is available it can install missing Python 3.12 and FFmpeg; otherwise it tells you which prerequisite is missing and exits.
-
-The implementation lives under `installer/macos/`.
+The current main line is **v31**. Docker is the supported runtime while the packaged installation workflows are being revised.
 
 ## Docker quick start
 
-Docker remains supported for people who prefer the containerized runtime. Git is used by the source-checkout workflow below; users without Git can download/extract the repository source and run the same Compose command from that directory.
+Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git.
 
 ```bash
-git clone https://github.com/zschmook/m3u-web-picker.git
-cd m3u-web-picker
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
 ```
+
+The script verifies Docker is running, downloads or updates M3U Web Picker in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, saves it in `.env`, and builds and starts the container. Existing application data is preserved. Set `M3U_PICKER_DIR` before running it to choose a different checkout location.
 
 Open `http://localhost:9999`.
 
@@ -74,9 +52,18 @@ Sports channel numbers are organized into stable league blocks. Generated channe
 
 The built-in TV Guide uses the curated lineup and Combined XMLTV output. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 
-For LAN discovery/casting, set `M3U_LAN_HOST` in a local `.env` file to the host computer's LAN IPv4 address. The host installers attempt to detect this automatically. On macOS source/Docker installs, `scripts/detect-lan-host.sh` prints the address on the default route.
+For LAN discovery and Roku/Google Cast playback, `M3U_LAN_HOST` must contain the Docker host computer's LAN IPv4 address.
 
-On Windows Docker installs, use `powershell -ExecutionPolicy Bypass -File scripts/docker-windows.ps1` to detect the active LAN IPv4 address, update `.env`, rebuild, and start the normal stack. Add `-CleanVolumes` only when intentionally resetting all persisted application data.
+From an existing checkout, Windows users can also open Git Bash and run:
+
+```bash
+cd /c/git/m3u-web-picker
+./scripts/docker-windows.sh
+```
+
+The helper uses the same all-in-one setup flow while keeping that checkout location. It detects the active Windows LAN address, writes it to `.env`, updates the checkout, rebuilds and recreates the normal container, and then shows its status. It preserves the application data volume.
+
+On macOS or Linux, `scripts/detect-lan-host.sh --write-env` updates `.env`; recreate the container afterward so it receives the new value.
 
 ## Roku receiver
 
@@ -125,8 +112,6 @@ For Docker, the cache directory must be explicitly mounted into the container wi
 
 ## Persistent data and backups
 
-For the Windows host installer, data and backups live under `%LOCALAPPDATA%\M3U-Web-Picker`. For the macOS host installer they live under `~/Library/Application Support/M3U-Web-Picker`.
-
 The normal Compose project is `m3u-picker` and stores application state in the `m3u-picker-data` Docker volume. `docker compose down` preserves the volume. `docker compose down -v` deletes it.
 
 Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
@@ -144,8 +129,6 @@ That stack uses host port `9998` and a separate `m3u-picker-dev-data` volume. Us
 
 ## Updating
 
-The Windows installer has an `--update` path. Re-running the macOS installer updates the source/dependencies while preserving its data directory.
-
 For a normal Docker/source checkout:
 
 ```bash
@@ -154,16 +137,6 @@ docker compose up -d --build
 ```
 
 Do not remove the data volume during a normal update.
-
-## Packaging installers
-
-`.github/workflows/package-installers.yml` builds the Windows EXE and macOS DMG. Open **Actions → Package installers → Run workflow** to start it manually from any machine.
-
-- Leave **release_tag** blank to build downloadable Actions artifacts only.
-- Enter a tag such as `v30.0` to create that GitHub Release if needed and upload/replace the Windows EXE and macOS DMG as permanent release assets.
-- Publishing a GitHub Release normally still triggers the same packaging workflow and attaches the installers automatically.
-
-The stable latest-release URLs used above always resolve to the installer files attached to the current latest GitHub Release.
 
 ## Tests
 

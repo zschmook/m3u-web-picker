@@ -12,18 +12,41 @@ from tools import hdhr_discovery_host
 class HdHomeRunSupportToggleTests(unittest.TestCase):
     def test_missing_toggle_state_preserves_existing_enabled_behavior(self):
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "hdhr.json"
+            path = Path(temp) / "config.json"
             with patch.object(hdhr_config, "HDHR_CONFIG_PATH", path):
                 self.assertTrue(hdhr_config.is_enabled())
 
     def test_toggle_state_persists(self):
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "hdhr.json"
+            path = Path(temp) / "config.json"
             with patch.object(hdhr_config, "HDHR_CONFIG_PATH", path):
                 self.assertFalse(hdhr_config.set_enabled(False))
                 self.assertFalse(hdhr_config.is_enabled())
                 self.assertTrue(hdhr_config.set_enabled(True))
                 self.assertTrue(hdhr_config.is_enabled())
+
+    def test_toggle_preserves_other_global_config_sections(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "config.json"
+            path.write_text('{"master_update": {"enabled": true}}', encoding="utf-8")
+            with patch.object(hdhr_config, "HDHR_CONFIG_PATH", path):
+                hdhr_config.set_enabled(False)
+
+            payload = hdhr_config.app_config.load(path)
+            self.assertEqual(payload["master_update"], {"enabled": True})
+            self.assertEqual(payload["hdhr"], {"enabled": False})
+
+    def test_legacy_toggle_file_migrates_into_global_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config_path = Path(temp) / "config.json"
+            legacy_path = Path(temp) / "hdhr.json"
+            legacy_path.write_text('{"enabled": false}', encoding="utf-8")
+            with patch.object(hdhr_config, "HDHR_CONFIG_PATH", config_path), patch.object(
+                hdhr_config, "LEGACY_HDHR_CONFIG_PATH", legacy_path
+            ), patch.object(hdhr_config.app_config, "CONFIG_PATH", config_path):
+                self.assertFalse(hdhr_config.is_enabled())
+
+            self.assertEqual(hdhr_config.app_config.section("hdhr", path=config_path), {"enabled": False})
 
     def test_host_discovery_helper_reads_web_toggle(self):
         response = MagicMock()

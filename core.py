@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 import sports
+import app_config
 from backup import create_database_backup
 from database import connect as connect_database
 from settings import SETTINGS
@@ -44,7 +45,7 @@ PUBLIC_EPG_DIR = DATA_DIR / "public_epg"
 PUBLIC_EPG_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "m3u_picker.db"
-CONFIG_PATH = DATA_DIR / "config.json"
+CONFIG_PATH = app_config.CONFIG_PATH
 MASTER_CACHE_PATH = DATA_DIR / "master_playlist_cache.m3u"
 EPG_CACHE_PATH = DATA_DIR / "epg_cache.xml"
 SPORTS_EPG_PATH = EXPORT_DIR / "sports.xml"
@@ -680,12 +681,7 @@ def unique_provider_id(name: str) -> str:
 
 
 def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        return {}
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return app_config.load(CONFIG_PATH)
 
 
 def _canonical_master_time(value) -> str:
@@ -774,14 +770,7 @@ def save_config() -> None:
         "epg_sources": epg_sources,
         "provider_sources": provider_sources,
     }
-    atomic_write_text(CONFIG_PATH, json.dumps(data, indent=2))
-    try:
-        CONFIG_PATH.chmod(0o600)
-    except OSError:
-        # Some mounted filesystems (notably Windows-backed Docker volumes) do
-        # not support POSIX mode changes. The configuration is still kept out
-        # of every browser/API payload.
-        pass
+    app_config.update(data, path=CONFIG_PATH)
 
 
 def restore_config() -> None:

@@ -271,6 +271,85 @@ body {
   margin-top: 12px;
 }
 
+.ui-settings-grid {
+  display: grid;
+  max-width: 860px;
+}
+
+.ui-settings-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.ui-settings-field {
+  display: grid;
+  gap: 7px;
+  color: #dfe6ef;
+  font-size: 0.8rem;
+  font-weight: 680;
+}
+
+.ui-settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #eef3f9;
+  cursor: pointer;
+}
+
+.ui-settings-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--ui-accent);
+}
+
+.ui-settings-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.ui-settings-toggle small,
+.ui-settings-runtime {
+  color: var(--ui-muted);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.ui-settings-warning,
+.ui-settings-runtime {
+  padding: 12px 14px;
+  border: 1px solid rgba(240, 184, 75, 0.2);
+  border-radius: 10px;
+  background: rgba(240, 184, 75, 0.07);
+  color: #d9c49a;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.ui-settings-runtime {
+  border-color: var(--ui-border);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--ui-muted);
+}
+
+.ui-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ui-settings-status {
+  min-height: 20px;
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+}
+
+.ui-settings-status.is-success { color: var(--ui-success); }
+.ui-settings-status.is-error { color: var(--ui-danger); }
+.ui-count-badge.is-enabled { color: var(--ui-success); }
+
 .btn.ui-btn-primary,
 .btn.ui-btn-secondary,
 .ui-modern-root .btn {

@@ -3,7 +3,7 @@
 
   if (document.getElementById("uiAppShell")) return;
 
-  const PAGE_IDS = ["overview", "providers", "channels", "epg", "sports", "devices"];
+  const PAGE_IDS = ["overview", "providers", "channels", "epg", "sports", "devices", "settings"];
   const state = {
     status: null,
     activePage: "overview",
@@ -26,6 +26,7 @@
     epg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v13H4zM8 3v6M16 3v6M4 10h16"/></svg>',
     sports: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8M16 8l-8 8"/></svg>',
     devices: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></svg>',
     external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 13v6H5V5h6"/></svg>',
   };
 
@@ -85,6 +86,7 @@
         ${navButton("epg", "EPG")}
         ${navButton("sports", "Sports Automation")}
         ${navButton("devices", "Devices")}
+        ${navButton("settings", "Settings")}
       </nav>
       <div class="ui-side-links">
         <a href="/guide">${icons.external}<span>TV Guide</span></a>
@@ -273,6 +275,45 @@
     devices.appendChild(devicesGrid);
     if (sportsCard?.parentNode) sportsCard.parentNode.insertBefore(devices, sportsCard.nextSibling);
     else root.appendChild(devices);
+
+    const settings = makePage("settings", "Settings", "Manage optional integrations and application behavior after initial setup.");
+    settings.innerHTML += `
+      <div class="ui-settings-grid">
+        <section class="ui-modern-card ui-jellyfin-settings-card" aria-labelledby="uiJellyfinSettingsTitle">
+          <div class="ui-card-heading">
+            <div><span id="uiJellyfinSettingsTitle">Jellyfin Cache Cleanup</span><small>Clear Jellyfin's mounted cache only after a successful Picker update.</small></div>
+            <span class="ui-count-badge" id="uiJellyfinSettingsBadge">Loading</span>
+          </div>
+          <div class="ui-settings-form">
+            <label class="ui-settings-toggle" for="uiJellyfinUsing">
+              <input id="uiJellyfinUsing" type="checkbox" role="switch">
+              <span><strong>I use Jellyfin</strong><small>Keep this integration available in the normal app.</small></span>
+            </label>
+            <label class="ui-settings-field" for="uiJellyfinCachePath">
+              <span>Local Jellyfin cache directory</span>
+              <input id="uiJellyfinCachePath" class="form-control" autocomplete="off" placeholder="C:\\path\\to\\Jellyfin\\cache">
+            </label>
+            <div class="ui-settings-warning">
+              Cache cleanup may affect cached information for downloaded movies, downloaded TV shows, and DVR recordings. The path must match the directory mounted into the container through <code>M3U_JELLYFIN_CACHE_DIR</code>.
+            </div>
+            <label class="ui-settings-toggle" for="uiJellyfinAcknowledge">
+              <input id="uiJellyfinAcknowledge" type="checkbox" role="switch">
+              <span><strong>I understand the risks</strong><small>Required before automatic cleanup can be enabled.</small></span>
+            </label>
+            <label class="ui-settings-toggle" for="uiJellyfinCleanupEnabled">
+              <input id="uiJellyfinCleanupEnabled" type="checkbox" role="switch">
+              <span><strong>Clear cache after successful updates</strong><small>Never runs after a failed update.</small></span>
+            </label>
+            <div class="ui-settings-runtime" id="uiJellyfinRuntime">Loading mount status…</div>
+            <div class="ui-settings-actions">
+              <button class="btn ui-btn-secondary" id="uiJellyfinValidate" type="button">Validate Path</button>
+              <button class="btn ui-btn-primary" id="uiJellyfinSave" type="button">Save Settings</button>
+            </div>
+            <div class="ui-settings-status" id="uiJellyfinStatus" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+      </div>`;
+    root.appendChild(settings);
 
     const hdhrPanel = document.querySelector(".hdhr-support-panel");
     if (hdhrPanel) {

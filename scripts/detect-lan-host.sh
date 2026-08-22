@@ -24,6 +24,10 @@ detect_lan_host() {
     Linux)
       private_ipv4_from_linux_route || true
       ;;
+    MINGW*|MSYS*|CYGWIN*)
+      route.exe print -4 2>/dev/null \
+        | awk '$1 == "0.0.0.0" && $2 == "0.0.0.0" {print $4; exit}'
+      ;;
     *)
       return 1
       ;;

@@ -5,6 +5,7 @@ import re
 import shutil
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -162,7 +163,7 @@ def validate_host_path(host_path: str, *, write_probe: bool = True) -> dict:
 
 
 def get_settings(db_path: Path | str) -> dict:
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         row = conn.execute(
             """
             SELECT using_jellyfin, cleanup_enabled, acknowledged, host_path,
@@ -211,7 +212,7 @@ def update_settings(
             raise ValueError(str(validation.get("message") or "Jellyfin cache path is not valid."))
 
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         conn.execute(
             """
             UPDATE jellyfin_cache_settings
@@ -233,7 +234,7 @@ def _record_cleanup(
     deleted_entries: int,
 ) -> None:
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         conn.execute(
             """
             UPDATE jellyfin_cache_settings

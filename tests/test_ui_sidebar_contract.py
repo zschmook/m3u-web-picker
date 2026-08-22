@@ -12,6 +12,7 @@ class ModernUiContractTests(unittest.TestCase):
         app_text = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn('/static/css/ui_sidebar.css?v=sidebar-1', app_text)
         self.assertIn('/static/js/ui_sidebar.js?v=sidebar-1', app_text)
+        self.assertIn('/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1', app_text)
         self.assertGreater(
             app_text.index('/static/js/ui_sidebar.js?v=sidebar-1'),
             app_text.index('/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1'),
@@ -26,6 +27,7 @@ class ModernUiContractTests(unittest.TestCase):
             "EPG",
             "Sports Automation",
             "Devices",
+            "Settings",
             "All Channels",
             "Indexed Channels",
             "Sports Channels",
@@ -34,6 +36,17 @@ class ModernUiContractTests(unittest.TestCase):
             "Update status",
         ):
             self.assertIn(label, script)
+
+    def test_jellyfin_cache_can_be_managed_after_onboarding(self):
+        sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
+        settings = (ROOT / "static/js/ui_jellyfin_settings.js").read_text(encoding="utf-8")
+        onboarding = (ROOT / "static/js/onboarding.js").read_text(encoding="utf-8")
+
+        self.assertIn("Jellyfin Cache Cleanup", sidebar)
+        self.assertIn("uiJellyfinCleanupEnabled", sidebar)
+        self.assertIn('api("/api/jellyfin-cache"', settings)
+        self.assertIn('api("/api/jellyfin-cache/validate"', settings)
+        self.assertIn("Jellyfin Cache Directory", onboarding)
 
     def test_ui_status_exposes_sidebar_counts_and_output_health(self):
         source = (ROOT / "api/ui_status.py").read_text(encoding="utf-8")
