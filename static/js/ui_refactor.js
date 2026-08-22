@@ -224,7 +224,7 @@
         }
         event.preventDefault();
         event.stopImmediatePropagation();
-        const count = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel)).length;
+        const count = removableVisibleChannels().length;
         if (!count || !window.confirm(`Remove all ${count} visible manual channels from the saved playlist?`)) return;
         bypass = true;
         removeAll.click();

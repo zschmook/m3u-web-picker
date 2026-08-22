@@ -74,6 +74,8 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn("excludeSd && !(selectedOnly && isSaved)", script)
         self.assertIn("clearButton.disabled = !canRemove;", script)
         self.assertIn('clearButton.classList.toggle("btn-outline-danger", canRemove);', script)
+        self.assertIn("const canRemove = removableVisible.length > 0;", script)
+        self.assertIn("const removable = removableVisibleChannels();", script)
 
 
 if __name__ == "__main__":

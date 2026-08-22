@@ -218,6 +218,12 @@ function filteredChannels() {
   });
 }
 
+function removableVisibleChannels() {
+  return filteredChannels().filter(channel =>
+    !isGeneratedSportsChannel(channel) && selected.has(Number(channel.id))
+  );
+}
+
 function rebuildProviderGroupFilter() {
   const current = els.groupFilter.value;
   const groups = [...new Set(channels.map(channel => channel.group).filter(Boolean))]
@@ -263,9 +269,10 @@ function render() {
   const clearButton = document.getElementById("clearVisibleBtn");
   const showSelectedButton = document.getElementById("showSelectedBtn");
   const manualVisible = visible.filter(channel => !isGeneratedSportsChannel(channel));
+  const removableVisible = manualVisible.filter(channel => selected.has(Number(channel.id)));
 
   if (selectButton) selectButton.textContent = `Add all ${manualVisible.length}`;
-  if (clearButton) clearButton.textContent = `Remove all ${manualVisible.length}`;
+  if (clearButton) clearButton.textContent = `Remove all ${removableVisible.length}`;
   if (showSelectedButton) {
     showSelectedButton.textContent = els.selectedOnly.checked
       ? `Show all (${selected.size} saved)`
@@ -275,7 +282,7 @@ function render() {
   const savedMode = els.selectedOnly.checked;
   if (selectButton) selectButton.disabled = savedMode || manualVisible.length === 0;
   if (clearButton) {
-    const canRemove = manualVisible.length > 0;
+    const canRemove = removableVisible.length > 0;
     clearButton.disabled = !canRemove;
     clearButton.classList.toggle("btn-outline-danger", canRemove);
     clearButton.classList.toggle("btn-outline-secondary", !canRemove);
@@ -1143,11 +1150,11 @@ document.getElementById("selectVisibleBtn").addEventListener("click", () => {
 });
 
 document.getElementById("clearVisibleBtn").addEventListener("click", () => {
-  const visible = filteredChannels().filter(channel => !isGeneratedSportsChannel(channel));
-  for (const channel of visible) selected.delete(Number(channel.id));
+  const removable = removableVisibleChannels();
+  for (const channel of removable) selected.delete(Number(channel.id));
   render();
   scheduleSaveSelected();
-  setStatus(`Removed ${visible.length} channels from current search.`);
+  setStatus(`Removed ${removable.length} channels from current search.`);
 });
 
 document.getElementById("showSelectedBtn").addEventListener("click", () => {
