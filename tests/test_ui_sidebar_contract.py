@@ -38,6 +38,17 @@ class ModernUiContractTests(unittest.TestCase):
         ):
             self.assertIn(label, script)
 
+    def test_documentation_links_live_on_overview_not_sidebar(self):
+        sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
+        brand_links = (ROOT / "static/js/ui_sidebar_brand_links.js").read_text(encoding="utf-8")
+        sidebar_links = sidebar[sidebar.index('<div class="ui-side-links">'):sidebar.index("</div>", sidebar.index('<div class="ui-side-links">'))]
+        self.assertNotIn("User Guide", sidebar_links)
+        self.assertNotIn("GitHub", sidebar_links)
+        self.assertIn("ui-overview-resource-links", sidebar)
+        self.assertIn('href="/user-guide"', sidebar)
+        self.assertIn("https://github.com/zschmook/m3u-web-picker", sidebar)
+        self.assertNotIn("uiGithubLink", brand_links)
+
     def test_jellyfin_cache_can_be_managed_after_onboarding(self):
         sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
         settings = (ROOT / "static/js/ui_jellyfin_settings.js").read_text(encoding="utf-8")

@@ -90,7 +90,6 @@
       </nav>
       <div class="ui-side-links">
         <a href="/guide">${icons.external}<span>TV Guide</span></a>
-        <a href="/user-guide" target="_blank" rel="noopener">${icons.external}<span>User Guide</span></a>
       </div>
       <section class="ui-system-card" aria-labelledby="uiSystemStatusTitle">
         <div class="ui-system-card-heading">
@@ -241,6 +240,10 @@
           <div><span>Combined EPG</span><code>/epg/epg.xml</code></div>
         </div>
         <button class="btn ui-btn-secondary" id="uiOverviewOutputsBtn" type="button">Open Outputs</button>
+        <div class="ui-overview-resource-links">
+          <a href="/user-guide" target="_blank" rel="noopener">${icons.external}<span>User Guide</span></a>
+          <a href="https://github.com/zschmook/m3u-web-picker" target="_blank" rel="noopener noreferrer">${icons.external}<span>GitHub</span></a>
+        </div>
       </section>`;
     overview.appendChild(overviewGrid);
     const firstPage = providerCard || epgPage || channelShell || sportsCard;

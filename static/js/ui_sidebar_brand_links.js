@@ -1,9 +1,6 @@
 (() => {
   "use strict";
 
-  const REPO_URL = "https://github.com/zschmook/m3u-web-picker";
-  const externalIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 13v6H5V5h6"/></svg>';
-
   function openOverview() {
     const overview = document.querySelector('[data-ui-page-target="overview"]');
     if (overview) overview.click();
@@ -12,7 +9,6 @@
 
   function install() {
     const brand = document.querySelector(".ui-sidebar-brand");
-    const links = document.querySelector(".ui-side-links");
 
     if (brand && !brand.dataset.uiHomeBound) {
       brand.dataset.uiHomeBound = "true";
@@ -29,17 +25,7 @@
       });
     }
 
-    if (links && !document.getElementById("uiGithubLink")) {
-      const github = document.createElement("a");
-      github.id = "uiGithubLink";
-      github.href = REPO_URL;
-      github.target = "_blank";
-      github.rel = "noopener noreferrer";
-      github.innerHTML = `${externalIcon}<span>GitHub</span>`;
-      links.appendChild(github);
-    }
-
-    return Boolean(brand && links);
+    return Boolean(brand);
   }
 
   if (!install()) {

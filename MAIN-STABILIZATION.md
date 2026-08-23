@@ -30,6 +30,7 @@
 ## Deferred device work
 
 - Roku manual IP entry and multiple-device behavior are deferred until a Roku stick is available for end-to-end testing. When resumed, distinguish a missing LAN relay configuration from a completed scan that found no Roku devices.
+- Native/non-Docker packaging is deferred. Revisit a Nuitka-style host runtime with a platform-specific hardware discovery layer that functionally tests and exposes selectable FFmpeg device/encoder combinations (NVENC, Intel QSV, AMD AMF/VA-API, and macOS VideoToolbox), persists both encoder and device identity, and safely falls back when saved hardware is unavailable.
 
 ## Global FFmpeg foundation
 

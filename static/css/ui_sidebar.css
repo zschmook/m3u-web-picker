@@ -145,7 +145,7 @@ body {
 }
 
 .ui-system-card {
-  margin-top: auto;
+  margin-top: 14px;
   padding: 14px;
   border: 1px solid var(--ui-border);
   border-radius: 14px;
@@ -612,6 +612,35 @@ body {
   display: grid;
   gap: 10px;
   margin-bottom: 18px;
+}
+
+.ui-overview-resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ui-overview-resource-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ui-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ui-overview-resource-links a:hover {
+  color: var(--ui-heading);
+}
+
+.ui-overview-resource-links svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
 }
 
 .ui-output-summary > div {
