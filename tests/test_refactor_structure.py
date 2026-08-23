@@ -15,7 +15,32 @@ import sports
 import sports_taxonomy
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class RefactorStructureTests(unittest.TestCase):
+    def test_windows_docker_setup_creates_complete_env_before_lan_override(self):
+        script = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn('$envExamplePath = Join-Path $repoRoot ".env.example"', script)
+        self.assertIn("Copy-Item -LiteralPath $envExamplePath -Destination $envPath", script)
+        self.assertLess(
+            script.index("Copy-Item -LiteralPath $envExamplePath"),
+            script.index('Set-DotEnvValue -Path $envPath -Name "M3U_LAN_HOST"'),
+        )
+
+    def test_windows_docker_setup_applies_gpu_override_when_nvidia_is_available(self):
+        script = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("Get-Command nvidia-smi -ErrorAction SilentlyContinue", script)
+        self.assertIn('$composeArgs += @("-f", "docker-compose.gpu.yml")', script)
+        self.assertIn("docker compose @composeArgs up -d --build", script)
+
+    def test_cross_platform_installers_describe_gpu_behavior(self):
+        docker_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")
+        macos_setup = (ROOT / "installer" / "macos" / "install.command").read_text(encoding="utf-8")
+        self.assertIn('compose_files="$compose_files -f docker-compose.gpu.yml"', docker_setup)
+        self.assertIn("GPU passthrough is not supported yet for Docker installs on macOS", docker_setup)
+        self.assertIn("GPU acceleration is not supported yet by the macOS installer", macos_setup)
+
     def test_core_database_schema_is_created_by_database_module(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "test.db"
@@ -51,6 +76,19 @@ class RefactorStructureTests(unittest.TestCase):
             settings = load_settings()
         self.assertEqual(settings.lan_host, "10.0.0.22")
         self.assertEqual(settings.external_port, 1000)
+
+    def test_settings_reads_saved_external_port_override(self):
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "config.json").write_text(
+                '{"network": {"external_port": 9997}}', encoding="utf-8"
+            )
+            with patch.dict(
+                "os.environ",
+                {"M3U_DATA_DIR": temp, "M3U_EXTERNAL_PORT": "9999"},
+                clear=False,
+            ):
+                settings = load_settings()
+        self.assertEqual(settings.external_port, 9997)
 
     def test_shared_ffmpeg_normalization_preserves_option_order(self):
         with patch("media.ffmpeg.shutil.which", return_value="/usr/bin/ffmpeg"):

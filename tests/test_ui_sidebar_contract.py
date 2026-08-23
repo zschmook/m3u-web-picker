@@ -13,6 +13,7 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn('/static/css/ui_sidebar.css?v=sidebar-1', app_text)
         self.assertIn('/static/js/ui_sidebar.js?v=sidebar-1', app_text)
         self.assertIn('/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1', app_text)
+        self.assertIn('/static/js/ui_network_settings.js?v=network-settings-1', app_text)
         self.assertGreater(
             app_text.index('/static/js/ui_sidebar.js?v=sidebar-1'),
             app_text.index('/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1'),
@@ -46,7 +47,21 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn("uiJellyfinCleanupEnabled", sidebar)
         self.assertIn('api("/api/jellyfin-cache"', settings)
         self.assertIn('api("/api/jellyfin-cache/validate"', settings)
+        self.assertIn('window.addEventListener("pageshow", load)', settings)
+        self.assertIn('data-settings-panel="jellyfin"', settings)
+        self.assertIn('? "Unavailable" : "Disabled"', settings)
+        self.assertIn('el("uiJellyfinUsing").disabled = !mountConfigured', settings)
+        self.assertIn('el("uiJellyfinCleanupEnabled").disabled = !mountConfigured', settings)
+        self.assertIn('saveButton.disabled = busy || !mountConfigured', settings)
+        self.assertIn('id="uiJellyfinUsing" type="checkbox" role="switch" autocomplete="off"', sidebar)
         self.assertIn("Jellyfin Cache Directory", onboarding)
+
+    def test_public_url_port_can_be_managed_in_settings(self):
+        sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
+        settings = (ROOT / "static/js/ui_network_settings.js").read_text(encoding="utf-8")
+        self.assertIn("Public URL port", sidebar)
+        self.assertIn("uiNetworkPort", sidebar)
+        self.assertIn('/api/network-config', settings)
 
     def test_ui_status_exposes_sidebar_counts_and_output_health(self):
         source = (ROOT / "api/ui_status.py").read_text(encoding="utf-8")
@@ -67,6 +82,13 @@ class ModernUiContractTests(unittest.TestCase):
         routes = (ROOT / "api/routes.py").read_text(encoding="utf-8")
         self.assertIn("register_ui_status_routes", routes)
         self.assertIn("register_ui_status_routes(app)", routes)
+
+    def test_ui_status_returns_cached_json_during_database_publish_lock(self):
+        source = (ROOT / "api/ui_status.py").read_text(encoding="utf-8")
+        self.assertIn("except sqlite3.OperationalError as exc:", source)
+        self.assertIn('if "locked" not in str(exc).lower():', source)
+        self.assertIn('label="Update in progress"', source)
+        self.assertIn('stale=True', source)
 
     def test_saved_channels_remain_visible_when_sd_catalog_filter_is_enabled(self):
         script = (ROOT / "static/js/app.js").read_text(encoding="utf-8")

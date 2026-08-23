@@ -32,10 +32,17 @@ fi
 
 cd "$INSTALL_DIR"
 compose_files="-f docker-compose.yml"
-if command -v nvidia-smi >/dev/null 2>&1 || command -v nvidia-smi.exe >/dev/null 2>&1; then
-  compose_files="$compose_files -f docker-compose.gpu.yml"
-  echo "NVIDIA GPU detected; requesting Docker GPU passthrough."
-fi
+case "$(uname -s 2>/dev/null || true)" in
+  Darwin)
+    echo "Note: GPU passthrough is not supported yet for Docker installs on macOS; FFmpeg will use CPU fallback."
+    ;;
+  *)
+    if command -v nvidia-smi >/dev/null 2>&1 || command -v nvidia-smi.exe >/dev/null 2>&1; then
+      compose_files="$compose_files -f docker-compose.gpu.yml"
+      echo "NVIDIA GPU detected; requesting Docker GPU passthrough."
+    fi
+    ;;
+esac
 # shellcheck disable=SC2086
 docker compose $compose_files up -d --build --force-recreate
 # shellcheck disable=SC2086

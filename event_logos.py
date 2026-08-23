@@ -147,10 +147,20 @@ def register_matchup_logo(
     """
     away_id = str(away_team_id or "").strip()
     home_id = str(home_team_id or "").strip()
-    if not event_key or not away_id or not home_id:
+    away_name = str(away_team_name or "Away").strip() or "Away"
+    home_name = str(home_team_name or "Home").strip() or "Home"
+    if not event_key or not away_name or not home_name:
         return ""
 
-    digest = event_digest(event_key, away_id, home_id)
+    # Provider/EPG titles sometimes contain only city names (for example,
+    # "Los Angeles at Boston"). Those names are sufficient to create a stable
+    # event composite, but not sufficient to guess a canonical team identity.
+    # Keep real IDs when known and use event-scoped name identities only for
+    # the digest so unresolved matchups render fallback tiles instead of a
+    # blank tvg-logo.
+    away_digest_identity = away_id or f"name:{away_name.casefold()}"
+    home_digest_identity = home_id or f"name:{home_name.casefold()}"
+    digest = event_digest(event_key, away_digest_identity, home_digest_identity)
     public_url = _public_event_logo_url(digest)
     if not public_url:
         return ""
@@ -168,15 +178,15 @@ def register_matchup_logo(
         "event_key": str(event_key or "")[:512],
         "away": {
             "team_id": away_id[:240],
-            "name": str(away_team_name or "Away")[:240],
-            "identity": logo_registry.team_identity(away_id),
+            "name": away_name[:240],
+            "identity": logo_registry.team_identity(away_id) if away_id else "",
             "source_url": _clean_http_url(away_logo_url),
             "fallback_url": _clean_http_url(away_fallback_logo_url),
         },
         "home": {
             "team_id": home_id[:240],
-            "name": str(home_team_name or "Home")[:240],
-            "identity": logo_registry.team_identity(home_id),
+            "name": home_name[:240],
+            "identity": logo_registry.team_identity(home_id) if home_id else "",
             "source_url": _clean_http_url(home_logo_url),
             "fallback_url": _clean_http_url(home_fallback_logo_url),
         },

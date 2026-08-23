@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
+$envExamplePath = Join-Path $repoRoot ".env.example"
 
 function Get-LanIPv4 {
     $configuration = try {
@@ -71,6 +72,16 @@ if (-not $lanHost) {
     throw "Could not detect this computer's LAN IPv4 address."
 }
 
+if (-not (Test-Path -LiteralPath $envPath)) {
+    if (Test-Path -LiteralPath $envExamplePath) {
+        Copy-Item -LiteralPath $envExamplePath -Destination $envPath
+        Write-Host "Created .env from .env.example"
+    }
+    else {
+        New-Item -ItemType File -Path $envPath | Out-Null
+    }
+}
+
 Set-DotEnvValue -Path $envPath -Name "M3U_LAN_HOST" -Value $lanHost
 Write-Host "Advertising M3U Web Picker at http://${lanHost}:9999"
 
@@ -80,18 +91,24 @@ if ($ConfigureOnly) {
 
 Push-Location $repoRoot
 try {
+    $composeArgs = @("-f", "docker-compose.yml")
+    if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+        $composeArgs += @("-f", "docker-compose.gpu.yml")
+        Write-Host "NVIDIA GPU detected; requesting Docker GPU passthrough."
+    }
+
     if ($CleanVolumes) {
-        docker compose -f docker-compose.yml down -v
+        docker compose @composeArgs down -v
     }
     else {
-        docker compose -f docker-compose.yml down
+        docker compose @composeArgs down
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    docker compose -f docker-compose.yml up -d --build
+    docker compose @composeArgs up -d --build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    docker compose -f docker-compose.yml ps
+    docker compose @composeArgs ps
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {

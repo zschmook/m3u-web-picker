@@ -24,7 +24,7 @@ class EventLogoContractTests(unittest.TestCase):
     def test_all_generated_matchup_feeds_use_event_logo(self):
         source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")
         self.assertIn("event_logos.register_matchup_logo", source)
-        self.assertIn("if away_team_id and home_team_id and event.get(\"event_key\")", source)
+        self.assertIn("if away_team_name and home_team_name and event.get(\"event_key\")", source)
         self.assertNotIn('feed_type not in {"home", "away"}', source)
         self.assertIn("away_team_id", source)
         self.assertIn("home_team_id", source)
@@ -36,6 +36,12 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertIn('str(away_team_id or "").strip().casefold()', source)
         self.assertIn('str(home_team_id or "").strip().casefold()', source)
         self.assertNotIn("assigned_number", source)
+
+    def test_city_only_matchups_use_name_scoped_fallback_identities(self):
+        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        self.assertIn('away_digest_identity = away_id or f"name:{away_name.casefold()}"', source)
+        self.assertIn('home_digest_identity = home_id or f"name:{home_name.casefold()}"', source)
+        self.assertIn('logo_registry.team_identity(away_id) if away_id else ""', source)
 
     def test_compositor_trims_padding_and_preserves_aspect_ratio(self):
         source = (ROOT / "event_logos.py").read_text(encoding="utf-8")

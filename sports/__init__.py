@@ -33,7 +33,7 @@ _install(
         "MAX_ESTIMATED_EVENT_DURATION", "_raise_if_cancelled", "_new_scan_diagnostics",
         "_record_malformed_entry", "_malformed_count", "_log_malformed_summary",
         "_now_iso", "_slug", "_normalize", "_smart_team_name", "_json_load",
-        "_is_sd_channel",
+        "_is_sd_channel", "_clock_text", "_schedule_text",
     ),
 )
 

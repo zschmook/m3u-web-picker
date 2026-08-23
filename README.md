@@ -14,6 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/script
 
 The script verifies Docker is running, downloads or updates M3U Web Picker in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, saves it in `.env`, and builds and starts the container. Existing application data is preserved. Set `M3U_PICKER_DIR` before running it to choose a different checkout location.
 
+On Linux and Windows, the installers automatically request NVIDIA GPU passthrough when `nvidia-smi` is available. GPU passthrough is not supported yet for Docker installs on macOS, so FFmpeg uses CPU fallback there.
+
 Open `http://localhost:9999`.
 
 A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.

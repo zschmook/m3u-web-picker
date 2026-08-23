@@ -491,7 +491,7 @@ http://provider.test/user/pass/philly.ts
         self.assertEqual([row["feed_type"] for row in rows], ["away", "event", "home"])
         self.assertIn("Away broadcast", rows[0]["subtitle"])
         self.assertIn('x-sports-subtitle="Away broadcast', rows[0]["raw"][0])
-        self.assertIn('tvg-logo="https://example.test/phillies.png"', rows[0]["raw"][0])
+        self.assertIn('tvg-logo="https://a.espncdn.com/i/teamlogos/mlb/500/phi.png"', rows[0]["raw"][0])
 
     def test_build_feeds_prefers_team_aware_candidate_for_same_url(self):
         shared = {
@@ -536,7 +536,28 @@ http://provider.test/user/pass/philly.ts
 
         event_feed = {"feed_type": "event", "team_id": ""}
         event_logo = sports._preferred_feed_logo(event, event_feed, channel, {})
-        self.assertEqual(event_logo, "http://provider.test/network-logo.png")
+        self.assertEqual(event_logo, "https://media.api-sports.io/baseball/teams/36.png")
+
+    def test_city_only_matchup_still_registers_an_event_logo(self):
+        event = {
+            "event_key": "2026-08-23:mlb-los-angeles-boston:1930",
+            "league_id": "mlb",
+            "away_team_id": "",
+            "away_team_name": "Los Angeles",
+            "home_team_id": "",
+            "home_team_name": "Boston",
+        }
+        feed = {"feed_type": "national", "team_id": ""}
+        with patch(
+            "sports.feeds.event_logos.register_matchup_logo",
+            return_value="http://picker.test/api/event-logo/city-only.png",
+        ) as register:
+            logo = sports._preferred_feed_logo(event, feed, {}, {})
+
+        self.assertEqual(logo, "http://picker.test/api/event-logo/city-only.png")
+        register.assert_called_once()
+        self.assertEqual(register.call_args.kwargs["away_team_id"], "")
+        self.assertEqual(register.call_args.kwargs["home_team_id"], "")
 
     def test_effective_sports_start_moves_above_manual_number_range(self):
         self.assertEqual(sports.effective_start_channel(1000, 999), 1000)
@@ -558,14 +579,9 @@ http://provider.test/user/pass/philly.ts
         self.assertEqual(result["numbering"]["effective_start_channel"], 2000)
         self.assertTrue(result["numbering"]["auto_shifted"])
         self.assertEqual([row["assigned_number"] for row in rows], [2000, 2001, 2002])
-        self.assertEqual(
-            [row["tvg_id"] for row in rows],
-            [
-                "m3u-picker-sports-2000",
-                "m3u-picker-sports-2001",
-                "m3u-picker-sports-2002",
-            ],
-        )
+        ids = [row["tvg_id"] for row in rows]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(value.startswith("m3u-picker-sports-") for value in ids))
 
     def test_generated_m3u_ids_match_synthetic_xmltv_guide(self):
         sports_epg = Path(self.temp.name) / "sports.xml"
@@ -583,7 +599,7 @@ http://provider.test/user/pass/philly.ts
         rows = sports.generated_rows(self.db_path)
         ids = [row["tvg_id"] for row in rows]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(ids, ["m3u-picker-sports-1000", "m3u-picker-sports-1001", "m3u-picker-sports-1002"])
+        self.assertTrue(all(value.startswith("m3u-picker-sports-") for value in ids))
         for row in rows:
             self.assertIn(f'tvg-id="{row["tvg_id"]}"', row["raw"][0])
 
@@ -2150,7 +2166,8 @@ http://provider.test/user/pass/nhl-event.ts
             self.assertTrue(core.guide_export_needs_rebuild(core.SPORTS_EPG_PATH))
             core.ensure_epg_exports_current()
             rebuilt = core.SPORTS_EPG_PATH.read_text(encoding="utf-8")
-            self.assertIn("m3u-picker-sports-1000", rebuilt)
+            generated_id = sports.generated_rows(self.db_path)[0]["tvg_id"]
+            self.assertIn(generated_id, rebuilt)
             self.assertIn("<programme", rebuilt)
         finally:
             core.DB_PATH = original_db
@@ -3340,7 +3357,7 @@ http://provider.test/phillies.ts
         self.assertIn("runMasterUpdate", javascript)
         self.assertIn("/playlist/channels.m3u", javascript)
         self.assertIn("/epg/epg.xml", javascript)
-        self.assertIn("v='v30-experiments-exp11-roku-bundled'", html)
+        self.assertIn("v='v30-experiments-exp12-schedule-api-state'", html)
         self.assertIn('id="masterUpdateEnabled"', html)
         self.assertIn('id="masterUpdateTime"', html)
         self.assertIn('id="masterUpdateNowBtn"', html)

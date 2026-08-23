@@ -3,6 +3,7 @@
 
   const el = id => document.getElementById(id);
   let current = null;
+  let mountConfigured = false;
 
   async function api(path, options = {}) {
     const response = await fetch(path, {...options, cache: "no-store"});
@@ -24,22 +25,31 @@
   }
 
   function setBusy(busy) {
-    ["uiJellyfinValidate", "uiJellyfinSave"].forEach(id => {
-      const button = el(id);
-      if (button) button.disabled = busy;
-    });
+    const validateButton = el("uiJellyfinValidate");
+    const saveButton = el("uiJellyfinSave");
+    if (validateButton) validateButton.disabled = busy;
+    if (saveButton) saveButton.disabled = busy || !mountConfigured;
   }
 
   function render(settings) {
     current = settings || {};
     const runtime = current.runtime || {};
-    el("uiJellyfinUsing").checked = Boolean(current.using_jellyfin);
+    mountConfigured = Boolean(runtime.mount_configured);
+    el("uiJellyfinUsing").checked = mountConfigured && Boolean(current.using_jellyfin);
+    el("uiJellyfinUsing").disabled = !mountConfigured;
+    el("uiJellyfinUsing").title = mountConfigured
+      ? ""
+      : "Configure M3U_JELLYFIN_CACHE_DIR and restart the container to use Jellyfin cache cleanup.";
     el("uiJellyfinCachePath").value = current.host_path || runtime.configured_host_path || "";
     el("uiJellyfinAcknowledge").checked = Boolean(current.acknowledged);
     el("uiJellyfinCleanupEnabled").checked = Boolean(current.cleanup_enabled);
-    el("uiJellyfinSettingsBadge").textContent = current.cleanup_enabled ? "Enabled" : "Disabled";
-    el("uiJellyfinSettingsBadge").classList.toggle("is-enabled", Boolean(current.cleanup_enabled));
     const mountAvailable = runtime.container_exists && runtime.container_is_dir && runtime.container_writable;
+    const cleanupAvailable = Boolean(current.cleanup_enabled && mountConfigured && mountAvailable);
+    el("uiJellyfinCleanupEnabled").disabled = !mountConfigured;
+    el("uiJellyfinSettingsBadge").textContent = cleanupAvailable
+      ? "Enabled"
+      : current.cleanup_enabled ? "Unavailable" : "Disabled";
+    el("uiJellyfinSettingsBadge").classList.toggle("is-enabled", cleanupAvailable);
     el("uiJellyfinRuntime").innerHTML = runtime.mount_configured
       ? `<strong>Container mount configured.</strong> ${mountAvailable ? "The mounted directory is available and writable." : "Restart the container after confirming the host path."}`
       : "<strong>Container mount not configured.</strong> Set M3U_JELLYFIN_CACHE_DIR and rebuild the container before enabling cleanup.";
@@ -115,6 +125,11 @@
   el("uiJellyfinSave")?.addEventListener("click", save);
   el("uiJellyfinUsing")?.addEventListener("change", event => {
     if (!event.target.checked) el("uiJellyfinCleanupEnabled").checked = false;
+  });
+  document.querySelector('[data-settings-panel="jellyfin"]')?.addEventListener("click", load);
+  window.addEventListener("pageshow", load);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void load();
   });
   void load();
 })();

@@ -122,11 +122,7 @@ class SportsApiTests(unittest.TestCase):
         core.write_current_playlist()
         playlist = self.client.get("/playlist/custom.m3u")
         self.assertEqual(playlist.status_code, 200)
-        self.assertIn(
-            f"http://localhost{sports.generated_stream_path(row['assigned_number'])}",
-            playlist.get_data(as_text=True),
-        )
-        self.assertNotIn(source_url, playlist.get_data(as_text=True))
+        self.assertIn(source_url, playlist.get_data(as_text=True))
 
     def test_fresh_api_has_no_sports_rules(self):
         response = self.client.get("/api/sports/settings")

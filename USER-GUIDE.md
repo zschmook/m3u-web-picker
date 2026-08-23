@@ -124,6 +124,8 @@ On macOS:
 ./scripts/detect-lan-host.sh
 ```
 
+GPU passthrough is not supported yet for Docker installs on macOS. FFmpeg uses CPU fallback even if the Mac has supported graphics hardware.
+
 Rebuild/restart after changing `.env`.
 
 ### Browser and Google Cast

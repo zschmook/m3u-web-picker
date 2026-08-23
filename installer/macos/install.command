@@ -136,6 +136,7 @@ launchctl kickstart -k "gui/$UID/com.m3uwebpicker.host" >/dev/null 2>&1 || true
 for _ in $(seq 1 60); do
     if curl -fsS "$WEB_URL/api/guide/ping" >/dev/null 2>&1 || curl -fsS "$WEB_URL" >/dev/null 2>&1; then
         echo "M3U Web Picker is running at $WEB_URL"
+        echo "Note: GPU acceleration is not supported yet by the macOS installer; FFmpeg will use CPU fallback."
         open "$WEB_URL"
         exit 0
     fi

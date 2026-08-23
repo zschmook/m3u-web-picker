@@ -23,6 +23,16 @@ def test_first_guide_gate_waits_for_public_epg_and_combined_publish():
     assert "/api/onboarding/initial-refresh" in gate
     assert "initial_refresh_completed_at" in gate
     assert "Retry First Update" in gate
+    assert "Setup is still working" in gate
+    assert "5–10 minutes" in gate
+    assert "dev-initial-refresh-spinner" in gate
+    assert 'location.replace("/#overview")' in gate
+    assert "location.reload()" not in gate
+
+    onboarding_ui = (ROOT / "static" / "js" / "onboarding.js").read_text(encoding="utf-8")
+    assert "Starting Your First Update" in onboarding_ui
+    assert 'classList.add("onboarding-initial-refresh-pending")' in onboarding_ui
+    assert "overlay()?.remove()" not in onboarding_ui
 
     assert "core.public_epg_payload()" in worker
     assert 'item.get("cached")' in worker

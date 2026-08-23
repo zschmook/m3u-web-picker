@@ -69,6 +69,13 @@
         <strong>TV Guide is temporarily locked.</strong><br>
         <span class="dev-onboarding-muted">This prevents the first guide view from opening against an empty public-EPG cache.</span>
       </div>
+      <div class="dev-initial-refresh-progress" aria-hidden="true">
+        <span class="dev-initial-refresh-spinner"></span>
+        <div>
+          <strong>Setup is still working</strong>
+          <span>This first update commonly takes 5–10 minutes. You can leave this page open.</span>
+        </div>
+      </div>
       ${error ? `<div class="dev-onboarding-warning">${escapeHtml(error)}</div>` : ""}
       <div class="dev-onboarding-actions">
         <span></span>
@@ -106,7 +113,7 @@
       "onboarding-initial-refresh-pending",
     );
     document.getElementById("devOnboardingOverlay")?.remove();
-    location.reload();
+    location.replace("/#overview");
   }
 
   async function pollUntilReady() {

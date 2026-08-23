@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,17 @@ APP_DIR = Path(__file__).resolve().parent
 
 def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, str(default)))
+
+
+def _saved_external_port(data_dir: Path, default: int) -> int:
+    """Return the UI-managed public port, falling back to the environment."""
+    try:
+        payload = json.loads((data_dir / "config.json").read_text(encoding="utf-8"))
+        network = payload.get("network", {}) if isinstance(payload, dict) else {}
+        value = int(network.get("external_port", default))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return default
+    return value if 1 <= value <= 65535 else default
 
 
 @dataclass(frozen=True)
@@ -39,6 +51,7 @@ class AppSettings:
 
 def load_settings() -> AppSettings:
     data_dir = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR))).expanduser().resolve()
+    environment_external_port = _env_int("M3U_EXTERNAL_PORT", 9999)
     cast_hls_dir = Path(
         os.environ.get("M3U_CAST_HLS_DIR", "/tmp/m3u-web-picker-cast-hls")
     ).expanduser()
@@ -58,7 +71,7 @@ def load_settings() -> AppSettings:
         ),
         cast_hls_dir=cast_hls_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
-        external_port=_env_int("M3U_EXTERNAL_PORT", 9999),
+        external_port=_saved_external_port(data_dir, environment_external_port),
     )
 
 

@@ -4,12 +4,21 @@
 
 ## Immediate hardening
 
-### Priority 1 — Remote playback reliability
+### Priority 1 — Safe Docker port-change automation
+
+- When the user changes **Settings → Network → Public URL port**, detect whether the requested port differs from Docker's currently published host port.
+- Show a confirmation dialog: **“Changing the port requires Docker to restart. Continue?”** with explicit **OK** and **Cancel** actions.
+- On confirmation, use a narrowly scoped host-side helper to update both `M3U_HOST_PORT` and `M3U_EXTERNAL_PORT` in `.env`, validate that the new port is available, recreate only the Picker container, wait for application health, and then run a Master Update so generated URLs are republished.
+- If validation, restart, or health verification fails, restore the previous `.env` values and attempt to bring the prior configuration back online; show the user a clear recovery result.
+- Do not mount the unrestricted Docker socket into the web app. Design the helper with the minimum permissions and command surface necessary, and support a manual fallback when automatic host integration is unavailable.
+
+### Priority 2 — Remote playback reliability
 
 1.2. [x] Windows LAN relay configuration — resolved by writing `M3U_LAN_HOST` to `.env` and recreating the container. Roku and Google Cast were verified working afterward, and the cross-platform Docker bootstrap now automates that path.
 
 ### Remaining hardening
 
+1. Tighten Jellyfin Cache form dependencies: when **I understand the risks** is unchecked, disable **Clear cache after successful updates** and **Save Settings** so the displayed controls cannot represent an invalid combination.
 1. Investigate the channel-picker issue discovered during FFmpeg/Jellyfin testing; capture exact reproduction steps after the current playback test.
 1. Add CI for Python tests and JavaScript syntax checks on pushes and pull requests.
 2. Replace the injected/legacy UI shell with the modern UI as the real application template.

@@ -113,6 +113,16 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _clock_text(value: datetime) -> str:
+    """Portable 12-hour time without a leading zero."""
+    return value.strftime("%I:%M %p").lstrip("0")
+
+
+def _schedule_text(value: datetime) -> str:
+    """Portable long local date/time used in generated guide descriptions."""
+    return f"{value.strftime('%A, %B')} {value.day} at {_clock_text(value)} {value.strftime('%Z')}"
+
+
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 

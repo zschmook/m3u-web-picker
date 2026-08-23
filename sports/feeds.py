@@ -128,7 +128,7 @@ def _preferred_feed_logo(
     home_espn_logo = _espn_team_logo(event, team_name=home_team_name)
     away_espn_logo = _espn_team_logo(event, team_name=away_team_name)
 
-    if away_team_id and home_team_id and event.get("event_key"):
+    if away_team_name and home_team_name and event.get("event_key"):
         matchup_logo = event_logos.register_matchup_logo(
             event_key=event.get("event_key"),
             away_team_id=away_team_id,

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
+
 from flask import jsonify
 
 import core
@@ -14,6 +17,10 @@ from .hdhr import HDHR_TUNER_COUNT
 
 
 master_update_reports.install(core)
+
+
+_status_cache_lock = threading.RLock()
+_last_status_payload: dict | None = None
 
 
 def _stage(name: str, status: str, detail: str = "", *, kind: str = "system") -> dict:
@@ -217,7 +224,36 @@ def ui_status_payload() -> dict:
 def register_ui_status_routes(app):
     @app.get("/api/ui/status")
     def api_ui_status():
-        response = jsonify(ui_status_payload())
+        global _last_status_payload
+        try:
+            payload = ui_status_payload()
+            with _status_cache_lock:
+                _last_status_payload = dict(payload)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
+            with _status_cache_lock:
+                payload = dict(_last_status_payload or {})
+            master = dict(master_update_worker.payload())
+            if payload:
+                payload["master_update"] = master
+                update = dict(payload.get("update") or {})
+                update.update(stale=True)
+                if master.get("running"):
+                    update.update(status="running", label="Update in progress")
+                payload["update"] = update
+            else:
+                running = bool(master.get("running"))
+                payload = {
+                    "error": "Status is temporarily unavailable while the update publishes data.",
+                    "master_update": master,
+                    "update": {
+                        "status": "running" if running else "unavailable",
+                        "label": "Update in progress" if running else "Status temporarily unavailable",
+                        "stale": True,
+                    },
+                }
+        response = jsonify(payload)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"

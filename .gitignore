@@ -9,6 +9,7 @@ config.json
 
 backups/
 data/
+espn_logo_catalog/
 .env
 .vscode/
 .idea/

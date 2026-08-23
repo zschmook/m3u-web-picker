@@ -19,6 +19,7 @@ from .hdhr import register_hdhr_routes
 from .images import register_image_routes
 from .logo_cache_status import register_logo_cache_status_routes
 from .media_pipeline import register_media_pipeline_routes
+from .network_config import register_network_config_routes
 from .outputs import register_output_routes
 from .providers import register_provider_routes
 from .sports_routes import register_sports_routes
@@ -40,6 +41,7 @@ def register_routes(app):
     register_event_image_routes(app)
     register_logo_cache_status_routes(app)
     register_media_pipeline_routes(app)
+    register_network_config_routes(app)
     register_output_routes(app)
     register_onboarding_routes(app)
     register_ui_status_routes(app)

@@ -399,9 +399,19 @@
     setBusy(true, "Finishing setup…");
     try {
       await api("/api/onboarding/complete", {method: "POST"});
-      document.documentElement.classList.remove("onboarding-active", "onboarding-pending");
-      overlay()?.remove();
-      location.reload();
+      const wizardBody = body();
+      if (wizardBody) {
+        wizardBody.innerHTML = `
+          <h2>Starting Your First Update</h2>
+          <div class="dev-onboarding-help">Your settings are saved. M3U Web Picker is now downloading provider and guide data and publishing the first outputs.</div>
+          <div class="dev-initial-refresh-progress" aria-hidden="true">
+            <span class="dev-initial-refresh-spinner"></span>
+            <div><strong>Setup is still working</strong><span>This first update commonly takes 5–10 minutes. Please leave this page open.</span></div>
+          </div>
+          <div class="dev-onboarding-status" role="status" aria-live="polite">Preparing the first Master Update…</div>`;
+      }
+      document.documentElement.classList.add("onboarding-initial-refresh-pending");
+      setTimeout(() => location.reload(), 150);
     } catch (error) {
       setBusy(false);
       setStatus(error.message, "error");

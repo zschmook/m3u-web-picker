@@ -280,6 +280,7 @@
     settings.innerHTML += `
       <div class="ui-settings-tabs" role="tablist">
         <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
       </div>
       <div class="ui-settings-grid">
@@ -306,6 +307,18 @@
             <div class="ui-settings-status" id="uiEncodingStatus" role="status" aria-live="polite"></div>
           </div>
         </section>
+        <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="network" aria-labelledby="uiNetworkTitle">
+          <div class="ui-card-heading">
+            <div><span id="uiNetworkTitle">Network URLs</span><small>Control the address advertised to guide clients and devices.</small></div>
+          </div>
+          <div class="ui-settings-form">
+            <label class="ui-settings-field" for="uiNetworkPort"><span>Public URL port</span><input id="uiNetworkPort" class="form-control" type="number" min="1" max="65535" value="9999"></label>
+            <div class="ui-settings-runtime">Advertised address: <code id="uiNetworkAddress">Loading…</code></div>
+            <div class="ui-settings-warning">This must match the host port published by Docker. Saving changes generated URLs but cannot remap a running container's Docker port.</div>
+            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiNetworkSave" type="button">Save Network Setting</button></div>
+            <div class="ui-settings-status" id="uiNetworkStatus" role="status" aria-live="polite"></div>
+          </div>
+        </section>
         <section class="ui-modern-card ui-jellyfin-settings-card ui-settings-panel" data-settings-panel-content="jellyfin" aria-labelledby="uiJellyfinSettingsTitle">
           <div class="ui-card-heading">
             <div><span id="uiJellyfinSettingsTitle">Jellyfin Cache Cleanup</span><small>Clear Jellyfin's mounted cache only after a successful Picker update.</small></div>
@@ -313,7 +326,7 @@
           </div>
           <div class="ui-settings-form">
             <label class="ui-settings-toggle" for="uiJellyfinUsing">
-              <input id="uiJellyfinUsing" type="checkbox" role="switch">
+              <input id="uiJellyfinUsing" type="checkbox" role="switch" autocomplete="off">
               <span><strong>I use Jellyfin</strong><small>Keep this integration available in the normal app.</small></span>
             </label>
             <label class="ui-settings-field" for="uiJellyfinCachePath">
@@ -324,11 +337,11 @@
               Cache cleanup may affect cached information for downloaded movies, downloaded TV shows, and DVR recordings. The path must match the directory mounted into the container through <code>M3U_JELLYFIN_CACHE_DIR</code>.
             </div>
             <label class="ui-settings-toggle" for="uiJellyfinAcknowledge">
-              <input id="uiJellyfinAcknowledge" type="checkbox" role="switch">
+              <input id="uiJellyfinAcknowledge" type="checkbox" role="switch" autocomplete="off">
               <span><strong>I understand the risks</strong><small>Required before automatic cleanup can be enabled.</small></span>
             </label>
             <label class="ui-settings-toggle" for="uiJellyfinCleanupEnabled">
-              <input id="uiJellyfinCleanupEnabled" type="checkbox" role="switch">
+              <input id="uiJellyfinCleanupEnabled" type="checkbox" role="switch" autocomplete="off">
               <span><strong>Clear cache after successful updates</strong><small>Never runs after a failed update.</small></span>
             </label>
             <div class="ui-settings-runtime" id="uiJellyfinRuntime">Loading mount status…</div>
@@ -374,11 +387,11 @@
           </div>
           <div class="modal-body">
             <div class="ui-output-copy-row">
-              <label for="uiM3uOutputUrl">M3U Playlist</label>
+              <label for="uiM3uOutputUrl">FFmpeg Enabled M3U Playlist</label>
               <div class="ui-copy-control"><input id="uiM3uOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiM3uOutputUrl">Copy</button></div>
             </div>
             <div class="ui-output-copy-row">
-              <label for="uiDirectM3uOutputUrl">Direct fallback M3U</label>
+              <label for="uiDirectM3uOutputUrl">Direct Fallback M3U</label>
               <div class="ui-copy-control"><input id="uiDirectM3uOutputUrl" readonly><button class="btn ui-btn-primary" type="button" data-ui-copy="uiDirectM3uOutputUrl">Copy</button></div>
             </div>
             <div class="ui-output-copy-row">
