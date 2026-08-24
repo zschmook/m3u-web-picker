@@ -31,21 +31,8 @@ def _enabled_value(value: str | None) -> bool:
 
 
 def onboarding_enabled() -> bool:
-    """Return whether first-run onboarding is enabled for this runtime.
-
-    M3U_ONBOARDING_ENABLED is the current public setting. M3U_DEV_ONBOARDING is
-    retained as a compatibility fallback so existing dev/test deployments do
-    not suddenly lose their setup flow.
-    """
-    value = os.environ.get("M3U_ONBOARDING_ENABLED")
-    if value is None:
-        value = os.environ.get("M3U_DEV_ONBOARDING", "")
-    return _enabled_value(value)
-
-
-def dev_onboarding_enabled() -> bool:
-    """Backward-compatible alias for older imports/tests."""
-    return onboarding_enabled()
+    """Return whether first-run onboarding is enabled for this runtime."""
+    return _enabled_value(os.environ.get("M3U_ONBOARDING_ENABLED", ""))
 
 
 def _connect(db_path: Path | str) -> sqlite3.Connection:
@@ -325,24 +312,24 @@ def finish_initial_refresh(
             "SELECT answers_json FROM app_onboarding WHERE id = 1"
         ).fetchone()
         answers = _decode_answers(row["answers_json"] if row else "{}")
-        if not bool(answers.get("initial_refresh_required")):
-            return get_state(db_path, provider_configured=provider_configured)
-        answers["initial_refresh_in_progress"] = False
-        if success:
-            answers["initial_refresh_pending"] = False
-            answers["initial_refresh_completed_at"] = now
-            answers.pop("initial_refresh_error", None)
-        else:
-            answers["initial_refresh_pending"] = True
-            answers.pop("initial_refresh_completed_at", None)
-            answers["initial_refresh_error"] = str(error or "The first guide update did not complete.")
-        conn.execute(
-            """
-            UPDATE app_onboarding
-            SET answers_json = ?, updated_at = ?
-            WHERE id = 1
-            """,
-            (json.dumps(answers), now),
-        )
-        conn.commit()
+        refresh_required = bool(answers.get("initial_refresh_required"))
+        if refresh_required:
+            answers["initial_refresh_in_progress"] = False
+            if success:
+                answers["initial_refresh_pending"] = False
+                answers["initial_refresh_completed_at"] = now
+                answers.pop("initial_refresh_error", None)
+            else:
+                answers["initial_refresh_pending"] = True
+                answers.pop("initial_refresh_completed_at", None)
+                answers["initial_refresh_error"] = str(error or "The first guide update did not complete.")
+            conn.execute(
+                """
+                UPDATE app_onboarding
+                SET answers_json = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                (json.dumps(answers), now),
+            )
+            conn.commit()
     return get_state(db_path, provider_configured=provider_configured)

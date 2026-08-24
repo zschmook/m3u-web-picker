@@ -1,0 +1,104 @@
+:root {
+  color-scheme: dark;
+  --guide-bg: #0f1726;
+  --guide-panel: #182337;
+  --guide-border: #34445e;
+  --guide-text: #e8eef8;
+  --guide-muted: #a9b5c8;
+  --guide-link: #55b8ff;
+}
+
+body {
+  margin: 0;
+  background: var(--guide-bg);
+  color: var(--guide-text);
+  font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.guide-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0.9rem max(1rem, calc((100vw - 900px) / 2));
+  border-bottom: 1px solid var(--guide-border);
+  background: rgb(15 23 38 / 94%);
+  backdrop-filter: blur(10px);
+}
+
+.guide-back,
+.guide-document a {
+  color: var(--guide-link);
+}
+
+.guide-back {
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.guide-document {
+  width: min(900px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2.5rem 0 5rem;
+}
+
+.guide-document h1 {
+  margin-bottom: 1.5rem;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.guide-document h2 {
+  margin-top: 2.75rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--guide-border);
+}
+
+.guide-document h3 {
+  margin-top: 2rem;
+}
+
+.guide-document p,
+.guide-document li {
+  color: var(--guide-muted);
+}
+
+.guide-document strong,
+.guide-document h1,
+.guide-document h2,
+.guide-document h3 {
+  color: var(--guide-text);
+}
+
+.guide-document code {
+  color: #b8e5ff;
+}
+
+.guide-document pre {
+  overflow-x: auto;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--guide-border);
+  border-radius: 0.65rem;
+  background: #0a111d;
+}
+
+.guide-document pre code {
+  color: #dbeafe;
+}
+
+.guide-document table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+}
+
+.guide-document th,
+.guide-document td {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--guide-border);
+}
+
+.guide-document th {
+  background: var(--guide-panel);
+  color: var(--guide-text);
+}

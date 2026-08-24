@@ -21,12 +21,14 @@ class UpdateLifecycleContractTests(unittest.TestCase):
             ast.parse(source, filename=relative)
 
     def test_main_ui_loads_live_update_lifecycle_after_sidebar(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertIn("update_lifecycle.css?v=update-lifecycle-1", source)
-        self.assertIn("update_lifecycle.js?v=update-lifecycle-1", source)
-        self.assertLess(source.index("ui_sidebar.js?v=sidebar-1"), source.index("update_lifecycle.js?v=update-lifecycle-1"))
-        self.assertIn('path in {"/", "/guide", "/api/ui/status", "/api/master-update"}', source)
-        self.assertIn('response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"', source)
+        template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("update_lifecycle.css?v=update-lifecycle-1", template)
+        self.assertIn("update_lifecycle.js?v=update-lifecycle-1", template)
+        self.assertLess(template.index("ui_sidebar.js?v=sidebar-2"), template.index("update_lifecycle.js?v=update-lifecycle-1"))
+        for uncached_path in ('"/"', '"/guide"', '"/user-guide"', '"/api/ui/status"', '"/api/master-update"'):
+            self.assertIn(uncached_path, app_source)
+        self.assertIn('response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"', app_source)
 
     def test_browser_uses_server_state_for_update_and_guide_lock(self):
         source = (ROOT / "static" / "js" / "update_lifecycle.js").read_text(encoding="utf-8")

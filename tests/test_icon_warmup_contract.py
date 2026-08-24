@@ -22,7 +22,7 @@ class LogoUpdateContractTests(unittest.TestCase):
         self.assertNotIn("icon_update", source)
 
     def test_logos_checkbox_overlay_is_not_loaded(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        source = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("ui_icon_update.js", source)
         self.assertIn("ui_img_cache_status.js", source)
 

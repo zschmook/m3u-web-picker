@@ -2,7 +2,11 @@
 import argparse
 import atexit
 import os
-from flask import Flask, redirect, render_template, request, send_from_directory
+from pathlib import Path
+
+import markdown
+from flask import Flask, redirect, render_template, request
+from markupsafe import Markup
 
 import core
 import hdhr_config
@@ -24,7 +28,7 @@ def disable_runtime_document_cache(response):
     """Never let navigation/status pages resurrect stale update state."""
     path = request.path
     if (
-        path in {"/", "/guide", "/api/ui/status", "/api/master-update"}
+        path in {"/", "/guide", "/user-guide", "/api/ui/status", "/api/master-update"}
         or path.startswith("/api/master-update/")
     ):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -62,61 +66,12 @@ def _onboarding_initial_refresh_required() -> bool:
 
 @app.get("/")
 def index():
-    html = render_template("index.html")
+    page_classes = ""
     if _onboarding_required():
-        pending_classes = "onboarding-pending"
+        page_classes = "onboarding-pending"
         if _onboarding_initial_refresh_required():
-            pending_classes += " onboarding-initial-refresh-pending"
-        html = html.replace(
-            '<html lang="en">',
-            f'<html lang="en" class="{pending_classes}">',
-            1,
-        )
-    html = html.replace(
-        "</head>",
-        '<style>html.onboarding-pending body,html.onboarding-initial-refresh-pending body{visibility:hidden}</style>\n'
-        '<link rel="stylesheet" href="/static/css/experiments_ui.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_themes.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sections.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_provider_cleanup.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_top_controls.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_resilient_images.css?v=ui-refactor-9">\n'
-        '<link rel="stylesheet" href="/static/css/ui_schedule_cleanup.css?v=schedule-cleanup-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar.css?v=sidebar-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar_brand_links.css?v=sidebar-brand-links-1">\n'
-        '<link rel="stylesheet" href="/static/css/ui_sidebar_tweaks.css?v=sidebar-tweaks-4">\n'
-        '<link rel="stylesheet" href="/static/css/update_lifecycle.css?v=update-lifecycle-1">\n'
-        '<link rel="stylesheet" href="/static/css/onboarding.css?v=onboarding-1">\n</head>',
-    )
-    return html.replace(
-        "</body>",
-        '<script src="/static/js/experiments_ui.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/ui_refactor.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/ui_themes.js?v=themes-overview-1"></script>\n'
-        '<script src="/static/js/ui_sections.js?v=ui-refactor-9"></script>\n'
-        '<script src="/static/js/hdhr_ui.js?v=hdhr-support-toggle-3"></script>\n'
-        '<script src="/static/js/ui_top_controls.js?v=ui-top-controls-10"></script>\n'
-        '<script src="/static/js/ui_brand_meta.js?v=v30-brand-1"></script>\n'
-        '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
-        '<script src="/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1"></script>\n'
-        '<script src="/static/js/ui_sidebar.js?v=sidebar-1"></script>\n'
-        '<script src="/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1"></script>\n'
-        '<script src="/static/js/ui_encoding_settings.js?v=encoding-settings-1"></script>\n'
-        '<script src="/static/js/ui_network_settings.js?v=network-settings-1"></script>\n'
-        '<script src="/static/js/ui_sidebar_brand_links.js?v=sidebar-brand-links-1"></script>\n'
-        '<script src="/static/js/update_lifecycle.js?v=update-lifecycle-1"></script>\n'
-        '<script src="/static/js/ui_img_cache_status.js?v=espn-logo-cache-1"></script>\n'
-        '<script src="/static/js/ui_epg_static.js?v=output-lan-1"></script>\n'
-        '<script src="/static/js/ui_overview_update_status.js?v=overview-status-1"></script>\n'
-        '<script src="/static/js/order_drag_drop.js?v=drag-order-1"></script>\n'
-        '<script src="/static/js/onboarding.js?v=onboarding-1"></script>\n'
-        '<script src="/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1"></script>\n'
-        '<script src="/static/js/onboarding_enhancements.js?v=onboarding-2"></script>\n'
-        '<script src="/static/js/onboarding_provider_validation_v2.js?v=onboarding-4"></script>\n'
-        '<script src="/static/js/onboarding_demo_provider.js?v=demo-provider-1"></script>\n'
-        '<script src="/static/js/onboarding_manual_channels.js?v=onboarding-5"></script>\n</body>',
-    )
+            page_classes += " onboarding-initial-refresh-pending"
+    return render_template("index.html", page_classes=page_classes)
 
 
 @app.get("/guide")
@@ -142,7 +97,7 @@ def guide():
         '  document.body.dataset.uiTheme = valid.has(saved) ? saved : "midnight";\n'
         '})();\n'
         '</script>\n'
-        '<script src="/static/js/guide_experiments_ui.js?v=cast-flow-2"></script>\n'
+        '<script src="/static/js/guide_cast_ui.js?v=cast-flow-3"></script>\n'
         '<script src="/static/js/guide_programmes.js?v=matchup-1"></script>\n'
         '<script src="/static/js/guide_event_logo_bridge.js?v=event-logo-2"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
@@ -153,12 +108,13 @@ def guide():
 
 @app.get("/user-guide")
 def user_guide():
-    return send_from_directory(
-        app.root_path,
-        "USER-GUIDE.md",
-        mimetype="text/plain",
-        as_attachment=False,
+    source = Path(app.root_path, "USER-GUIDE.md").read_text(encoding="utf-8")
+    content = markdown.markdown(
+        source,
+        extensions=("fenced_code", "tables", "toc", "sane_lists"),
+        output_format="html5",
     )
+    return render_template("user_guide.html", guide_content=Markup(content))
 
 
 register_routes(app)

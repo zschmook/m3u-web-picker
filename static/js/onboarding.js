@@ -184,16 +184,22 @@
   }
 
   async function chooseSports(enabled) {
+    const excludeSd = Boolean(document.getElementById("devExcludeSdChannels")?.checked);
     setBusy(true, enabled ? "Enabling Sports Automation…" : "Leaving Sports Automation disabled…");
     try {
       await api("/api/sports/settings", {
         method: "PATCH",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({enabled}),
+        body: JSON.stringify({enabled, exclude_sd: excludeSd}),
       });
       ctx.payload.sports.settings.enabled = enabled;
+      ctx.payload.sports.settings.exclude_sd = excludeSd;
       const next = enabled ? 3 : 6;
-      await saveProgress(next, {sports_enabled: enabled, schedule_api_enabled: false});
+      await saveProgress(next, {
+        sports_enabled: enabled,
+        schedule_api_enabled: false,
+        exclude_sd_channels: excludeSd,
+      });
       render();
     } catch (error) {
       setBusy(false);
@@ -202,6 +208,7 @@
   }
 
   function renderSportsChoice() {
+    const excludeSd = Boolean(ctx.payload?.sports?.settings?.exclude_sd);
     body().innerHTML = `
       <h2>Enable Sports Automation?</h2>
       <div class="dev-onboarding-help">Sports Automation creates temporary event channels from your provider and keeps them updated on the Master Update schedule.</div>
@@ -215,6 +222,10 @@
           <span>Skip sports-specific setup and continue to Jellyfin.</span>
         </button>
       </div>
+      <label class="dev-onboarding-ack" for="devExcludeSdChannels">
+        <input id="devExcludeSdChannels" class="form-check-input" type="checkbox" ${excludeSd ? "checked" : ""}>
+        <span><strong>Hide SD / Low Bandwidth Channels</strong><br><span class="dev-onboarding-muted">Hide low-bandwidth provider channels from the catalog and sports-generated feeds.</span></span>
+      </label>
       ${actions(true, "")}
     `;
     document.getElementById("devOnboardingNext")?.remove();
@@ -491,7 +502,7 @@
         </div>
       </div>
       <div class="dev-onboarding-warning">
-        <strong>Experimental Jellyfin cache integration</strong><br>
+        <strong>Jellyfin cache integration</strong><br>
         M3U Web Picker can clear the configured Jellyfin cache after a successful update to help prevent stale Live TV logos and metadata.<br><br>
         <strong>Warning:</strong> This may affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
       </div>
@@ -635,7 +646,7 @@
   async function start() {
     try {
       ctx.payload = await api("/api/onboarding");
-      const enabled = ctx.payload.enabled ?? ctx.payload.dev_enabled;
+      const enabled = ctx.payload.enabled;
       if (!enabled || !ctx.payload.state?.required || ctx.payload.state?.completed) {
         document.documentElement.classList.remove("onboarding-pending", "onboarding-active");
         return;

@@ -1,8 +1,6 @@
 (() => {
   "use strict";
 
-  if (document.getElementById("uiAppShell")) return;
-
   const PAGE_IDS = ["overview", "providers", "channels", "epg", "sports", "devices", "settings"];
   const state = {
     status: null,
@@ -54,98 +52,13 @@
     return `${minutes}:${String(remainder).padStart(2, "0")}`;
   }
 
-  function navButton(page, label) {
-    return `<button class="ui-side-nav-item" type="button" data-ui-page-target="${page}">${icons[page]}<span>${label}</span></button>`;
-  }
-
   function buildShell() {
-    const root = document.querySelector("body > .container-fluid");
-    if (!root) return false;
+    if (!document.getElementById("uiAppShell") || !document.getElementById("uiModernRoot")) return false;
 
-    const shell = document.createElement("div");
-    shell.id = "uiAppShell";
-    shell.className = "ui-app-shell";
-    root.parentNode.insertBefore(shell, root);
-
-    const sidebar = document.createElement("aside");
-    sidebar.id = "uiSidebar";
-    sidebar.className = "ui-sidebar";
-    sidebar.setAttribute("aria-label", "Application navigation");
-    sidebar.innerHTML = `
-      <div class="ui-sidebar-brand">
-        <div class="ui-sidebar-mark">M3U</div>
-        <div>
-          <div class="ui-sidebar-title">Web Picker</div>
-          <div class="ui-sidebar-version" id="uiSidebarVersion">Experimental UI</div>
-        </div>
-      </div>
-      <nav class="ui-side-nav" aria-label="Main sections">
-        ${navButton("overview", "Overview")}
-        ${navButton("providers", "Providers")}
-        ${navButton("channels", "Channels")}
-        ${navButton("epg", "EPG")}
-        ${navButton("sports", "Sports Automation")}
-        ${navButton("devices", "Devices")}
-        ${navButton("settings", "Settings")}
-      </nav>
-      <div class="ui-side-links">
-        <a href="/guide">${icons.external}<span>TV Guide</span></a>
-      </div>
-      <section class="ui-system-card" aria-labelledby="uiSystemStatusTitle">
-        <div class="ui-system-card-heading">
-          <span id="uiSystemStatusTitle">System Status</span>
-          <span class="ui-health-dot is-loading" id="uiSystemHealthDot" aria-hidden="true"></span>
-        </div>
-        <div class="ui-system-health" id="uiSystemHealth">Loading…</div>
-        <div class="ui-system-metrics">
-          <div><span>Provider</span><strong id="uiProviderStatus">—</strong></div>
-          <div><span>All Channels</span><strong id="uiAllChannels">—</strong></div>
-          <div><span>Indexed Channels</span><strong id="uiIndexedChannels">—</strong></div>
-          <div><span>Sports Channels</span><strong id="uiSportsChannels">—</strong></div>
-          <div><span>HDHomeRun</span><strong id="uiHdhrStatus">—</strong></div>
-          <div><span>Roku</span><strong id="uiRokuStatus">—</strong></div>
-          <div><span>Streams</span><strong id="uiStreamsStatus">—</strong></div>
-        </div>
-        <div class="ui-system-divider"></div>
-        <div class="ui-system-times">
-          <div><span>Last update</span><strong id="uiLastUpdate">—</strong></div>
-          <div><span>Next update</span><strong id="uiNextUpdate">—</strong></div>
-        </div>
-        <div class="ui-system-actions">
-          <button id="uiUpdateNowBtn" class="btn ui-btn-primary" type="button">Update Now</button>
-          <button id="uiOutputsBtn" class="btn ui-btn-secondary" type="button">Outputs</button>
-        </div>
-        <div class="ui-update-result is-loading" id="uiUpdateResult">
-          <span class="ui-update-result-dot" aria-hidden="true"></span>
-          <span class="ui-update-result-copy">
-            <span class="ui-update-result-label">Update status</span>
-            <strong id="uiUpdateResultText">Loading…</strong>
-          </span>
-          <button id="uiUpdateDetailsBtn" class="ui-details-link d-none" type="button">Details</button>
-        </div>
-      </section>`;
-
-    const main = document.createElement("main");
-    main.className = "ui-main-shell";
-    main.appendChild(root);
-    shell.append(sidebar, main);
-    root.classList.add("ui-modern-root");
-
-    const mobileButton = document.createElement("button");
-    mobileButton.id = "uiSidebarToggle";
-    mobileButton.className = "ui-sidebar-toggle";
-    mobileButton.type = "button";
-    mobileButton.setAttribute("aria-label", "Open navigation");
-    mobileButton.innerHTML = '<span></span><span></span><span></span>';
-    document.body.appendChild(mobileButton);
-
-    const scrim = document.createElement("div");
-    scrim.id = "uiSidebarScrim";
-    scrim.className = "ui-sidebar-scrim";
-    document.body.appendChild(scrim);
-
-    mobileButton.addEventListener("click", () => document.body.classList.toggle("ui-sidebar-open"));
-    scrim.addEventListener("click", () => document.body.classList.remove("ui-sidebar-open"));
+    const mobileButton = el("uiSidebarToggle");
+    const scrim = el("uiSidebarScrim");
+    mobileButton?.addEventListener("click", () => document.body.classList.toggle("ui-sidebar-open"));
+    scrim?.addEventListener("click", () => document.body.classList.remove("ui-sidebar-open"));
     return true;
   }
 
@@ -626,6 +539,7 @@
     state.elapsedTimer = setInterval(() => {
       if (state.status?.master_update?.running) refreshStatus();
     }, 1000);
+    document.getElementById("uiModernRoot")?.classList.remove("ui-modern-pending");
   }
 
   install();
