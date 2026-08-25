@@ -5,6 +5,7 @@
   let state = {active: false, elapsed_seconds: 0};
   let busy = false;
   let lastPreviewUrl = "";
+  let previewSessionId = "";
   let lastChartSignature = "";
   const CHART_TICK_COUNT = 5;
   const CHART_HISTORY_MINUTES = 30;
@@ -137,6 +138,30 @@
     return "";
   }
 
+  function newPreviewSessionId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function releaseCommercialPreview({keepalive = false} = {}) {
+    const video = el("uiCommercialTestVideo");
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+    const sessionId = previewSessionId;
+    previewSessionId = "";
+    lastPreviewUrl = "";
+    if (sessionId) {
+      fetch(`/guide/play/preview/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE",
+        cache: "no-store",
+        keepalive,
+      }).catch(() => {});
+    }
+  }
+
   function renderCommercialPreview(stream, hasCommercial) {
     const preview = el("uiCommercialTestPreview");
     const video = el("uiCommercialTestVideo");
@@ -146,22 +171,20 @@
     const previewUrl = streamToPreviewUrl(stream);
     if (!hasCommercial || !previewUrl) {
       preview.classList.add("d-none");
-      if (video.getAttribute("src")) {
-        video.removeAttribute("src");
-        video.load();
-      }
-      lastPreviewUrl = "";
+      if (previewSessionId || video.getAttribute("src")) releaseCommercialPreview();
       fallback.classList.add("d-none");
       return;
     }
 
     preview.classList.remove("d-none");
     if (previewUrl !== lastPreviewUrl) {
+      releaseCommercialPreview();
       lastPreviewUrl = previewUrl;
+      previewSessionId = newPreviewSessionId();
       video.classList.remove("d-none");
       fallback.classList.add("d-none");
       video.muted = false;
-      video.src = `${previewUrl}?_=${Date.now()}`;
+      video.src = `${previewUrl}?preview_session=${encodeURIComponent(previewSessionId)}&_=${Date.now()}`;
       video.load();
     }
     if (!video.paused) return;
@@ -434,6 +457,7 @@
     event.currentTarget.classList.add("d-none");
     el("uiCommercialTestFallback")?.classList.remove("d-none");
   });
+  window.addEventListener("pagehide", () => releaseCommercialPreview({keepalive: true}));
   setInterval(() => {
     if (state.active) state.elapsed_seconds = Number(state.elapsed_seconds || 0) + 1;
     render();

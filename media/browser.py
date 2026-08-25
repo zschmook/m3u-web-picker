@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 
 from flask import Response, request, stream_with_context
 
@@ -8,7 +9,24 @@ from .ffmpeg import normalized_live_input_args, terminate
 import media_pipeline
 
 
-def response_for(target: str) -> Response:
+_PREVIEW_LOCK = threading.RLock()
+_PREVIEW_PROCESSES: dict[str, subprocess.Popen] = {}
+
+
+def stop_preview(session_id: str) -> bool:
+    """Explicitly stop a browser preview that may outlive its media request."""
+    key = str(session_id or "").strip()
+    if not key:
+        return False
+    with _PREVIEW_LOCK:
+        process = _PREVIEW_PROCESSES.pop(key, None)
+    if process is None:
+        return False
+    terminate(process)
+    return True
+
+
+def response_for(target: str, *, preview_session: str = "") -> Response:
     """Transcode one curated IPTV stream to browser-friendly fragmented MP4."""
     session_token = ""
     try:
@@ -44,6 +62,13 @@ def response_for(target: str) -> Response:
             status=502,
             content_type="text/plain; charset=utf-8",
         )
+    preview_key = str(preview_session or "").strip()
+    if preview_key:
+        with _PREVIEW_LOCK:
+            previous = _PREVIEW_PROCESSES.get(preview_key)
+            _PREVIEW_PROCESSES[preview_key] = process
+        if previous is not None and previous is not process:
+            terminate(previous)
     client_disconnected = request.environ.get("waitress.client_disconnected")
 
     def generate():
@@ -58,6 +83,10 @@ def response_for(target: str) -> Response:
                     break
                 yield chunk
         finally:
+            if preview_key:
+                with _PREVIEW_LOCK:
+                    if _PREVIEW_PROCESSES.get(preview_key) is process:
+                        _PREVIEW_PROCESSES.pop(preview_key, None)
             if process.stdout is not None:
                 try:
                     process.stdout.close()

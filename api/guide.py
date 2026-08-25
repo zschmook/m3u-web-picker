@@ -299,11 +299,24 @@ def register_guide_routes(app):
         target = core.manual_stream_target(token)
         if not target:
             return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
-        return browser.response_for(target)
+        return browser.response_for(
+            target,
+            preview_session=request.args.get("preview_session", ""),
+        )
 
     @app.get("/guide/play/sports/<int:assigned_number>")
     def guide_play_sports(assigned_number: int):
         target = sports.generated_stream_target(core.DB_PATH, assigned_number)
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
-        return browser.response_for(target)
+        return browser.response_for(
+            target,
+            preview_session=request.args.get("preview_session", ""),
+        )
+
+    @app.delete("/guide/play/preview/<session_id>")
+    def guide_stop_preview(session_id: str):
+        return no_cache(jsonify({
+            "ok": True,
+            "released": browser.stop_preview(session_id),
+        }))
