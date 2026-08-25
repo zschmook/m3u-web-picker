@@ -139,7 +139,7 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertNotIn('id="uiCommercialTestVideo" muted', sidebar)
         self.assertIn("video.muted = false;", script)
         self.assertIn("video.muted = true;", script)
-        self.assertIn("ui_commercial_test.js?v=commercial-test-10", template)
+        self.assertIn("ui_commercial_test.js?v=commercial-test-11", template)
         self.assertIn("ui_sidebar.js?v=sidebar-9", template)
 
 

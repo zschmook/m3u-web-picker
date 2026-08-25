@@ -306,6 +306,8 @@
           ? "Disabled for sports-generated channels"
           : detector.countdown_detected
             ? `${detector.countdown_region} · Confidence: ${countdownConfidence}% · direct commercial signal`
+            : Number(detector.countdown_probation_seconds_remaining || 0) > 0
+              ? `Waiting ${Math.ceil(Number(detector.countdown_probation_seconds_remaining))}s for normal network-bug detection first`
             : !detector.countdown_fallback_available
               ? `Network bug is authoritative · countdown fallback inactive · Confidence: ${countdownConfidence}%`
             : `Scanning all four corners · Confidence: ${countdownConfidence}%`;

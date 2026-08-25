@@ -64,6 +64,25 @@ class LiveLogoDetectorTests(unittest.TestCase):
         confidence, _reference = _countdown_signature(self._countdown_maps(counting=False))
         self.assertLess(confidence, COUNTDOWN_THRESHOLD)
 
+    def test_countdown_cannot_latch_during_network_bug_probation(self):
+        detector = LiveLogoDetector(Path("."), Path("frame-%06d.jpg"), Mock())
+        blank = tuple(0 for _ in range(48 * 24))
+        counting = self._countdown_maps(counting=True)
+
+        for frame in counting:
+            maps = {name: blank for name in detector._countdown_samples}
+            maps["top-right"] = frame
+            detector._update_countdown_detector(maps, fallback_allowed=False)
+
+        self.assertFalse(detector.bugless_countdown_mode)
+        for frame in counting:
+            maps = {name: blank for name in detector._countdown_samples}
+            maps["top-right"] = frame
+            detector._update_countdown_detector(maps, fallback_allowed=True)
+
+        self.assertTrue(detector.bugless_countdown_mode)
+        self.assertEqual(detector.countdown_region, "top-right")
+
     @staticmethod
     def _frame(
         path: Path,

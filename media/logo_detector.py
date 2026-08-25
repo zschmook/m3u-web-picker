@@ -68,6 +68,10 @@ STRONG_PROGRAM_MODEL_MAX = 0.35
 MANUAL_PROGRAM_HOLD_SECONDS = 30
 MIN_PERSISTENT_EDGES = 16
 COUNTDOWN_WINDOW_FRAMES = 12
+COUNTDOWN_FALLBACK_PROBATION_SECONDS = 60.0
+COUNTDOWN_FALLBACK_PROBATION_FRAMES = int(
+    COUNTDOWN_FALLBACK_PROBATION_SECONDS / POLL_SECONDS
+)
 COUNTDOWN_CONFIRMATIONS = 2
 COUNTDOWN_RELEASE_CONFIRMATIONS = 2
 COUNTDOWN_THRESHOLD = 0.68
@@ -283,6 +287,7 @@ class LiveLogoDetector:
     _countdown_reference: tuple[int, ...] | None = None
     _countdown_candidate_count: int = 0
     _countdown_missing_count: int = 0
+    _frames_observed: int = 0
     _missing_count: int = 0
     _present_count: int = 0
     _return_candidate_key: str = ""
@@ -1408,10 +1413,14 @@ class LiveLogoDetector:
         self.edge_density = sum(sum(edge_map) for edge_map in maps.values()) / float(
             len(maps) * len(next(iter(maps.values())))
         )
+        self._frames_observed += 1
         self._load_trusted_bugs()
         if not self.sports_generated and self._update_countdown_detector(
             maps,
-            fallback_allowed=not bool(self._reference_entries()),
+            fallback_allowed=bool(
+                self._frames_observed >= COUNTDOWN_FALLBACK_PROBATION_FRAMES
+                and not self._reference_entries()
+            ),
         ):
             self._sample_channel_profile()
             return
@@ -1496,7 +1505,21 @@ class LiveLogoDetector:
             "countdown_detected_at": self.countdown_detected_at,
             "countdown_confidence": round(self.countdown_confidence * 100, 1),
             "countdown_fallback_available": bool(
-                self.bugless_countdown_mode or not self._reference_entries()
+                self.bugless_countdown_mode
+                or (
+                    self._frames_observed >= COUNTDOWN_FALLBACK_PROBATION_FRAMES
+                    and not self._reference_entries()
+                )
+            ),
+            "countdown_probation_seconds_remaining": round(
+                max(
+                    0.0,
+                    (
+                        COUNTDOWN_FALLBACK_PROBATION_FRAMES
+                        - self._frames_observed
+                    ) * POLL_SECONDS,
+                ),
+                1,
             ),
             "commercial": self.last_commercial,
             "commercial_confidence": round(self.overall_commercial_confidence * 100, 1),
