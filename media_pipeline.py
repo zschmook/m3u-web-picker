@@ -114,20 +114,53 @@ def capability_test() -> dict[str, Any]:
 
 def status(*, run_test: bool = False) -> dict[str, Any]:
     current = settings()
-    test = capability_test() if run_test else dict(_last_test)
+    test = capability_test() if run_test or (current["enabled"] and not _last_test) else dict(_last_test)
     with _session_lock:
         sessions = [dict(item) for item in _sessions.values()]
-    return {"settings": current, "capability": test, "runtime": {"active_sessions": len(sessions), "sessions": sessions}, "direct_playlist": "/playlist/channels.direct.m3u"}
+    return {
+        "settings": current,
+        "capability": test,
+        "commercial_detection": commercial_detection_eligibility(current, test),
+        "runtime": {"active_sessions": len(sessions), "sessions": sessions},
+        "direct_playlist": "/playlist/channels.direct.m3u",
+    }
+
+
+def commercial_detection_eligibility(
+    current: dict[str, Any] | None = None,
+    test: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = dict(current or settings())
+    test = dict(test or _last_test)
+    if not current.get("enabled"):
+        return {"available": False, "reason": "Enable FFmpeg encoding first."}
+    if not current.get("warning_acknowledged"):
+        return {"available": False, "reason": "Acknowledge the encoding performance risk first."}
+    if not test.get("ok"):
+        return {"available": False, "reason": "Run a successful hardware check first."}
+    if test.get("hardware_available"):
+        return {"available": True, "reason": "Hardware encoding is available."}
+    if current.get("encoder") == CPU_ENCODER and test.get("active_encoder") == CPU_ENCODER:
+        return {"available": True, "reason": "Explicit CPU encoding was accepted."}
+    return {
+        "available": False,
+        "reason": "No hardware encoder passed. Select CPU (libx264) explicitly to accept CPU encoding.",
+    }
 
 
 def save(values: dict[str, Any]) -> dict[str, Any]:
     current = settings()
+    requested_detection_enable = bool(values.get("commercial_detection_enabled"))
     for key in DEFAULTS:
         if key in values:
             current[key] = values[key]
     current["enabled"] = bool(current["enabled"])
     current["warning_acknowledged"] = bool(current["warning_acknowledged"])
     current["commercial_detection_enabled"] = bool(current["commercial_detection_enabled"])
+    if not current["enabled"]:
+        if requested_detection_enable:
+            raise ValueError("Enable FFmpeg encoding before enabling automatic commercial filtering.")
+        current["commercial_detection_enabled"] = False
     current["max_sessions"] = max(1, min(16, int(current["max_sessions"] or 2)))
     requested = str(current["encoder"] or "auto")
     if requested not in {"auto", CPU_ENCODER, *HARDWARE_ENCODERS}:
@@ -135,16 +168,19 @@ def save(values: dict[str, Any]) -> dict[str, Any]:
     current["encoder"] = requested
     if current["enabled"] and not current["warning_acknowledged"]:
         raise ValueError("Acknowledge the encoding performance warning before enabling FFmpeg.")
-    if current["commercial_detection_enabled"] and not current["enabled"]:
-        raise ValueError("Enable FFmpeg encoding before enabling automatic commercial filtering.")
+    functional_test: dict[str, Any] = {}
     if current["enabled"]:
-        test = capability_test()
-        if not test.get("ok"):
-            raise ValueError(str(test.get("error") or "FFmpeg has no usable encoder."))
-        if requested not in {"auto", test.get("active_encoder")}:
-            matching = next((item for item in test.get("attempts", []) if item.get("encoder") == requested), None)
+        functional_test = capability_test()
+        if not functional_test.get("ok"):
+            raise ValueError(str(functional_test.get("error") or "FFmpeg has no usable encoder."))
+        if requested not in {"auto", functional_test.get("active_encoder")}:
+            matching = next((item for item in functional_test.get("attempts", []) if item.get("encoder") == requested), None)
             if not matching or not matching.get("ok"):
                 raise ValueError(f"The selected encoder {requested} failed its functional test.")
+    if current["commercial_detection_enabled"]:
+        eligibility = commercial_detection_eligibility(current, functional_test)
+        if not eligibility["available"]:
+            raise ValueError(str(eligibility["reason"]))
     return app_config.update_section(SECTION, current)
 
 
@@ -170,6 +206,14 @@ def active_encoder() -> str:
     if attempt and attempt.get("ok"):
         return requested
     return CPU_ENCODER
+
+
+def commercial_filtering_active() -> bool:
+    current = settings()
+    if not current["commercial_detection_enabled"]:
+        return False
+    test = dict(_last_test) or capability_test()
+    return bool(commercial_detection_eligibility(current, test)["available"])
 
 
 def acquire_session(output: str, *, identity: str = "") -> str:

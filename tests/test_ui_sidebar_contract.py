@@ -140,7 +140,7 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn("video.muted = false;", script)
         self.assertIn("video.muted = true;", script)
         self.assertIn("ui_commercial_test.js?v=commercial-test-10", template)
-        self.assertIn("ui_sidebar.js?v=sidebar-8", template)
+        self.assertIn("ui_sidebar.js?v=sidebar-9", template)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
   "use strict";
   const el = id => document.getElementById(id);
   let currentSettings = {};
+  let currentCapability = {};
   async function api(path, options = {}) {
     const response = await fetch(path, {...options, cache: "no-store"});
     const data = await response.json().catch(() => ({}));
@@ -10,18 +11,49 @@
   }
   function busy(value) { ["uiEncodingTest", "uiEncodingSave"].forEach(id => { if (el(id)) el(id).disabled = value; }); }
   function status(message, kind = "") { const node = el("uiEncodingStatus"); if (node) { node.textContent = message; node.className = `ui-settings-status${kind ? ` is-${kind}` : ""}`; } }
+  function updateCommercialLock() {
+    const enabled = Boolean(el("uiEncodingEnabled")?.checked);
+    const acknowledged = Boolean(el("uiEncodingAcknowledge")?.checked);
+    const encoder = el("uiEncodingEncoder")?.value || "auto";
+    const checked = Boolean(currentCapability.ok);
+    const hardware = checked && Boolean(currentCapability.hardware_available);
+    const explicitCpu = checked
+      && currentCapability.active_encoder === "libx264"
+      && encoder === "libx264";
+    const available = enabled && acknowledged && (hardware || explicitCpu);
+    const toggle = el("uiCommercialDetectionEnabled");
+    if (toggle) {
+      toggle.disabled = !available;
+      if (!available) toggle.checked = false;
+    }
+    const lock = el("uiCommercialDetectionLock");
+    if (lock) {
+      lock.textContent = !enabled
+        ? "Locked until FFmpeg encoding is enabled."
+        : !acknowledged
+          ? "Locked until the performance warning is acknowledged."
+          : !checked
+            ? "Locked until the hardware check passes."
+            : hardware
+              ? "Available: a hardware encoder passed its functional test."
+              : explicitCpu
+                ? "Available: CPU (libx264) was selected explicitly."
+                : "Locked: no hardware encoder passed. Select CPU (libx264) explicitly to continue.";
+    }
+  }
   function render(data) {
     const settings = data.settings || {};
     currentSettings = {...settings};
     const test = data.capability || {};
+    currentCapability = {...test};
     el("uiEncodingEnabled").checked = Boolean(settings.enabled);
     el("uiEncodingAcknowledge").checked = Boolean(settings.warning_acknowledged);
     el("uiEncodingEncoder").value = settings.encoder || "auto";
     el("uiEncodingMaxSessions").value = settings.max_sessions || 2;
     el("uiCommercialDetectionEnabled").checked = Boolean(settings.commercial_detection_enabled);
-    el("uiCommercialDetectionEnabled").disabled = !settings.enabled;
     el("uiEncodingBadge").textContent = settings.enabled ? "Enabled" : "Disabled";
     el("uiEncodingBadge").classList.toggle("is-enabled", Boolean(settings.enabled));
+    updateCommercialLock();
     if (!test.tested_at) return;
     const version = test.ffmpeg_version || "FFmpeg unavailable";
     const encoder = test.active_encoder || "none";
@@ -68,10 +100,10 @@
     }
   }
   el("uiEncodingEnabled")?.addEventListener("change", () => {
-    const enabled = el("uiEncodingEnabled").checked;
-    el("uiCommercialDetectionEnabled").disabled = !enabled;
-    if (!enabled) el("uiCommercialDetectionEnabled").checked = false;
+    updateCommercialLock();
   });
+  el("uiEncodingAcknowledge")?.addEventListener("change", updateCommercialLock);
+  el("uiEncodingEncoder")?.addEventListener("change", updateCommercialLock);
   el("uiEncodingTest")?.addEventListener("click", test);
   el("uiEncodingSave")?.addEventListener("click", save);
   void load();

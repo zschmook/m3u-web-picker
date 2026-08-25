@@ -287,9 +287,7 @@ def _build_stream(
                 with _LOCK:
                     current = _STREAMS.get(target)
                 if current is stream:
-                    filtering_enabled = bool(
-                        media_pipeline.settings()["commercial_detection_enabled"]
-                    )
+                    filtering_enabled = media_pipeline.commercial_filtering_active()
                     _set_stream_commercial(
                         stream,
                         bool(filtering_enabled and detected.get("active")),

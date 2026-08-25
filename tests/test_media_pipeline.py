@@ -37,6 +37,60 @@ class MediaPipelineTests(unittest.TestCase):
             saved = media_pipeline.save({"enabled": True, "warning_acknowledged": True})
             self.assertTrue(saved["enabled"])
 
+    def test_commercial_filtering_rejects_silent_auto_cpu_fallback(self):
+        result = {
+            "ok": True,
+            "hardware_available": False,
+            "active_encoder": "libx264",
+            "mode": "cpu",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            media_pipeline.app_config, "CONFIG_PATH", Path(temp) / "config.json"
+        ), patch.object(media_pipeline, "capability_test", return_value=result):
+            with self.assertRaisesRegex(ValueError, "Select CPU"):
+                media_pipeline.save({
+                    "enabled": True,
+                    "warning_acknowledged": True,
+                    "encoder": "auto",
+                    "commercial_detection_enabled": True,
+                })
+
+    def test_commercial_filtering_allows_explicit_cpu_opt_in(self):
+        result = {
+            "ok": True,
+            "hardware_available": False,
+            "active_encoder": "libx264",
+            "mode": "cpu",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            media_pipeline.app_config, "CONFIG_PATH", Path(temp) / "config.json"
+        ), patch.object(media_pipeline, "capability_test", return_value=result):
+            saved = media_pipeline.save({
+                "enabled": True,
+                "warning_acknowledged": True,
+                "encoder": "libx264",
+                "commercial_detection_enabled": True,
+            })
+        self.assertTrue(saved["commercial_detection_enabled"])
+
+    def test_commercial_filtering_allows_tested_hardware(self):
+        result = {
+            "ok": True,
+            "hardware_available": True,
+            "active_encoder": "h264_nvenc",
+            "mode": "hardware",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            media_pipeline.app_config, "CONFIG_PATH", Path(temp) / "config.json"
+        ), patch.object(media_pipeline, "capability_test", return_value=result):
+            saved = media_pipeline.save({
+                "enabled": True,
+                "warning_acknowledged": True,
+                "encoder": "auto",
+                "commercial_detection_enabled": True,
+            })
+        self.assertTrue(saved["commercial_detection_enabled"])
+
     def test_session_limit_is_enforced(self):
         with patch.object(media_pipeline, "settings", return_value={**media_pipeline.DEFAULTS, "max_sessions": 1}):
             token = media_pipeline.acquire_session("browser")

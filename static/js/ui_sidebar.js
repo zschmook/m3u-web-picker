@@ -289,6 +289,7 @@
               <input id="uiCommercialDetectionEnabled" type="checkbox" role="switch">
               <span><strong>Automatically filter detected commercials</strong><small>Turn this off to leave playback untouched while detection, diagnostics, and per-channel learning continue.</small></span>
             </label>
+            <div class="ui-settings-runtime" id="uiCommercialDetectionLock">Checking encoder eligibility…</div>
             <div class="ui-settings-runtime" id="uiEncodingRuntime">FFmpeg has not been checked yet.</div>
             <div class="ui-output-summary"><div><span>Normal M3U</span><code>/playlist/channels.m3u</code></div><div><span>Always-direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
             <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiEncodingTest" type="button">Run Hardware Check</button><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
