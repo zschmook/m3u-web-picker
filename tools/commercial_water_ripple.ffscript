@@ -1,0 +1,14 @@
+[0:v]fps=8,scale=960:540:flags=lanczos,format=rgba,split=2[base][water];
+[water]crop=960:145:0:290,
+geq=r='r(X+(0.35+2.0*Y/H)*sin(2*PI*(Y/32-N/24))+(0.15+0.8*Y/H)*sin(2*PI*(Y/19-N/12)),Y+0.45*sin(2*PI*(Y/27-N/24)))':
+     g='g(X+(0.35+2.0*Y/H)*sin(2*PI*(Y/32-N/24))+(0.15+0.8*Y/H)*sin(2*PI*(Y/19-N/12)),Y+0.45*sin(2*PI*(Y/27-N/24)))':
+     b='b(X+(0.35+2.0*Y/H)*sin(2*PI*(Y/32-N/24))+(0.15+0.8*Y/H)*sin(2*PI*(Y/19-N/12)),Y+0.45*sin(2*PI*(Y/27-N/24)))',
+format=rgba,
+geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(between(X,385,575)*gt(Y,55),0,if(lt(Y,5),51*Y,if(gt(Y,140),51*(145-Y),255)))'[ripples];
+[base][ripples]overlay=0:290:format=auto[scene];
+[scene]drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='.':fontcolor=white:fontsize=54:shadowcolor=black@0.75:shadowx=2:shadowy=2:x=769:y=249:enable='between(t,0,0.999)'[dot1];
+[dot1]drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='..':fontcolor=white:fontsize=54:shadowcolor=black@0.75:shadowx=2:shadowy=2:x=769:y=249:enable='between(t,1,1.999)'[dot2];
+[dot2]drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='...':fontcolor=white:fontsize=54:shadowcolor=black@0.75:shadowx=2:shadowy=2:x=769:y=249:enable='gte(t,2)'[animated];
+[animated]split=2[frames][palette_source];
+[palette_source]palettegen=stats_mode=diff:max_colors=192[palette];
+[frames][palette]paletteuse=dither=sierra2_4a:diff_mode=rectangle[out]

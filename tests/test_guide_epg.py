@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from guide_epg import enrich_guide_channels
+from guide_epg import enrich_guide_channels, programme_window
 
 
 class GuideEpgTests(unittest.TestCase):
@@ -148,6 +148,20 @@ class GuideEpgTests(unittest.TestCase):
         self.assertEqual(enriched[0]["upcoming"], [])
         self.assertFalse(status["available"])
         self.assertIn("not available", status["error"])
+
+    def test_programme_window_reports_exact_current_boundary(self):
+        self._write_epg()
+
+        window = programme_window(
+            self.epg_path,
+            "station-1",
+            timezone_name="America/New_York",
+            now=self.now,
+        )
+
+        self.assertEqual(window["current"]["title"], "Dateline NBC")
+        self.assertEqual(window["current"]["stop"], "2026-08-10T15:00:00-04:00")
+        self.assertEqual(window["next"]["title"], "NBC News")
 
 
 if __name__ == "__main__":

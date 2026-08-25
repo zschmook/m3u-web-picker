@@ -2,6 +2,7 @@ from flask import Response, redirect, request, send_file
 
 import core
 import media_pipeline
+import logo_registry
 import public_epg_logos
 import sports
 from media import mpegts
@@ -41,6 +42,19 @@ def register_output_routes(app):
             return sports.generated_stream_target(core.DB_PATH, int(identity))
         return ""
 
+    def profile_identity(kind: str, identity: str) -> str:
+        if kind != "manual":
+            return ""
+        expected = f"manual:{identity}"
+        channel = next(
+            (
+                item for item in core.selected_channels_from_selected_ids_in_order()
+                if core.channel_key(item) == expected
+            ),
+            None,
+        )
+        return logo_registry.channel_identity(channel or {}) or expected
+
     @app.route("/stream/channel/<kind>/<identity>/mpegts", methods=["GET", "HEAD"])
     def encoded_channel_stream(kind: str, identity: str):
         target = resolve_stream(kind, identity)
@@ -48,7 +62,15 @@ def register_output_routes(app):
             return Response("Channel stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
         if request.method == "HEAD":
             return Response(status=200, content_type="video/mp2t")
-        return mpegts.response_for(target)
+        return mpegts.response_for(
+            target,
+            identity=f"{kind}:{identity}",
+            sports_generated=kind == "sports",
+            profile_identity=profile_identity(kind, identity),
+            profile_db_path=core.DB_PATH,
+            epg_path=core.COMBINED_EPG_PATH,
+            timezone_name=core.master_timezone_name(),
+        )
 
     def serve_named_epg(source_id: str):
         source = core.find_epg_source(source_id)

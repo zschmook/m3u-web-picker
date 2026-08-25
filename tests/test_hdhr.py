@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from flask import Flask
 
+import core
 from api.hdhr import (
     HDHR_DEVICE_AUTH,
     HDHR_DEVICE_ID,
@@ -255,7 +256,15 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         response = self.client.get("/hdhr/stream/7")
         self.assertEqual(response.status_code, 200)
         manual_stream_target.assert_called_once_with("manual-token")
-        response_for.assert_called_once_with("http://provider/manual")
+        response_for.assert_called_once_with(
+            "http://provider/manual",
+            identity="hdhr:7",
+            sports_generated=False,
+            profile_identity="tvg:nbc10.example",
+            profile_db_path=core.DB_PATH,
+            epg_path=core.COMBINED_EPG_PATH,
+            timezone_name=core.master_timezone_name(),
+        )
 
     @patch("api.hdhr.core.manual_stream_target", return_value="http://provider/manual")
     @patch("api.hdhr.mpegts.response_for")
@@ -272,7 +281,15 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         response = self.client.get("/auto/v7?duration=7200")
         self.assertEqual(response.status_code, 200)
         manual_stream_target.assert_called_once_with("manual-token")
-        response_for.assert_called_once_with("http://provider/manual")
+        response_for.assert_called_once_with(
+            "http://provider/manual",
+            identity="hdhr:7",
+            sports_generated=False,
+            profile_identity="tvg:nbc10.example",
+            profile_db_path=core.DB_PATH,
+            epg_path=core.COMBINED_EPG_PATH,
+            timezone_name=core.master_timezone_name(),
+        )
 
     @patch("api.hdhr.sports.generated_stream_target", return_value="http://provider/sports")
     @patch("api.hdhr.mpegts.response_for")
@@ -290,7 +307,15 @@ class HdHomeRunFacadeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         generated_stream_target.assert_called_once()
         self.assertEqual(generated_stream_target.call_args.args[1], 1000)
-        response_for.assert_called_once_with("http://provider/sports")
+        response_for.assert_called_once_with(
+            "http://provider/sports",
+            identity="hdhr:1000",
+            sports_generated=True,
+            profile_identity="tvg:m3u-picker-sports-1000",
+            profile_db_path=core.DB_PATH,
+            epg_path=core.COMBINED_EPG_PATH,
+            timezone_name=core.master_timezone_name(),
+        )
 
 
 if __name__ == "__main__":

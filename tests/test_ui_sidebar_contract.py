@@ -10,12 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 class ModernUiContractTests(unittest.TestCase):
     def test_app_loads_sidebar_assets_after_existing_ui_layers(self):
         app_text = (ROOT / "templates/index.html").read_text(encoding="utf-8")
-        self.assertIn('/static/css/ui_sidebar.css?v=sidebar-2', app_text)
-        self.assertIn('/static/js/ui_sidebar.js?v=sidebar-2', app_text)
+        self.assertIn('/static/css/ui_sidebar.css?v=', app_text)
+        self.assertIn('/static/js/ui_sidebar.js?v=', app_text)
         self.assertIn('/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1', app_text)
         self.assertIn('/static/js/ui_network_settings.js?v=network-settings-1', app_text)
         self.assertGreater(
-            app_text.index('/static/js/ui_sidebar.js?v=sidebar-2'),
+            app_text.index('/static/js/ui_sidebar.js?v='),
             app_text.index('/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1'),
         )
 
@@ -103,6 +103,8 @@ class ModernUiContractTests(unittest.TestCase):
             self.assertIn(key, source)
         self.assertIn('"M3U Publish"', source)
         self.assertIn('"Combined EPG"', source)
+        self.assertIn('"active_streams": active_ffmpeg_streams', source)
+        self.assertIn('playback = media_pipeline.status()', source)
 
     def test_ui_status_routes_are_registered(self):
         routes = (ROOT / "api/routes.py").read_text(encoding="utf-8")
@@ -124,6 +126,21 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn('clearButton.classList.toggle("btn-outline-danger", canRemove);', script)
         self.assertIn("const canRemove = removableVisible.length > 0;", script)
         self.assertIn("const removable = removableVisibleChannels();", script)
+
+    def test_commercial_preview_uses_browser_playback_not_debug_routes(self):
+        script = (ROOT / "static/js/ui_commercial_test.js").read_text(encoding="utf-8")
+        template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
+        self.assertIn("/guide/play/manual/", script)
+        self.assertIn("/guide/play/sports/", script)
+        self.assertNotIn("/guide/debug/ts/", script)
+        self.assertIn('addEventListener("error"', script)
+        sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
+        self.assertIn('id="uiCommercialTestVideo" controls autoplay playsinline', sidebar)
+        self.assertNotIn('id="uiCommercialTestVideo" muted', sidebar)
+        self.assertIn("video.muted = false;", script)
+        self.assertIn("video.muted = true;", script)
+        self.assertIn("ui_commercial_test.js?v=commercial-test-10", template)
+        self.assertIn("ui_sidebar.js?v=sidebar-8", template)
 
 
 if __name__ == "__main__":

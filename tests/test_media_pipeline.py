@@ -16,6 +16,14 @@ class MediaPipelineTests(unittest.TestCase):
             media_pipeline.app_config, "CONFIG_PATH", Path(temp) / "config.json"
         ):
             self.assertFalse(media_pipeline.settings()["enabled"])
+            self.assertFalse(media_pipeline.settings()["commercial_detection_enabled"])
+
+    def test_commercial_detection_requires_encoding(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(
+            media_pipeline.app_config, "CONFIG_PATH", Path(temp) / "config.json"
+        ):
+            with self.assertRaisesRegex(ValueError, "Enable FFmpeg"):
+                media_pipeline.save({"commercial_detection_enabled": True})
 
     def test_enable_requires_acknowledgement(self):
         with self.assertRaisesRegex(ValueError, "Acknowledge"):

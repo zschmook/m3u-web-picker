@@ -15,6 +15,7 @@ DEFAULTS = {
     "warning_acknowledged": False,
     "encoder": "auto",
     "max_sessions": 2,
+    "commercial_detection_enabled": False,
 }
 HARDWARE_ENCODERS = ("h264_nvenc", "h264_qsv", "h264_vaapi")
 CPU_ENCODER = "libx264"
@@ -28,6 +29,7 @@ def settings() -> dict[str, Any]:
     result = {**DEFAULTS, **saved}
     result["enabled"] = bool(result["enabled"])
     result["warning_acknowledged"] = bool(result["warning_acknowledged"])
+    result["commercial_detection_enabled"] = bool(result["commercial_detection_enabled"])
     result["encoder"] = str(result["encoder"] or "auto")
     result["max_sessions"] = max(1, min(16, int(result["max_sessions"] or 2)))
     return result
@@ -125,6 +127,7 @@ def save(values: dict[str, Any]) -> dict[str, Any]:
             current[key] = values[key]
     current["enabled"] = bool(current["enabled"])
     current["warning_acknowledged"] = bool(current["warning_acknowledged"])
+    current["commercial_detection_enabled"] = bool(current["commercial_detection_enabled"])
     current["max_sessions"] = max(1, min(16, int(current["max_sessions"] or 2)))
     requested = str(current["encoder"] or "auto")
     if requested not in {"auto", CPU_ENCODER, *HARDWARE_ENCODERS}:
@@ -132,6 +135,8 @@ def save(values: dict[str, Any]) -> dict[str, Any]:
     current["encoder"] = requested
     if current["enabled"] and not current["warning_acknowledged"]:
         raise ValueError("Acknowledge the encoding performance warning before enabling FFmpeg.")
+    if current["commercial_detection_enabled"] and not current["enabled"]:
+        raise ValueError("Enable FFmpeg encoding before enabling automatic commercial filtering.")
     if current["enabled"]:
         test = capability_test()
         if not test.get("ok"):
@@ -167,13 +172,18 @@ def active_encoder() -> str:
     return CPU_ENCODER
 
 
-def acquire_session(output: str) -> str:
+def acquire_session(output: str, *, identity: str = "") -> str:
     token = uuid.uuid4().hex
     with _session_lock:
         limit = settings()["max_sessions"]
         if len(_sessions) >= limit:
             raise RuntimeError(f"FFmpeg stream limit reached ({limit} active). Stop another stream or raise the limit in Settings → Encoding.")
-        _sessions[token] = {"id": token, "output": str(output), "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        _sessions[token] = {
+            "id": token,
+            "output": str(output),
+            "identity": str(identity or ""),
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
     return token
 
 

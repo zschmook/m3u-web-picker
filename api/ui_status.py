@@ -12,7 +12,6 @@ import master_update_worker
 import media_pipeline
 import roku_devices
 import sports
-from media import hls
 from .hdhr import HDHR_TUNER_COUNT
 
 
@@ -30,17 +29,6 @@ def _stage(name: str, status: str, detail: str = "", *, kind: str = "system") ->
         "detail": str(detail or ""),
         "kind": str(kind),
     }
-
-
-def _active_hls_sessions() -> int:
-    # The relay registry is process-local by design. Read it under the module's
-    # lock and count only live ffmpeg processes; do not mutate session state.
-    try:
-        with hls._LOCK:  # noqa: SLF001 - same-application status introspection
-            sessions = list(hls._SESSIONS.values())  # noqa: SLF001
-        return sum(1 for session in sessions if session.process.poll() is None)
-    except Exception:
-        return 0
 
 
 def _update_health() -> dict:
@@ -190,6 +178,10 @@ def ui_status_payload() -> dict:
             provider_label = str(primary.get("account_status") or "Active")
             provider_state = "success"
 
+    playback = media_pipeline.status()
+    active_ffmpeg_streams = int(
+        ((playback.get("runtime") or {}).get("active_sessions") or 0)
+    )
     return {
         "provider": {
             "label": provider_label,
@@ -207,7 +199,9 @@ def ui_status_payload() -> dict:
             },
             "roku_saved": len(saved_roku),
             "roku_devices": saved_roku,
-            "active_streams": _active_hls_sessions(),
+            # Picker-owned FFmpeg sessions only. Direct provider playback is
+            # deliberately invisible because it never enters this process.
+            "active_streams": active_ffmpeg_streams,
         },
         "master_update": master,
         "last_update_report": report,
@@ -217,7 +211,7 @@ def ui_status_payload() -> dict:
             "m3u_direct": "/playlist/channels.direct.m3u",
             "epg": "/epg/epg.xml",
         },
-        "playback": media_pipeline.status(),
+        "playback": playback,
     }
 
 

@@ -3,3 +3,4 @@ waitress>=3.0,<4
 tzdata>=2024.1
 Pillow>=10.3,<12
 Markdown>=3.6,<4
+pyzmq>=26,<28

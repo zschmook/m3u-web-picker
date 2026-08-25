@@ -173,6 +173,27 @@ def _now_and_next(records: list[dict], now: datetime) -> tuple[dict | None, dict
     return current, upcoming
 
 
+def programme_window(
+    epg_path: Path,
+    tvg_id: str,
+    *,
+    timezone_name: str,
+    now: datetime | None = None,
+) -> dict:
+    """Return the current programme boundary for one exact XMLTV channel ID."""
+    identity = str(tvg_id or "").strip()
+    if not identity:
+        return {}
+    local_tz = ZoneInfo(str(timezone_name or "America/New_York"))
+    anchor = (now or datetime.now().astimezone()).astimezone(local_tz)
+    index, _metadata = _cached_programme_index(Path(epg_path), str(local_tz))
+    current, upcoming = _now_and_next(index.get(identity, []), anchor)
+    return {
+        "current": _serialize_programme(current),
+        "next": _serialize_programme(upcoming),
+    }
+
+
 def _upcoming_programmes(
     records: list[dict],
     now: datetime,

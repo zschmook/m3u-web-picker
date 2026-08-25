@@ -22,6 +22,8 @@ public_epg_compat.install(core)
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
+_ONBOARDING_DEMO_PROVIDER_SCRIPT = "/static/js/onboarding_demo_provider.js?v=demo-provider-1"
+
 
 @app.after_request
 def disable_runtime_document_cache(response):

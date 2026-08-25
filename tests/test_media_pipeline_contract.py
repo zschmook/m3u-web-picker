@@ -12,6 +12,9 @@ class MediaPipelineContractTests(unittest.TestCase):
         onboarding = (ROOT / "static/js/onboarding.js").read_text(encoding="utf-8")
         self.assertIn("Settings → Encoding", onboarding)
         self.assertIn("uiEncodingEnabled", sidebar)
+        self.assertIn("uiCommercialDetectionEnabled", sidebar)
+        self.assertIn("commercial_detection_enabled", settings)
+        self.assertIn("channel analysis and learning remain active", settings)
         self.assertIn("/api/media-pipeline/test", settings)
         self.assertIn("/playlist/channels.direct.m3u", sidebar)
 

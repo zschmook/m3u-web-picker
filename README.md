@@ -190,6 +190,43 @@ python -m compileall -q .
 find static -name '*.js' -print0 | xargs -0 -n1 node --check
 ```
 
+## Planned channel-balanced cold start — not yet implemented
+
+> **Status: design only. This global seed is not used by the application yet.**
+
+Commercial detection currently keeps every channel's learned profile independent. The planned cold-start layer will let an unfamiliar channel begin with a weak hint from other mature, compatible channels without sharing logo fingerprints, screen positions, or raw observations.
+
+A contributing channel must have roughly three hours of retained observations, 20–30 minutes of commercial observations, at least six complete commercial-to-program transitions, and a usable balance of both classes. Normal bug-based television, sports-generated channels, and bugless/countdown channels will use separate pools.
+
+For the current feature window `x`, each eligible channel supplies its independent score `S_c(x)`. Scores are converted to log-odds and combined with a trimmed mean so that one unusual channel cannot dominate:
+
+```text
+z_c = log(S_c / (1 - S_c))
+S_global = sigmoid(trimmed_mean(z_1, z_2, ... z_k))
+```
+
+Each mature channel receives approximately one vote regardless of how many extra hours it was watched. The target channel is excluded from its own seed.
+
+Local maturity depends on retained program hours `H_p`, commercial hours `H_a`, and complete commercial transitions `T`:
+
+```text
+m = cube_root(
+    (1 - exp(-H_p / 0.75))
+  * (1 - exp(-H_a / 0.25))
+  * (1 - exp(-T / 6))
+)
+```
+
+The effective score blends the global hint with the independent local model:
+
+```text
+S_effective = (1 - m) * S_global + m * S_channel
+```
+
+For example, if the global seed scores a window at 82%, the local channel scores it at 65%, and local maturity is 55%, the effective score is 72.7%. At 90% maturity it becomes 66.7%, so inherited guidance fades naturally as local observations accumulate.
+
+Global predictions will never be written into local history as confirmed facts, and a seeded channel will not contribute to the global pool until it independently satisfies the maturity requirements. Manual corrections retain stronger weight than inferred labels.
+
 ## Current known cleanup items
 
 Two non-blocking issues are still being tracked:

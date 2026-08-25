@@ -7,6 +7,7 @@ from flask import Response, jsonify, request
 
 import core
 import hdhr_config
+import logo_registry
 import sports
 from media import mpegts
 from .http import no_cache
@@ -353,4 +354,12 @@ def register_hdhr_routes(app):
             response = Response(status=200, content_type="video/mp2t")
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             return response
-        return mpegts.response_for(target)
+        return mpegts.response_for(
+            target,
+            identity=f"hdhr:{guide_number}",
+            sports_generated=bool(channel.get("generated")),
+            profile_identity=logo_registry.channel_identity(channel),
+            profile_db_path=core.DB_PATH,
+            epg_path=core.COMBINED_EPG_PATH,
+            timezone_name=core.master_timezone_name(),
+        )

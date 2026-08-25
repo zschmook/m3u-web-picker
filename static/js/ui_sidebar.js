@@ -157,6 +157,73 @@
           <a href="/user-guide" target="_blank" rel="noopener">${icons.external}<span>User Guide</span></a>
           <a href="https://github.com/zschmook/m3u-web-picker" target="_blank" rel="noopener noreferrer">${icons.external}<span>GitHub</span></a>
         </div>
+      </section>
+      <section class="ui-modern-card ui-commercial-test-card">
+        <div class="ui-card-heading">
+          <div><span>Commercial Detection Test</span><small>Manual control for active Jellyfin FFmpeg streams.</small></div>
+          <span class="ui-count-badge" id="uiScte35Badge">SCTE-35 pending</span>
+        </div>
+        <div class="ui-commercial-test-controls">
+          <div><strong id="uiCommercialTestStatus">Loading…</strong><small>Elapsed commercial time: <span id="uiCommercialTestTimer">00:00</span></small></div>
+          <button class="btn ui-btn-primary" id="uiCommercialTestToggle" type="button">Start Commercial</button>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiScte35Status">SCTE-35 not detected</strong>
+          <small id="uiScte35Timestamp">Waiting for a broadcast marker</small>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiLearningChannelStatus">Learning channel</strong>
+          <small id="uiLearningChannelValue">Waiting for stream connection</small>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiLogoDetectorStatus">Logo detector idle</strong>
+          <small id="uiLogoDetectorTimestamp">Starts when a Jellyfin FFmpeg stream connects</small>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiScoreboardDetectorStatus">Scoreboard not detected</strong>
+          <small id="uiScoreboardDetectorDetail">Waits until the broadcast logo is learned</small>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiCountdownDetectorStatus">Countdown overlay not detected</strong>
+          <small id="uiCountdownDetectorDetail">Scans all four corners on non-sports channels</small>
+        </div>
+        <div class="ui-commercial-marker-status">
+          <strong id="uiChannelModelStatus">Channel model waiting</strong>
+          <small id="uiChannelModelDetail">Learns non-sports channels over a rolling two-week window</small>
+          <div class="ui-channel-model-stats">
+            <div><span>Program samples</span><strong id="uiChannelProgramSamples">0</strong></div>
+            <div><span>Commercial samples</span><strong id="uiChannelCommercialSamples">0</strong></div>
+            <div><span>Shadow score</span><strong id="uiChannelShadowScore">—</strong></div>
+          </div>
+          <div class="ui-channel-model-chart-shell">
+            <svg id="uiChannelModelChart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Channel learning signal history">
+              <line x1="0" y1="120" x2="600" y2="120" class="ui-chart-grid"></line>
+              <line x1="0" y1="75" x2="600" y2="75" class="ui-chart-grid"></line>
+              <line x1="0" y1="30" x2="600" y2="30" class="ui-chart-grid"></line>
+              <path id="uiChannelCutLine" class="ui-channel-chart-line is-cut" d=""></path>
+              <path id="uiChannelColorLine" class="ui-channel-chart-line is-color" d=""></path>
+              <path id="uiChannelGraphicLine" class="ui-channel-chart-line is-graphic" d=""></path>
+              <path id="uiChannelBugLine" class="ui-channel-chart-line is-bug" d=""></path>
+              <path id="uiChannelConfidenceLine" class="ui-channel-chart-line is-confidence" d=""></path>
+            </svg>
+            <div class="ui-channel-chart-time-axis" id="uiChannelModelChartTimestamps" aria-label="Channel learning timestamps"></div>
+            <div class="ui-channel-chart-legend">
+              <span class="is-cut">Cut frequency</span>
+              <span class="is-color">Color changes</span>
+              <span class="is-graphic">Program graphic</span>
+              <span class="is-bug">Bug confidence</span>
+              <span class="is-confidence">Commercial confidence</span>
+            </div>
+          </div>
+          <div class="ui-commercial-feedback-controls">
+            <button class="btn ui-btn-secondary" id="uiMarkProgramBtn" type="button">This Is Program</button>
+            <button class="btn ui-btn-secondary" id="uiMarkCommercialBtn" type="button">This Is a Commercial</button>
+          </div>
+        </div>
+        <div class="ui-commercial-test-preview d-none" id="uiCommercialTestPreview">
+          <video id="uiCommercialTestVideo" controls autoplay playsinline preload="none"></video>
+          <img id="uiCommercialTestFallback" src="/static/images/commercial-in-progress-preview.gif" alt="Commercial in progress over a peaceful mountain lake">
+        </div>
       </section>`;
     overview.appendChild(overviewGrid);
     const firstPage = providerCard || epgPage || channelShell || sportsCard;
@@ -217,6 +284,11 @@
             </label>
             <label class="ui-settings-field" for="uiEncodingEncoder"><span>Encoder</span><select id="uiEncodingEncoder" class="form-select"><option value="auto">Auto (recommended)</option><option value="h264_nvenc">NVIDIA NVENC</option><option value="h264_qsv">Intel Quick Sync</option><option value="h264_vaapi">VA-API</option><option value="libx264">CPU (libx264)</option></select></label>
             <label class="ui-settings-field" for="uiEncodingMaxSessions"><span>Maximum simultaneous streams</span><input id="uiEncodingMaxSessions" class="form-control" type="number" min="1" max="16" value="2"></label>
+            <div class="ui-settings-runtime"><strong>Commercial Analysis and Filtering</strong><br>FFmpeg streams are always analyzed so each channel can keep learning. Automatic filtering controls only whether detected breaks are replaced on your TV.</div>
+            <label class="ui-settings-toggle" for="uiCommercialDetectionEnabled">
+              <input id="uiCommercialDetectionEnabled" type="checkbox" role="switch">
+              <span><strong>Automatically filter detected commercials</strong><small>Turn this off to leave playback untouched while detection, diagnostics, and per-channel learning continue.</small></span>
+            </label>
             <div class="ui-settings-runtime" id="uiEncodingRuntime">FFmpeg has not been checked yet.</div>
             <div class="ui-output-summary"><div><span>Normal M3U</span><code>/playlist/channels.m3u</code></div><div><span>Always-direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
             <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiEncodingTest" type="button">Run Hardware Check</button><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
