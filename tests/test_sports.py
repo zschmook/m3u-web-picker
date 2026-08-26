@@ -491,7 +491,7 @@ http://provider.test/user/pass/philly.ts
         self.assertEqual([row["feed_type"] for row in rows], ["away", "event", "home"])
         self.assertIn("Away broadcast", rows[0]["subtitle"])
         self.assertIn('x-sports-subtitle="Away broadcast', rows[0]["raw"][0])
-        self.assertIn('tvg-logo="https://a.espncdn.com/i/teamlogos/mlb/500/phi.png"', rows[0]["raw"][0])
+        self.assertIn('/api/event-logo/', rows[0]["raw"][0])
 
     def test_build_feeds_prefers_team_aware_candidate_for_same_url(self):
         shared = {
