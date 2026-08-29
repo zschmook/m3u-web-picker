@@ -19,7 +19,7 @@ import media_pipeline
 _LOCK = threading.RLock()
 _STREAMS: dict[str, "SharedMpegtsStream"] = {}
 _END = object()
-STALE_SUBSCRIBER_SECONDS = 15.0
+STALE_SUBSCRIBER_SECONDS = 60.0
 SLATE_PATH = Path(__file__).resolve().parent.parent / "static" / "images" / "commercial-in-progress-preview.gif"
 
 
@@ -114,7 +114,17 @@ def _command(
     return command
 
 
-def _set_stream_commercial(stream: SharedMpegtsStream, active: bool) -> tuple[bool, str]:
+def _set_stream_commercial(
+    stream: SharedMpegtsStream,
+    active: bool,
+    *,
+    manual: bool = False,
+) -> tuple[bool, str]:
+    # Enforce the playback setting at the final control boundary. Analyzer
+    # callbacks are asynchronous and can arrive after the user has disabled
+    # filtering; no stale automatic decision may put the slate on screen.
+    if active and not manual and not media_pipeline.commercial_filtering_active():
+        return False, "Automatic commercial filtering is disabled."
     if stream.process.poll() is not None:
         return False, "FFmpeg session has ended."
     try:
@@ -183,6 +193,24 @@ def active_profile_snapshot() -> dict:
     return active_stream_profile_snapshot()
 
 
+def set_inspection_archive(stream_identity: str, directory: Path | None) -> bool:
+    """Persist low-rate original analysis frames for an unattended test run."""
+    with _LOCK:
+        stream = next(
+            (
+                candidate for candidate in _STREAMS.values()
+                if candidate.process.poll() is None
+                and candidate.analyzer is not None
+                and candidate.identity == stream_identity
+            ),
+            None,
+        )
+    if stream is None or stream.analyzer is None:
+        return False
+    stream.analyzer.set_inspection_archive(directory)
+    return True
+
+
 def apply_program_feedback(stream_identity: str = "") -> bool:
     """Apply a user's program correction to the live classifier immediately."""
     with _LOCK:
@@ -203,6 +231,22 @@ def apply_program_feedback(stream_identity: str = "") -> bool:
     return True
 
 
+def apply_commercial_feedback(stream_identity: str = "") -> bool:
+    """Give a user's commercial label to the active fingerprint episode."""
+    with _LOCK:
+        candidates = [
+            stream for stream in _STREAMS.values()
+            if stream.process.poll() is None
+            and stream.analyzer is not None
+            and (not stream_identity or stream.identity == stream_identity)
+        ]
+        candidates.sort(key=lambda stream: stream.created_at, reverse=True)
+        stream = candidates[0] if candidates else None
+    if stream is None or stream.analyzer is None:
+        return False
+    return stream.analyzer.apply_commercial_feedback()
+
+
 def set_commercial(active: bool, stream_identity: str = "") -> dict:
     with _LOCK:
         streams = [
@@ -211,7 +255,8 @@ def set_commercial(active: bool, stream_identity: str = "") -> dict:
         ]
     results = []
     for stream in streams:
-        ok, error = _set_stream_commercial(stream, active)
+        # This path is reached only by the explicit Start/End Commercial test.
+        ok, error = _set_stream_commercial(stream, active, manual=True)
         results.append({"identity": stream.identity, "ok": ok, "error": error})
     return {
         "requested_active": bool(active),
@@ -291,6 +336,7 @@ def _build_stream(
                     _set_stream_commercial(
                         stream,
                         bool(filtering_enabled and detected.get("active")),
+                        manual=False,
                     )
 
         # Analysis is part of every FFmpeg stream. The user-facing setting only

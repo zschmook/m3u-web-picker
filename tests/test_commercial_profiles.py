@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -146,7 +147,7 @@ class CommercialProfilesTests(unittest.TestCase):
                 )
             removed = commercial_profiles.prune(self.db_path, now=datetime(2026, 8, 24, 13, 0, tzinfo=timezone.utc))
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             remaining = conn.execute(
                 "SELECT COUNT(*) FROM commercial_channel_observations"
             ).fetchone()[0]
@@ -174,6 +175,47 @@ class CommercialProfilesTests(unittest.TestCase):
         self.assertLess(points[0]["observed_at"], points[-1]["observed_at"])
         self.assertEqual(points[-1]["label"], "commercial")
         self.assertAlmostEqual(points[-1]["features"]["color_volatility"], 0.8)
+
+    def test_program_feedback_discards_only_recent_inferred_ad_samples(self):
+        anchor = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
+        samples = (
+            (-11, "commercial", "inferred"),
+            (-9, "commercial", "inferred"),
+            (-5, "uncertain", "inferred"),
+            (-3, "commercial", "user"),
+            (-2, "program", "inferred"),
+        )
+        with patch("commercial_profiles.maybe_prune", return_value=0):
+            for offset, label, source in samples:
+                commercial_profiles.record(
+                    self.db_path,
+                    "tvg:hln.example",
+                    label=label,
+                    source=source,
+                    features={"commercial_confidence": 0.9},
+                    observed_at=anchor + timedelta(seconds=offset),
+                )
+
+        removed = commercial_profiles.discard_recent_possible_commercials(
+            self.db_path,
+            "tvg:hln.example",
+            seconds=10,
+            observed_at=anchor,
+        )
+        remaining = commercial_profiles.recent(
+            self.db_path, "tvg:hln.example", limit=20
+        )
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(len(remaining), 3)
+        self.assertEqual(
+            [(row["label"], row["source"]) for row in remaining],
+            [
+                ("commercial", "inferred"),
+                ("commercial", "user"),
+                ("program", "inferred"),
+            ],
+        )
 
     def test_recent_can_return_a_time_bounded_graph_window(self):
         now = datetime.now(timezone.utc)
@@ -271,7 +313,29 @@ class CommercialProfilesTests(unittest.TestCase):
             label="program",
             features={},
         )
-        with sqlite3.connect(self.db_path) as conn:
+        commercial_profiles.begin_commercial_episode(
+            self.db_path,
+            "tvg:wgal.example",
+            "episode-to-clear",
+            entry_reason="logo-missing",
+            features={},
+        )
+        import commercial_signatures
+        commercial_signatures.record_episode(
+            self.db_path,
+            "tvg:wgal.example",
+            "manual-ad",
+            [
+                (
+                    index,
+                    tuple([index] * commercial_signatures.TILE_COUNT),
+                    tuple([200] * (commercial_signatures.TILE_COUNT * 3)),
+                )
+                for index in range(15)
+            ],
+            user_confirmed=True,
+        )
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute("CREATE TABLE app_settings (name TEXT PRIMARY KEY, value TEXT)")
             conn.execute("INSERT INTO app_settings VALUES ('port', '9999')")
             conn.commit()
@@ -280,8 +344,11 @@ class CommercialProfilesTests(unittest.TestCase):
 
         self.assertEqual(removed["observations"], 1)
         self.assertEqual(removed["bugs"], 1)
+        self.assertEqual(removed["signatures"], 1)
+        self.assertEqual(removed["episodes"], 1)
+        self.assertEqual(commercial_signatures.library_stats(self.db_path)["classified"], 0)
         self.assertEqual(commercial_profiles.trusted_bugs(self.db_path, "tvg:wgal.example"), [])
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             self.assertEqual(
                 conn.execute("SELECT value FROM app_settings WHERE name = 'port'").fetchone()[0],
                 "9999",
@@ -331,6 +398,94 @@ class CommercialProfilesTests(unittest.TestCase):
         profile = commercial_profiles.profile(self.db_path, "tvg:nbc.example")
         self.assertEqual(profile["commercial_samples"], 0)
         self.assertEqual(profile["program_samples"], 1)
+
+    def test_episode_ledger_records_duration_reasons_and_signal_summary(self):
+        started = datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)
+        commercial_profiles.begin_commercial_episode(
+            self.db_path,
+            "tvg:nbc.example",
+            "logo-episode-1",
+            entry_reason="logo-missing",
+            observed_at=started,
+            features={
+                "commercial_confidence": 0.72,
+                "bug_identity_confidence": 0.18,
+                "program_graphics_confidence": 0.22,
+            },
+        )
+        commercial_profiles.record(
+            self.db_path,
+            "tvg:nbc.example",
+            label="commercial",
+            event_id="logo-episode-1",
+            observed_at=started + timedelta(seconds=10),
+            features={
+                "commercial_confidence": 0.96,
+                "bug_identity_confidence": 0.12,
+                "program_graphics_confidence": 0.16,
+            },
+        )
+
+        self.assertTrue(commercial_profiles.finish_commercial_episode(
+            self.db_path,
+            "tvg:nbc.example",
+            "logo-episode-1",
+            exit_reason="program-return",
+            observed_at=started + timedelta(seconds=30),
+            features={
+                "commercial_confidence": 0.0,
+                "bug_identity_confidence": 0.88,
+                "program_graphics_confidence": 0.91,
+            },
+            signature_ids=(7, 3, 7),
+            signature_windows=2,
+        ))
+
+        episode = commercial_profiles.episodes_between(
+            self.db_path,
+            "tvg:nbc.example",
+            started - timedelta(seconds=1),
+            started + timedelta(minutes=1),
+        )[0]
+        self.assertEqual(episode["duration_seconds"], 30.0)
+        self.assertEqual(episode["entry_reason"], "logo-missing")
+        self.assertEqual(episode["exit_reason"], "program-return")
+        self.assertEqual(episode["signature_ids"], "[3, 7]")
+        self.assertEqual(episode["signature_windows"], 2)
+        self.assertAlmostEqual(episode["peak_commercial_confidence"], 0.96)
+
+    def test_profile_reports_recent_logo_missing_false_positive_rate(self):
+        started = datetime.now(timezone.utc) - timedelta(minutes=5)
+        for index in range(5):
+            event_id = f"logo-episode-{index}"
+            episode_started = started + timedelta(seconds=index * 30)
+            commercial_profiles.begin_commercial_episode(
+                self.db_path,
+                "tvg:adaptive.example",
+                event_id,
+                entry_reason="logo-missing",
+                observed_at=episode_started,
+                features={},
+            )
+            commercial_profiles.finish_commercial_episode(
+                self.db_path,
+                "tvg:adaptive.example",
+                event_id,
+                exit_reason=(
+                    "short-false-positive" if index < 4 else "program-return"
+                ),
+                short_false_positive=index < 4,
+                observed_at=episode_started + timedelta(seconds=8 if index < 4 else 30),
+                features={},
+            )
+
+        profile = commercial_profiles.profile(
+            self.db_path, "tvg:adaptive.example"
+        )
+
+        self.assertEqual(profile["logo_missing_episodes"], 5)
+        self.assertEqual(profile["logo_missing_short_false_positives"], 4)
+        self.assertAlmostEqual(profile["logo_missing_false_positive_rate"], 0.8)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 import re
 import sqlite3
 import threading
@@ -175,6 +176,38 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_commercial_observations_time "
         "ON commercial_channel_observations(observed_at)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS commercial_channel_episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_identity TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            duration_seconds REAL NOT NULL DEFAULT 0,
+            entry_reason TEXT NOT NULL DEFAULT '',
+            exit_reason TEXT NOT NULL DEFAULT '',
+            start_commercial_confidence REAL NOT NULL DEFAULT 0,
+            peak_commercial_confidence REAL NOT NULL DEFAULT 0,
+            end_commercial_confidence REAL NOT NULL DEFAULT 0,
+            start_bug_confidence REAL NOT NULL DEFAULT 0,
+            average_bug_confidence REAL NOT NULL DEFAULT 0,
+            end_bug_confidence REAL NOT NULL DEFAULT 0,
+            start_program_graphics_confidence REAL NOT NULL DEFAULT 0,
+            average_program_graphics_confidence REAL NOT NULL DEFAULT 0,
+            end_program_graphics_confidence REAL NOT NULL DEFAULT 0,
+            signature_ids TEXT NOT NULL DEFAULT '[]',
+            signature_windows INTEGER NOT NULL DEFAULT 0,
+            user_confirmed INTEGER NOT NULL DEFAULT 0,
+            short_false_positive INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(channel_identity, event_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_commercial_episodes_channel_time "
+        "ON commercial_channel_episodes(channel_identity, started_at)"
+    )
     conn.commit()
 
 
@@ -198,7 +231,7 @@ def _bounded_feature(value: object) -> float:
     return max(0.0, min(1.0, numeric))
 
 
-def record(
+def record_with_metadata(
     db_path: Path | str,
     channel_identity: object,
     *,
@@ -209,14 +242,14 @@ def record(
     event_id: object = "",
     detector_state: object = "",
     commercial_reason: object = "",
-) -> bool:
+) -> dict:
     identity = normalize_identity(channel_identity)
     if not identity:
-        return False
+        return {"recorded": False, "id": 0, "observed_at": ""}
     timestamp = (observed_at or _utc_now()).astimezone(timezone.utc).isoformat(timespec="seconds")
     values = [_bounded_feature(features.get(name, 0)) for name in HISTORY_SIGNAL_NAMES]
     with closing(_connect(db_path)) as conn:
-        conn.execute(
+        cursor = conn.execute(
             f"""
             INSERT INTO commercial_channel_observations (
                 channel_identity, observed_at, label, source, event_id,
@@ -237,7 +270,38 @@ def record(
         _compact_channel_if_overfull(conn, identity)
         conn.commit()
     maybe_prune(db_path)
-    return True
+    return {
+        "recorded": True,
+        "id": int(cursor.lastrowid or 0),
+        "observed_at": timestamp,
+        "channel_identity": identity,
+    }
+
+
+def record(
+    db_path: Path | str,
+    channel_identity: object,
+    *,
+    label: object,
+    features: dict[str, object],
+    observed_at: datetime | None = None,
+    source: object = "inferred",
+    event_id: object = "",
+    detector_state: object = "",
+    commercial_reason: object = "",
+) -> bool:
+    result = record_with_metadata(
+        db_path,
+        channel_identity,
+        label=label,
+        features=features,
+        observed_at=observed_at,
+        source=source,
+        event_id=event_id,
+        detector_state=detector_state,
+        commercial_reason=commercial_reason,
+    )
+    return bool(result.get("recorded"))
 
 
 def record_many(db_path: Path | str, observations: Iterable[dict]) -> int:
@@ -273,6 +337,242 @@ def relabel_event_as_false_positive(
         return max(0, int(cursor.rowcount or 0))
 
 
+def discard_recent_possible_commercials(
+    db_path: Path | str,
+    channel_identity: object,
+    *,
+    seconds: float = 10.0,
+    observed_at: datetime | None = None,
+) -> int:
+    """Discard recent inferred ad/uncertain samples after explicit program feedback."""
+    identity = normalize_identity(channel_identity)
+    if not identity:
+        return 0
+    window_seconds = max(0.0, min(60.0, float(seconds or 0)))
+    cutoff = (
+        (observed_at or _utc_now()).astimezone(timezone.utc)
+        - timedelta(seconds=window_seconds)
+    ).isoformat(timespec="seconds")
+    with closing(_connect(db_path)) as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM commercial_channel_observations
+            WHERE channel_identity = ? AND observed_at >= ?
+              AND label IN ('commercial', 'uncertain')
+              AND source <> 'user'
+            """,
+            (identity, cutoff),
+        )
+        conn.commit()
+        return max(0, int(cursor.rowcount or 0))
+
+
+def begin_commercial_episode(
+    db_path: Path | str,
+    channel_identity: object,
+    event_id: object,
+    *,
+    entry_reason: object = "",
+    features: dict | None = None,
+    observed_at: datetime | None = None,
+) -> bool:
+    """Open one compact, auditable commercial-decision episode."""
+    identity = normalize_identity(channel_identity)
+    clean_event_id = str(event_id or "").strip()[:120]
+    if not identity or not clean_event_id:
+        return False
+    values = dict(features or {})
+    timestamp = (observed_at or _utc_now()).astimezone(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    commercial_confidence = max(
+        0.0, min(1.0, float(values.get("commercial_confidence") or 0))
+    )
+    bug_confidence = max(
+        0.0, min(1.0, float(values.get("bug_identity_confidence") or 0))
+    )
+    graphics_confidence = max(
+        0.0, min(1.0, float(values.get("program_graphics_confidence") or 0))
+    )
+    with closing(_connect(db_path)) as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO commercial_channel_episodes (
+                channel_identity, event_id, started_at, entry_reason,
+                start_commercial_confidence, peak_commercial_confidence,
+                start_bug_confidence, average_bug_confidence,
+                start_program_graphics_confidence,
+                average_program_graphics_confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                identity, clean_event_id, timestamp,
+                str(entry_reason or "").strip()[:80],
+                commercial_confidence, commercial_confidence,
+                bug_confidence, bug_confidence,
+                graphics_confidence, graphics_confidence,
+            ),
+        )
+        conn.commit()
+        return bool(cursor.rowcount)
+
+
+def finish_commercial_episode(
+    db_path: Path | str,
+    channel_identity: object,
+    event_id: object,
+    *,
+    exit_reason: object = "program-return",
+    features: dict | None = None,
+    signature_ids: Iterable[int] = (),
+    signature_windows: int = 0,
+    user_confirmed: bool = False,
+    short_false_positive: bool = False,
+    observed_at: datetime | None = None,
+) -> bool:
+    """Close an episode and summarize its confidence trajectory compactly."""
+    identity = normalize_identity(channel_identity)
+    clean_event_id = str(event_id or "").strip()[:120]
+    if not identity or not clean_event_id:
+        return False
+    values = dict(features or {})
+    ended = (observed_at or _utc_now()).astimezone(timezone.utc)
+    ended_at = ended.isoformat(timespec="seconds")
+    clean_ids = sorted({max(0, int(value or 0)) for value in signature_ids if int(value or 0) > 0})
+    with closing(_connect(db_path)) as conn:
+        episode = conn.execute(
+            """
+            SELECT started_at, start_commercial_confidence,
+                   start_bug_confidence, start_program_graphics_confidence
+            FROM commercial_channel_episodes
+            WHERE channel_identity = ? AND event_id = ?
+            """,
+            (identity, clean_event_id),
+        ).fetchone()
+        if episode is None:
+            start_commercial = max(
+                0.0, min(1.0, float(values.get("commercial_confidence") or 0))
+            )
+            start_bug = max(
+                0.0, min(1.0, float(values.get("bug_identity_confidence") or 0))
+            )
+            start_graphics = max(
+                0.0,
+                min(1.0, float(values.get("program_graphics_confidence") or 0)),
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO commercial_channel_episodes (
+                    channel_identity, event_id, started_at, entry_reason,
+                    start_commercial_confidence, peak_commercial_confidence,
+                    start_bug_confidence, average_bug_confidence,
+                    start_program_graphics_confidence,
+                    average_program_graphics_confidence
+                ) VALUES (?, ?, ?, 'unknown', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    identity, clean_event_id, ended_at,
+                    start_commercial, start_commercial,
+                    start_bug, start_bug, start_graphics, start_graphics,
+                ),
+            )
+            episode = conn.execute(
+                """
+                SELECT started_at, start_commercial_confidence,
+                       start_bug_confidence, start_program_graphics_confidence
+                FROM commercial_channel_episodes
+                WHERE channel_identity = ? AND event_id = ?
+                """,
+                (identity, clean_event_id),
+            ).fetchone()
+        started = datetime.fromisoformat(str(episode["started_at"]))
+        duration = max(0.0, (ended - started.astimezone(timezone.utc)).total_seconds())
+        trajectory = conn.execute(
+            """
+            SELECT
+                MAX(commercial_confidence) peak_commercial,
+                AVG(bug_identity_confidence) average_bug,
+                AVG(program_graphics_confidence) average_graphics
+            FROM commercial_channel_observations
+            WHERE channel_identity = ? AND event_id = ?
+            """,
+            (identity, clean_event_id),
+        ).fetchone()
+        end_commercial = max(
+            0.0, min(1.0, float(values.get("commercial_confidence") or 0))
+        )
+        end_bug = max(0.0, min(1.0, float(values.get("bug_identity_confidence") or 0)))
+        end_graphics = max(
+            0.0, min(1.0, float(values.get("program_graphics_confidence") or 0))
+        )
+        peak = max(
+            float(episode["start_commercial_confidence"] or 0),
+            float(trajectory["peak_commercial"] or 0),
+            end_commercial,
+        )
+        average_bug = float(
+            trajectory["average_bug"]
+            if trajectory["average_bug"] is not None
+            else episode["start_bug_confidence"] or 0
+        )
+        average_graphics = float(
+            trajectory["average_graphics"]
+            if trajectory["average_graphics"] is not None
+            else episode["start_program_graphics_confidence"] or 0
+        )
+        conn.execute(
+            """
+            UPDATE commercial_channel_episodes
+            SET ended_at = ?, duration_seconds = ?, exit_reason = ?,
+                peak_commercial_confidence = ?, end_commercial_confidence = ?,
+                average_bug_confidence = ?, end_bug_confidence = ?,
+                average_program_graphics_confidence = ?,
+                end_program_graphics_confidence = ?,
+                signature_ids = ?, signature_windows = ?,
+                user_confirmed = ?, short_false_positive = ?
+            WHERE channel_identity = ? AND event_id = ?
+            """,
+            (
+                ended_at, duration, str(exit_reason or "program-return").strip()[:80],
+                peak, end_commercial, average_bug, end_bug,
+                average_graphics, end_graphics, json.dumps(clean_ids),
+                max(0, int(signature_windows or 0)), int(bool(user_confirmed)),
+                int(bool(short_false_positive)), identity, clean_event_id,
+            ),
+        )
+        conn.commit()
+    return True
+
+
+def episodes_between(
+    db_path: Path | str,
+    channel_identity: object,
+    started_at: object,
+    ended_at: object,
+) -> list[dict]:
+    identity = normalize_identity(channel_identity)
+    if not identity:
+        return []
+    def normalized_timestamp(value: object) -> str:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat(timespec="seconds")
+        return str(value or "")
+    with closing(_connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM commercial_channel_episodes
+            WHERE channel_identity = ? AND started_at >= ? AND started_at <= ?
+            ORDER BY started_at, id
+            """,
+            (
+                identity,
+                normalized_timestamp(started_at),
+                normalized_timestamp(ended_at),
+            ),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def prune(db_path: Path | str, *, now: datetime | None = None) -> int:
     cutoff = ((now or _utc_now()).astimezone(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat(
         timespec="seconds"
@@ -286,6 +586,10 @@ def prune(db_path: Path | str, *, now: datetime | None = None) -> int:
             "DELETE FROM commercial_channel_bugs WHERE last_seen < ?",
             (cutoff,),
         )
+        episode_cursor = conn.execute(
+            "DELETE FROM commercial_channel_episodes WHERE started_at < ?",
+            (cutoff,),
+        )
         conn.execute("PRAGMA optimize")
         compacted = _compact_overfull_channels(conn)
         if compacted > 0:
@@ -294,6 +598,7 @@ def prune(db_path: Path | str, *, now: datetime | None = None) -> int:
         return (
             max(0, int(cursor.rowcount or 0))
             + max(0, int(bug_cursor.rowcount or 0))
+            + max(0, int(episode_cursor.rowcount or 0))
             + max(0, int(compacted or 0))
         )
 
@@ -595,15 +900,49 @@ def clear_learning_data(db_path: Path | str) -> dict[str, int]:
             conn.execute("SELECT COUNT(*) FROM commercial_channel_bug_positions").fetchone()[0]
             or 0
         )
+        episode_count = int(
+            conn.execute("SELECT COUNT(*) FROM commercial_channel_episodes").fetchone()[0]
+            or 0
+        )
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        signature_count = 0
+        if "commercial_ad_signatures" in existing_tables:
+            signature_count += int(
+                conn.execute("SELECT COUNT(*) FROM commercial_ad_signatures").fetchone()[0]
+                or 0
+            )
+        if "commercial_ad_signatures_v2" in existing_tables:
+            signature_count += int(
+                conn.execute("SELECT COUNT(*) FROM commercial_ad_signatures_v2").fetchone()[0]
+                or 0
+            )
+        if "commercial_ad_signature_events_v2" in existing_tables:
+            conn.execute("DELETE FROM commercial_ad_signature_events_v2")
+        if "commercial_ad_signatures_v2" in existing_tables:
+            conn.execute("DELETE FROM commercial_ad_signatures_v2")
+        if "commercial_ad_signature_channels" in existing_tables:
+            conn.execute("DELETE FROM commercial_ad_signature_channels")
+        if "commercial_ad_signatures" in existing_tables:
+            conn.execute("DELETE FROM commercial_ad_signatures")
         conn.execute("DELETE FROM commercial_channel_bug_positions")
         conn.execute("DELETE FROM commercial_channel_bugs")
         conn.execute("DELETE FROM commercial_channel_observations")
+        conn.execute("DELETE FROM commercial_channel_episodes")
         conn.commit()
+    import commercial_signatures
+    commercial_signatures.invalidate_cache(db_path)
     _LAST_PRUNE.pop(str(Path(db_path).resolve()), None)
     return {
         "observations": observation_count,
         "bugs": bug_count,
         "positions": position_count,
+        "signatures": signature_count,
+        "episodes": episode_count,
     }
 
 
@@ -632,7 +971,17 @@ def _feature_stats(rows: list[sqlite3.Row]) -> dict[str, dict[str, float]]:
 def profile(db_path: Path | str, channel_identity: object) -> dict:
     identity = normalize_identity(channel_identity)
     if not identity:
-        return {"channel_identity": "", "program_samples": 0, "commercial_samples": 0}
+        return {
+            "channel_identity": "",
+            "program_samples": 0,
+            "commercial_samples": 0,
+            "logo_missing_episodes": 0,
+            "logo_missing_short_false_positives": 0,
+            "logo_missing_false_positive_rate": 0.0,
+        }
+    episode_cutoff = (
+        _utc_now() - timedelta(days=RETENTION_DAYS)
+    ).isoformat(timespec="seconds")
     with closing(_connect(db_path)) as conn:
         rows = conn.execute(
             f"""
@@ -643,11 +992,25 @@ def profile(db_path: Path | str, channel_identity: object) -> dict:
             """,
             (identity,),
         ).fetchall()
+        episode_row = conn.execute(
+            """
+            SELECT COUNT(*) AS episode_count,
+                   COALESCE(SUM(short_false_positive), 0) AS short_false_positives
+            FROM commercial_channel_episodes
+            WHERE channel_identity = ? AND entry_reason = 'logo-missing'
+              AND ended_at IS NOT NULL AND started_at >= ?
+            """,
+            (identity, episode_cutoff),
+        ).fetchone()
     program = [row for row in rows if row["label"] == "program"]
     commercial = [row for row in rows if row["label"] == "commercial"]
     confirmed = [row for row in commercial if row["source"] == "user"]
     effective_program = sum(_row_weight(row) for row in program)
     effective_commercial = sum(_row_weight(row) for row in commercial)
+    logo_missing_episodes = int(episode_row["episode_count"] or 0)
+    logo_missing_short_false_positives = int(
+        episode_row["short_false_positives"] or 0
+    )
     return {
         "channel_identity": identity,
         "program_samples": len(program),
@@ -655,6 +1018,13 @@ def profile(db_path: Path | str, channel_identity: object) -> dict:
         "effective_program_samples": effective_program,
         "effective_commercial_samples": effective_commercial,
         "user_confirmed_commercial_samples": len(confirmed),
+        "logo_missing_episodes": logo_missing_episodes,
+        "logo_missing_short_false_positives": logo_missing_short_false_positives,
+        "logo_missing_false_positive_rate": (
+            logo_missing_short_false_positives / logo_missing_episodes
+            if logo_missing_episodes
+            else 0.0
+        ),
         "ready": effective_program >= 30 and effective_commercial >= 3,
         "program": _feature_stats(program),
         "commercial": _feature_stats(commercial),

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import math
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -12,9 +15,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 import commercial_profiles
+import commercial_signatures
 
 
 POLL_SECONDS = 0.5
@@ -27,6 +31,8 @@ COLOR_MIN_SAMPLES = 8
 COLOR_CUT_FLOOR = 0.24
 PROGRAM_COLOR_BASELINE_FRAMES = 400
 MISSING_CONFIRMATIONS = 6
+ADAPTIVE_MISSING_MIN_EPISODES = 5
+ADAPTIVE_MISSING_MAX_SECONDS = 10.0
 RETURN_CONFIRMATIONS = 5
 LOCAL_LAYOUT_CONFIRMATIONS = 12
 LOCAL_BREAK_CONFIRMATIONS = 8
@@ -51,7 +57,11 @@ OVERALL_CONFIDENCE_FALL_ALPHA = 0.65
 LOGO_ABSENCE_BOOST = 1.25
 PROGRAM_BOUNDARY_SUPPRESSION_SECONDS = 120
 BUG_DURATION_FULL_TRUST_TICKS = 12
-BUG_PROMOTION_TICKS = 60
+BUG_PROMOTION_TICKS = 180
+BUG_PROMOTION_MIN_SCENE_CHANGES = 3
+BUG_PROMOTION_SCENE_GAP_TICKS = 8
+BUG_PROMOTION_COOLDOWN_SECONDS = 60.0
+MAX_SESSION_TRUSTED_BUGS = 3
 BUG_RELOCATION_WINDOW_TICKS = 4
 BUG_RELOCATION_SAVE_TICKS = 12
 BUG_RELOCATION_VISUAL_THRESHOLD = 0.70
@@ -59,23 +69,42 @@ BUG_RELOCATION_SHIFT_X = 4
 BUG_RELOCATION_SHIFT_Y = 3
 BUG_TRANSITION_GRACE_SECONDS = 20
 EDGE_THRESHOLD = 35
+ADAPTIVE_EDGE_FLOOR = 10
+ADAPTIVE_EDGE_CEILING = 28
+FUZZY_EDGE_RADIUS = 1
 COMMERCIAL_THRESHOLD = 0.65
 BUG_RETURN_CONFIDENCE = 0.78
 BUG_RETURN_CONFIRMATIONS = 8
-STRONG_PROGRAM_RETURN_CONFIRMATIONS = 1
 STRONG_PROGRAM_GRAPHIC_CONFIDENCE = 0.78
-STRONG_PROGRAM_MODEL_MAX = 0.35
+PROGRAM_RETURN_MIN_CONFIDENCE = 0.65
+PROGRAM_RETURN_ADAPTIVE_FLOOR = 0.42
+PROGRAM_RETURN_FULL_TRUST_TICKS = 40
+PROGRAM_RETURN_ADAPTIVE_STEP = 0.05
+PROGRAM_RETURN_EVIDENCE_TARGET = 3
+PROGRAM_RETURN_STRONG_EVIDENCE = 2
+PROGRAM_RETURN_WEAK_EVIDENCE = 1
+PROGRAM_RETURN_MISMATCH_PENALTY = 2
 MANUAL_PROGRAM_HOLD_SECONDS = 30
 MIN_PERSISTENT_EDGES = 16
-COUNTDOWN_WINDOW_FRAMES = 12
-COUNTDOWN_FALLBACK_PROBATION_SECONDS = 60.0
+COUNTDOWN_WINDOW_FRAMES = 24
+COUNTDOWN_FALLBACK_PROBATION_SECONDS = 120.0
 COUNTDOWN_FALLBACK_PROBATION_FRAMES = int(
     COUNTDOWN_FALLBACK_PROBATION_SECONDS / POLL_SECONDS
 )
-COUNTDOWN_CONFIRMATIONS = 2
-COUNTDOWN_RELEASE_CONFIRMATIONS = 2
+BUGLESS_CLASSIFICATION_SECONDS = 120.0
+BUGLESS_CLASSIFICATION_FRAMES = int(BUGLESS_CLASSIFICATION_SECONDS / POLL_SECONDS)
+BUGLESS_RESCAN_DELAY_SECONDS = 10.0
+BUGLESS_RESCAN_DELAY_FRAMES = int(BUGLESS_RESCAN_DELAY_SECONDS / POLL_SECONDS)
+BUGLESS_FALSE_LOGO_TRIGGER_LIMIT = 2
+COUNTDOWN_CONFIRMATIONS = 8
+COUNTDOWN_REENTRY_CONFIRMATIONS = 8
+COUNTDOWN_RELEASE_CONFIRMATIONS = 8
+COUNTDOWN_IDLE_RELEASE_SECONDS = 20.0
+COUNTDOWN_IDLE_RELEASE_FRAMES = int(COUNTDOWN_IDLE_RELEASE_SECONDS / POLL_SECONDS)
 COUNTDOWN_THRESHOLD = 0.68
+COUNTDOWN_PRESENCE_THRESHOLD = 0.58
 COUNTDOWN_MIN_PERSISTENT_EDGES = 6
+COUNTDOWN_MAX_PERSISTENT_EDGES = 320
 REGION_NAMES = ("top-left", "top-center", "top-right", "bottom-left", "bottom-right")
 COUNTDOWN_REGION_NAMES = ("top-left", "top-right", "bottom-left", "bottom-right")
 SCOREBOARD_NAMES = (
@@ -86,6 +115,27 @@ SCOREBOARD_NAMES = (
 
 def _timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _adaptive_missing_confirmations(profile: dict | None) -> int:
+    """Delay unreliable logo-loss triggers while keeping proven channels fast."""
+    values = profile or {}
+    episodes = max(0, int(values.get("logo_missing_episodes") or 0))
+    if episodes < ADAPTIVE_MISSING_MIN_EPISODES:
+        return MISSING_CONFIRMATIONS
+    false_positives = max(
+        0,
+        min(episodes, int(values.get("logo_missing_short_false_positives") or 0)),
+    )
+    # A small Beta(1, 1) prior prevents five early samples from immediately
+    # pinning a channel at either the fastest or slowest possible response.
+    false_positive_rate = (false_positives + 1.0) / (episodes + 2.0)
+    base_seconds = MISSING_CONFIRMATIONS * POLL_SECONDS
+    hold_seconds = base_seconds + (
+        (ADAPTIVE_MISSING_MAX_SECONDS - base_seconds)
+        * (false_positive_rate ** 2)
+    )
+    return max(MISSING_CONFIRMATIONS, math.ceil(hold_seconds / POLL_SECONDS))
 
 
 def _regions(image: Image.Image) -> dict[str, Image.Image]:
@@ -102,14 +152,76 @@ def _regions(image: Image.Image) -> dict[str, Image.Image]:
 
 
 def _edge_map(image: Image.Image) -> tuple[int, ...]:
-    edges = image.convert("L").resize((48, 24)).filter(ImageFilter.FIND_EDGES)
-    values = list(edges.getdata())
+    gray = image.convert("L").resize((48, 24))
+    # Broadcast bugs are frequently monochrome and partially transparent. A
+    # fixed absolute threshold loses their silhouette as the picture beneath
+    # them changes. Preserve the original strong edges, but supplement them
+    # with locally normalized structure and an adaptive weak-edge threshold.
+    strong_values = list(gray.filter(ImageFilter.FIND_EDGES).getdata())
+    normalized = ImageOps.autocontrast(gray, cutoff=1).filter(
+        ImageFilter.UnsharpMask(radius=1.0, percent=140, threshold=2)
+    )
+    normalized_edges = normalized.filter(ImageFilter.FIND_EDGES)
+    local_structure = ImageChops.difference(
+        normalized.filter(ImageFilter.GaussianBlur(0.6)),
+        normalized.filter(ImageFilter.GaussianBlur(2.2)),
+    ).point(lambda value: min(255, value * 2))
+    weak_values = list(ImageChops.lighter(normalized_edges, local_structure).getdata())
+    interior_values = [
+        value
+        for index, value in enumerate(weak_values)
+        if 2 <= (index % 48) < 46 and 2 <= (index // 48) < 22 and value > 0
+    ]
+    if interior_values:
+        ordered = sorted(interior_values)
+        percentile = ordered[round((len(ordered) - 1) * 0.65)]
+        adaptive_threshold = max(
+            ADAPTIVE_EDGE_FLOOR,
+            min(ADAPTIVE_EDGE_CEILING, round(percentile * 0.75)),
+        )
+    else:
+        adaptive_threshold = ADAPTIVE_EDGE_CEILING
     # FIND_EDGES treats the crop boundary as an edge. Exclude that artificial
     # frame so only graphics inside the sampled region can become the logo.
     return tuple(
-        1 if 2 <= (index % 48) < 46 and 2 <= (index // 48) < 22 and value >= EDGE_THRESHOLD else 0
-        for index, value in enumerate(values)
+        1
+        if (
+            2 <= (index % 48) < 46
+            and 2 <= (index // 48) < 22
+            and (
+                strong_values[index] >= EDGE_THRESHOLD
+                or weak_values[index] >= adaptive_threshold
+            )
+        )
+        else 0
+        for index in range(len(strong_values))
     )
+
+
+def _fuzzy_edge_match_count(
+    reference: tuple[int, ...],
+    edge_map: tuple[int, ...],
+    *,
+    width: int = 48,
+    radius: int = FUZZY_EDGE_RADIUS,
+) -> int:
+    """Count reference edges present directly or one cell away."""
+    height = len(reference) // width
+    matched = 0
+    for index, expected in enumerate(reference):
+        if not expected:
+            continue
+        x, y = index % width, index // width
+        found = False
+        for yy in range(max(0, y - radius), min(height, y + radius + 1)):
+            for xx in range(max(0, x - radius), min(width, x + radius + 1)):
+                if edge_map[(yy * width) + xx]:
+                    found = True
+                    break
+            if found:
+                break
+        matched += int(found)
+    return matched
 
 
 def _scoreboard_regions(image: Image.Image) -> dict[str, Image.Image]:
@@ -198,9 +310,20 @@ def _countdown_signature(
         for index in range(len(frames[0]))
     )
     persistent_count = sum(persistent)
-    if persistent_count < COUNTDOWN_MIN_PERSISTENT_EDGES:
+    if not (
+        COUNTDOWN_MIN_PERSISTENT_EDGES
+        <= persistent_count
+        <= COUNTDOWN_MAX_PERSISTENT_EDGES
+    ):
         return 0.0, None
-    neighborhood = _expand_mask(persistent)
+    # Countdown digits can sit several cells away from the static label or
+    # frame that anchors the overlay. Keep the neighborhood local to that
+    # overlay, but wide enough to include adjacent changing digits.
+    neighborhood = _expand_mask(persistent, radius=7)
+    total_pulses = [
+        sum(1 for left, right in zip(previous, current) if left != right)
+        for previous, current in zip(frames, frames[1:])
+    ]
     pulses = [
         sum(
             1
@@ -215,10 +338,26 @@ def _countdown_signature(
     periodicity = max(0.0, min(1.0, (high - low) / max(2.0, high)))
     pulse_strength = max(0.0, min(1.0, high / 10.0))
     structure = max(0.0, min(1.0, persistent_count / 24.0))
+    active_concentrations = [
+        nearby / total
+        for nearby, total in zip(pulses, total_pulses)
+        if total > 0
+    ]
+    concentration = (
+        sum(active_concentrations) / len(active_concentrations)
+        if active_concentrations else 0.0
+    )
     # Periodicity is deliberately dominant: a static logo may have excellent
-    # structure, but it must never look like a counting clock.
-    confidence = 0.20 * structure + 0.55 * periodicity + 0.25 * pulse_strength
-    if pulse_strength < 0.25 or periodicity < 0.40:
+    # structure, but it must never look like a counting clock. Motion must also
+    # be concentrated around that structure; ordinary scene cuts change the
+    # entire corner and caused the old even/odd pulse test to false-trigger.
+    confidence = (
+        0.15 * structure
+        + 0.45 * periodicity
+        + 0.20 * pulse_strength
+        + 0.20 * concentration
+    )
+    if pulse_strength < 0.25 or periodicity < 0.40 or concentration < 0.55:
         confidence *= 0.50
     return max(0.0, min(1.0, confidence)), persistent
 
@@ -252,6 +391,7 @@ class LiveLogoDetector:
     countdown_region: str = ""
     countdown_detected_at: str | None = None
     bugless_countdown_mode: bool = False
+    channel_bug_mode: str = "unknown"
     cut_density: float = 0.0
     mean_color_change: float = 0.0
     edge_density: float = 0.0
@@ -261,6 +401,13 @@ class LiveLogoDetector:
     bug_identity_confidence: float = 0.0
     channel_model_score: float = 0.0
     channel_model_ready: bool = False
+    signature_match_confidence: float = 0.0
+    signature_authority: float = 0.0
+    signature_id: int = 0
+    signature_ids: tuple[int, ...] = ()
+    signature_occurrences: int = 0
+    classified_commercial_count: int = 0
+    probable_commercial_candidate_count: int = 0
     _samples: dict[str, list[tuple[int, ...]]] = field(
         default_factory=lambda: {name: [] for name in REGION_NAMES}
     )
@@ -271,6 +418,7 @@ class LiveLogoDetector:
     _active_bug_ticks: int = 0
     _promotion_bug_key: str = ""
     _promotion_bug_ticks: int = 0
+    _session_promotion_candidates: dict[str, dict] = field(default_factory=dict)
     _relocation_samples: dict[str, list[tuple[int, ...]]] = field(
         default_factory=lambda: {name: [] for name in REGION_NAMES}
     )
@@ -287,7 +435,12 @@ class LiveLogoDetector:
     _countdown_reference: tuple[int, ...] | None = None
     _countdown_candidate_count: int = 0
     _countdown_missing_count: int = 0
+    _countdown_idle_count: int = 0
     _frames_observed: int = 0
+    _bugless_rescan_after_frame: int | None = None
+    _false_logo_trigger_corrections: int = 0
+    _bug_promotion_resume_monotonic: float = 0.0
+    _bug_scan_previous_histogram: tuple[float, ...] | None = None
     _missing_count: int = 0
     _present_count: int = 0
     _return_candidate_key: str = ""
@@ -297,6 +450,7 @@ class LiveLogoDetector:
     _color_changes: list[float] = field(default_factory=list)
     _program_color_changes: list[float] = field(default_factory=list)
     _commercial_reason: str = ""
+    _commercial_entry_reason: str = ""
     _commercial_frame_count: int = 0
     _commercial_event_id: str = ""
     _commercial_started_monotonic: float | None = None
@@ -314,6 +468,14 @@ class LiveLogoDetector:
     _boundary_suppressed_until: datetime | None = None
     _bug_transition_grace_until: datetime | None = None
     _manual_program_until: datetime | None = None
+    _fingerprint_frame_count: int = 0
+    _fingerprint_history: list[commercial_signatures.Fingerprint] = field(default_factory=list)
+    _signature_episode_points: list[commercial_signatures.Fingerprint] = field(default_factory=list)
+    _signature_event_user_confirmed: bool = False
+    _signature_match_until_monotonic: float = 0.0
+    _signature_stats_frame_count: int = 0
+    _inspection_archive_directory: Path | None = None
+    _current_analysis_frame: Path | None = None
     _stop: threading.Event = field(default_factory=threading.Event)
     _thread: threading.Thread | None = None
 
@@ -344,6 +506,45 @@ class LiveLogoDetector:
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def set_inspection_archive(
+        self,
+        directory: Path | None,
+    ) -> None:
+        target = Path(directory) if directory else None
+        if target is not None:
+            target.mkdir(parents=True, exist_ok=True)
+        self._inspection_archive_directory = target
+
+    def _archive_decision_frame(
+        self,
+        observation: dict,
+        *,
+        label: str,
+        source: str,
+        features: dict[str, float],
+        detector_state: str,
+        commercial_reason: str,
+    ) -> None:
+        target = self._inspection_archive_directory
+        path = self._current_analysis_frame
+        observation_id = int(observation.get("id") or 0)
+        if target is None or path is None or not path.is_file() or observation_id <= 0:
+            return
+        timestamp = re.sub(r"[^0-9A-Za-z]+", "", str(observation.get("observed_at") or ""))
+        stem = f"observation-{observation_id:09d}-{timestamp or 'unknown'}"
+        shutil.copyfile(path, target / f"{stem}.jpg")
+        (target / f"{stem}.json").write_text(
+            json.dumps({
+                **observation,
+                "label": label,
+                "source": source,
+                "detector_state": detector_state,
+                "commercial_reason": commercial_reason,
+                "features": features,
+            }, indent=2),
+            encoding="utf-8",
+        )
 
     def _refresh_references(self, maps: dict[str, tuple[int, ...]]) -> bool:
         for name, edge_map in maps.items():
@@ -404,6 +605,8 @@ class LiveLogoDetector:
                 self.profile_db_path,
                 self.channel_identity,
             )
+            if self._trusted_bugs:
+                self.channel_bug_mode = "bugged"
         except (OSError, sqlite3.Error):
             self._trusted_bugs = []
 
@@ -465,6 +668,31 @@ class LiveLogoDetector:
             entries.append((f"session:{region}:{hash(reference)}", region, reference))
         return entries
 
+    def _trusted_return_gate(self, matched_key: str) -> tuple[float, int]:
+        """Relax the return score only after a bug has substantial channel history.
+
+        Faint, translucent, monochrome, or compressed bugs can have a lower
+        absolute edge-map score even when their identity is stable. More
+        persistence lowers the required score, while proportionally increasing
+        the consecutive evidence needed so a briefly similar advertisement
+        graphic cannot end the break.
+        """
+        if not matched_key.startswith("trusted:"):
+            return PROGRAM_RETURN_MIN_CONFIDENCE, PROGRAM_RETURN_EVIDENCE_TARGET
+        try:
+            index = int(matched_key.rsplit(":", 1)[1])
+            observed_ticks = int(self._trusted_bugs[index].get("observed_ticks") or 0)
+        except (IndexError, TypeError, ValueError):
+            observed_ticks = 0
+        trust = min(1.0, observed_ticks / PROGRAM_RETURN_FULL_TRUST_TICKS)
+        threshold = PROGRAM_RETURN_MIN_CONFIDENCE - trust * (
+            PROGRAM_RETURN_MIN_CONFIDENCE - PROGRAM_RETURN_ADAPTIVE_FLOOR
+        )
+        extra_evidence = round(
+            (PROGRAM_RETURN_MIN_CONFIDENCE - threshold) / PROGRAM_RETURN_ADAPTIVE_STEP
+        )
+        return threshold, PROGRAM_RETURN_EVIDENCE_TARGET + extra_evidence
+
     @staticmethod
     def _translated_match_score(
         reference: tuple[int, ...] | None,
@@ -480,22 +708,69 @@ class LiveLogoDetector:
         reference = reference or ()
         if len(reference) != 48 * 24 or len(edge_map) != len(reference):
             return LiveLogoDetector._match_score(reference, edge_map)
-        reference_count = sum(reference)
+        reference_coordinates = [
+            (index % 48, index // 48)
+            for index, expected in enumerate(reference)
+            if expected
+        ]
+        reference_count = len(reference_coordinates)
         if not reference_count:
             return 0.0
-        best = 0.0
+        best_direct = 0.0
+        best_delta_x = 0
+        best_delta_y = 0
         for delta_y in range(-BUG_RELOCATION_SHIFT_Y, BUG_RELOCATION_SHIFT_Y + 1):
             for delta_x in range(-BUG_RELOCATION_SHIFT_X, BUG_RELOCATION_SHIFT_X + 1):
-                matched = 0
-                for index, expected in enumerate(reference):
-                    if not expected:
-                        continue
-                    x = (index % 48) + delta_x
-                    y = (index // 48) + delta_y
+                direct_matched = 0
+                for reference_x, reference_y in reference_coordinates:
+                    x = reference_x + delta_x
+                    y = reference_y + delta_y
                     if 0 <= x < 48 and 0 <= y < 24 and edge_map[(y * 48) + x]:
-                        matched += 1
-                best = max(best, matched / reference_count)
-        return best
+                        direct_matched += 1
+                direct_score = direct_matched / reference_count
+                if direct_score > best_direct:
+                    best_direct = direct_score
+                    best_delta_x = delta_x
+                    best_delta_y = delta_y
+        fuzzy_matched = 0
+        for reference_x, reference_y in reference_coordinates:
+            x = reference_x + best_delta_x
+            y = reference_y + best_delta_y
+            fuzzy_matched += int(any(
+                edge_map[(yy * 48) + xx]
+                for yy in range(max(0, y - FUZZY_EDGE_RADIUS), min(24, y + FUZZY_EDGE_RADIUS + 1))
+                for xx in range(max(0, x - FUZZY_EDGE_RADIUS), min(48, x + FUZZY_EDGE_RADIUS + 1))
+            ))
+        fuzzy_score = fuzzy_matched / reference_count
+        recall_score = (0.70 * best_direct) + (0.30 * fuzzy_score)
+
+        shifted_reference = {
+            (reference_x + best_delta_x, reference_y + best_delta_y)
+            for reference_x, reference_y in reference_coordinates
+            if 0 <= reference_x + best_delta_x < 48
+            and 0 <= reference_y + best_delta_y < 24
+        }
+        if not shifted_reference:
+            return 0.0
+        min_x = max(0, min(x for x, _y in shifted_reference) - 2)
+        max_x = min(47, max(x for x, _y in shifted_reference) + 2)
+        min_y = max(0, min(y for _x, y in shifted_reference) - 2)
+        max_y = min(23, max(y for _x, y in shifted_reference) + 2)
+        actual_in_box = {
+            (index % 48, index // 48)
+            for index, value in enumerate(edge_map)
+            if value
+            and min_x <= (index % 48) <= max_x
+            and min_y <= (index // 48) <= max_y
+        }
+        precision_score = (
+            len(actual_in_box & shifted_reference) / len(actual_in_box)
+            if actual_in_box else 0.0
+        )
+        # Recall keeps translucent edges tolerant of the changing picture;
+        # precision prevents a dense ad frame from satisfying every sparse
+        # reference edge merely by chance.
+        return recall_score * precision_score
 
     def _bug_family_regions(self, reference: tuple[int, ...]) -> set[str]:
         regions: set[str] = set()
@@ -676,6 +951,103 @@ class LiveLogoDetector:
         self._promotion_bug_key = ""
         self._promotion_bug_ticks = 0
 
+    def _track_session_bug_promotions(
+        self,
+        maps: dict[str, tuple[int, ...]],
+        *,
+        stable_program: bool,
+        scene_change: bool = False,
+    ) -> None:
+        """Promote conservative cold-start bug candidates.
+
+        A candidate must keep the same visual identity for ninety seconds and
+        survive several independent scene changes. Only one candidate is
+        promoted at a time; the remaining regions must earn their own evidence
+        window instead of all self-confirming from the same rolling composite.
+        """
+        if (
+            not stable_program
+            or time.monotonic() < self._bug_promotion_resume_monotonic
+            or len(self._trusted_bugs) >= MAX_SESSION_TRUSTED_BUGS
+        ):
+            self._session_promotion_candidates.clear()
+            return
+        active_regions = set(self._references)
+        for region in tuple(self._session_promotion_candidates):
+            if region not in active_regions:
+                self._session_promotion_candidates.pop(region, None)
+        eligible: list[tuple[float, int, str, tuple[int, ...], int]] = []
+        for region, reference in self._references.items():
+            if sum(reference) < MIN_PERSISTENT_EDGES:
+                self._session_promotion_candidates.pop(region, None)
+                continue
+            already_trusted = any(
+                min(
+                    self._translated_match_score(tuple(bug.get("fingerprint") or ()), reference),
+                    self._translated_match_score(reference, tuple(bug.get("fingerprint") or ())),
+                ) >= commercial_profiles.TRUSTED_BUG_MATCH_THRESHOLD
+                for bug in self._trusted_bugs
+            )
+            if already_trusted:
+                self._session_promotion_candidates.pop(region, None)
+                continue
+            current = tuple(maps.get(region) or ())
+            visual_match = self._translated_match_score(reference, current)
+            if visual_match < 0.45:
+                self._session_promotion_candidates.pop(region, None)
+                continue
+            candidate = self._session_promotion_candidates.get(region)
+            previous_reference = tuple((candidate or {}).get("reference") or ())
+            identity_match = (
+                min(
+                    self._translated_match_score(previous_reference, reference),
+                    self._translated_match_score(reference, previous_reference),
+                )
+                if previous_reference else 1.0
+            )
+            if candidate and identity_match < 0.60:
+                candidate = None
+            ticks = int((candidate or {}).get("ticks") or 0) + 1
+            scene_changes = int((candidate or {}).get("scene_changes") or 0)
+            last_scene_frame = int((candidate or {}).get("last_scene_frame") or -10_000)
+            if (
+                scene_change
+                and self._frames_observed - last_scene_frame
+                >= BUG_PROMOTION_SCENE_GAP_TICKS
+            ):
+                scene_changes += 1
+                last_scene_frame = self._frames_observed
+            visual_total = float((candidate or {}).get("visual_total") or 0.0) + visual_match
+            self._session_promotion_candidates[region] = {
+                "reference": reference,
+                "ticks": ticks,
+                "visual_match": visual_match,
+                "visual_total": visual_total,
+                "scene_changes": scene_changes,
+                "last_scene_frame": last_scene_frame,
+            }
+            if (
+                ticks >= BUG_PROMOTION_TICKS
+                and scene_changes >= BUG_PROMOTION_MIN_SCENE_CHANGES
+            ):
+                eligible.append(
+                    (
+                        visual_total / max(1, ticks),
+                        scene_changes,
+                        region,
+                        reference,
+                        ticks,
+                    )
+                )
+        if eligible:
+            _visual, _scenes, region, reference, ticks = max(
+                eligible,
+                key=lambda item: (item[1], item[0], -sum(item[3])),
+            )
+            self._remember_trusted_bug(region, reference, observed_ticks=ticks)
+            self.channel_bug_mode = "bugged"
+            self._session_promotion_candidates.clear()
+
     def _bug_transition_grace(self) -> bool:
         return bool(
             self._bug_transition_grace_until
@@ -691,8 +1063,35 @@ class LiveLogoDetector:
     def apply_program_feedback(self) -> None:
         """Immediately honor an explicit correction and prevent a fast rebound."""
         was_commercial = self.last_commercial is True
+        corrected_false_logo = bool(
+            was_commercial and self._commercial_reason == "logo-missing"
+        )
+        commercial_seconds = (
+            max(0.0, time.monotonic() - self._commercial_started_monotonic)
+            if was_commercial and self._commercial_started_monotonic is not None
+            else 0.0
+        )
+        signature_result: dict = {}
+        if was_commercial and commercial_seconds >= FALSE_POSITIVE_BUFFER_SECONDS:
+            signature_result = self._finish_signature_episode()
+        if (
+            self.profile_db_path is not None
+            and (self.signature_ids or self.signature_id)
+            and self._commercial_reason == "known-ad"
+            and commercial_seconds < FALSE_POSITIVE_BUFFER_SECONDS
+        ):
+            try:
+                commercial_signatures.mark_false_positives(
+                    self.profile_db_path,
+                    self.signature_ids or (self.signature_id,),
+                )
+            except (OSError, sqlite3.Error):
+                pass
         self._manual_program_until = datetime.now(timezone.utc) + timedelta(
             seconds=MANUAL_PROGRAM_HOLD_SECONDS
+        )
+        self._bug_promotion_resume_monotonic = (
+            time.monotonic() + BUG_PROMOTION_COOLDOWN_SECONDS
         )
         self._commercial_reason = ""
         self.last_commercial = False
@@ -704,9 +1103,222 @@ class LiveLogoDetector:
         self._local_candidate_count = 0
         self._countdown_candidate_count = 0
         self._countdown_missing_count = 0
+        self.signature_match_confidence = 0.0
+        self.signature_authority = 0.0
+        self.signature_id = 0
+        self.signature_ids = ()
+        self._signature_match_until_monotonic = 0.0
+        self._signature_episode_points.clear()
+        self._signature_event_user_confirmed = False
         self.last_decision_at = _timestamp()
+        if corrected_false_logo and not self._trusted_bugs:
+            self._false_logo_trigger_corrections += 1
+            self._update_channel_bug_mode()
         if was_commercial:
+            if self.profile_db_path is not None and self._commercial_event_id:
+                try:
+                    commercial_profiles.finish_commercial_episode(
+                        self.profile_db_path,
+                        self.channel_identity,
+                        self._commercial_event_id,
+                        exit_reason="manual-program",
+                        features=self._profile_features(),
+                        signature_ids=signature_result.get("signature_ids", ()),
+                        signature_windows=int(signature_result.get("windows") or 0),
+                        user_confirmed=bool(signature_result.get("user_confirmed")),
+                        short_false_positive=(
+                            commercial_seconds < FALSE_POSITIVE_BUFFER_SECONDS
+                        ),
+                    )
+                except (OSError, sqlite3.Error):
+                    pass
+            self._commercial_event_id = ""
+            self._commercial_started_monotonic = None
+            self._commercial_entry_reason = ""
             self.callback(False)
+
+    def _update_channel_bug_mode(self) -> None:
+        """Classify whether this stream has a dependable broadcast bug."""
+        if self.sports_generated or self._trusted_bugs:
+            self.channel_bug_mode = "bugged"
+            self._bugless_rescan_after_frame = None
+            return
+        if self.channel_bug_mode == "bugless":
+            return
+        if (
+            self._frames_observed < BUGLESS_CLASSIFICATION_FRAMES
+            and self._false_logo_trigger_corrections < BUGLESS_FALSE_LOGO_TRIGGER_LIMIT
+        ):
+            return
+        self.channel_bug_mode = "bugless"
+        self._bugless_rescan_after_frame = (
+            self._frames_observed + BUGLESS_RESCAN_DELAY_FRAMES
+        )
+        self._references.clear()
+        self._samples = {name: [] for name in REGION_NAMES}
+        self._active_bug_key = ""
+        self._active_bug_ticks = 0
+        self._promotion_bug_key = ""
+        self._promotion_bug_ticks = 0
+        self._session_promotion_candidates.clear()
+        self._missing_count = 0
+        if self.last_commercial is True and self._commercial_reason == "logo-missing":
+            # A break already in progress on the bug-confidence gate would
+            # otherwise wait forever on a threshold this channel has just been
+            # declared unable to reliably clear. Drop the reason so the next
+            # tick re-derives it from a signal bugless mode actually trusts.
+            self._commercial_reason = ""
+            self._present_count = 0
+            self._return_candidate_key = ""
+
+    def _bugless_bug_scan_ready(self) -> bool:
+        """Keep bugless mode reversible without blocking countdown analysis."""
+        if self.channel_bug_mode != "bugless":
+            return True
+        if self._bugless_rescan_after_frame is None:
+            self._bugless_rescan_after_frame = (
+                self._frames_observed + BUGLESS_RESCAN_DELAY_FRAMES
+            )
+        return self._frames_observed >= self._bugless_rescan_after_frame
+
+    def apply_commercial_feedback(self) -> bool:
+        """Give the current fingerprint episode an immediate promotion weight."""
+        if self.last_commercial is not True:
+            return False
+        self._signature_event_user_confirmed = True
+        return True
+
+    def _refresh_signature_stats(self) -> None:
+        if self.profile_db_path is None:
+            return
+        try:
+            stats = commercial_signatures.library_stats(
+                self.profile_db_path,
+                self.channel_identity,
+            )
+        except (OSError, sqlite3.Error):
+            return
+        self.classified_commercial_count = int(stats.get("classified") or 0)
+        self.probable_commercial_candidate_count = int(stats.get("candidates") or 0)
+
+    def _sample_ad_fingerprint(self, fingerprint: commercial_signatures.Fingerprint) -> None:
+        if self.profile_db_path is None:
+            return
+        self._fingerprint_frame_count += 1
+        if self._fingerprint_frame_count % max(
+            1,
+            int(commercial_signatures.SAMPLE_INTERVAL_SECONDS / POLL_SECONDS),
+        ):
+            return
+        self._fingerprint_history.append(fingerprint)
+        del self._fingerprint_history[:-40]
+        if self.last_commercial is True:
+            self._signature_episode_points.append(fingerprint)
+            del self._signature_episode_points[:-600]
+
+        try:
+            matched = commercial_signatures.match_live(
+                self.profile_db_path,
+                self.channel_identity,
+                self._fingerprint_history,
+            )
+        except (OSError, sqlite3.Error):
+            matched = {"matched": False, "score": 0.0}
+        now = time.monotonic()
+        if matched.get("matched"):
+            self.signature_match_confidence = float(matched.get("score") or 0)
+            self.signature_authority = float(matched.get("authority") or 0)
+            self.signature_id = int(matched.get("signature_id") or 0)
+            self.signature_ids = tuple(
+                int(value)
+                for value in matched.get("signature_ids", ())
+                if int(value or 0) > 0
+            ) or ((self.signature_id,) if self.signature_id else ())
+            self.signature_occurrences = int(matched.get("occurrence_count") or 0)
+            self._signature_match_until_monotonic = now + max(
+                0.75,
+                float(matched.get("seconds_remaining") or 0) + 0.75,
+            )
+        elif now >= self._signature_match_until_monotonic:
+            self.signature_match_confidence = 0.0
+            self.signature_authority = 0.0
+            self.signature_id = 0
+            self.signature_ids = ()
+            self.signature_occurrences = 0
+
+        self._signature_stats_frame_count += 1
+        if self._signature_stats_frame_count == 1 or self._signature_stats_frame_count >= 60:
+            self._signature_stats_frame_count = 0
+            self._refresh_signature_stats()
+
+    def _begin_signature_episode(self) -> None:
+        self._signature_episode_points = list(self._fingerprint_history[-2:])
+        self._signature_event_user_confirmed = False
+
+    def _finish_signature_episode(self) -> dict:
+        user_confirmed = bool(self._signature_event_user_confirmed)
+        if self.profile_db_path is None or not self._commercial_event_id:
+            self._signature_episode_points.clear()
+            self._signature_event_user_confirmed = False
+            return {"windows": 0, "signature_ids": [], "user_confirmed": user_confirmed}
+        result: dict = {"windows": 0, "signature_ids": []}
+        try:
+            result = commercial_signatures.record_episode(
+                self.profile_db_path,
+                self.channel_identity,
+                self._commercial_event_id,
+                self._signature_episode_points,
+                user_confirmed=user_confirmed,
+                trigger_reason=self._commercial_entry_reason or self._commercial_reason,
+            )
+        except (OSError, sqlite3.Error):
+            pass
+        self._signature_episode_points.clear()
+        self._signature_event_user_confirmed = False
+        self._refresh_signature_stats()
+        return {**result, "user_confirmed": user_confirmed}
+
+    def _close_episode_ledger(
+        self,
+        exit_reason: str,
+        *,
+        keep_signatures: bool = True,
+    ) -> None:
+        """Close non-standard exits that bypass the normal transition path."""
+        if (
+            self.last_commercial is not True
+            or self.profile_db_path is None
+            or not self._commercial_event_id
+        ):
+            return
+        duration = (
+            max(0.0, time.monotonic() - self._commercial_started_monotonic)
+            if self._commercial_started_monotonic is not None
+            else 0.0
+        )
+        signature_result: dict = {}
+        if keep_signatures and duration >= FALSE_POSITIVE_BUFFER_SECONDS:
+            signature_result = self._finish_signature_episode()
+        else:
+            self._signature_episode_points.clear()
+            self._signature_event_user_confirmed = False
+        try:
+            commercial_profiles.finish_commercial_episode(
+                self.profile_db_path,
+                self.channel_identity,
+                self._commercial_event_id,
+                exit_reason=exit_reason,
+                features=self._profile_features(),
+                signature_ids=signature_result.get("signature_ids", ()),
+                signature_windows=int(signature_result.get("windows") or 0),
+                user_confirmed=bool(signature_result.get("user_confirmed")),
+                short_false_positive=duration < FALSE_POSITIVE_BUFFER_SECONDS,
+            )
+        except (OSError, sqlite3.Error):
+            pass
+        self._commercial_event_id = ""
+        self._commercial_started_monotonic = None
+        self._commercial_entry_reason = ""
 
     def _observe(
         self,
@@ -740,7 +1352,9 @@ class LiveLogoDetector:
         raw_logo_missing = best_logo_score < 0.50
         if not raw_logo_missing:
             self.logo_last_seen_at = _timestamp()
-        if self.last_commercial is None and not raw_logo_missing:
+        if self.last_commercial is None and (
+            not raw_logo_missing or self.channel_bug_mode == "bugless"
+        ):
             self.last_commercial = False
             self.state = "program"
             self.last_decision_at = _timestamp()
@@ -796,10 +1410,18 @@ class LiveLogoDetector:
             self.mean_color_change = 0.0
             self.color_volatility = 0.0
 
+        # A bugless channel has no logo/bug that can go missing, so
+        # best_logo_score is pinned at 0 and this signal carries no
+        # information for it. Let local_break_confidence carry detection
+        # instead rather than reporting a permanently elevated primary score.
         self.primary_confidence = (
-            0.80 * logo_presence_delta
-            + 0.15 * duration_score
-            + 0.05 * secondary_absence
+            0.0
+            if self.channel_bug_mode == "bugless"
+            else (
+                0.80 * logo_presence_delta
+                + 0.15 * duration_score
+                + 0.05 * secondary_absence
+            )
         )
         local_duration = min(1.0, self._secondary_missing_count / LOCAL_LAYOUT_CONFIRMATIONS)
         has_color_baseline = len(self._program_color_changes) >= LEARNING_FRAMES
@@ -811,7 +1433,7 @@ class LiveLogoDetector:
             )
         elif (
             not self.sports_generated
-            and not raw_logo_missing
+            and (not raw_logo_missing or self.channel_bug_mode == "bugless")
             and has_color_baseline
             and not self._boundary_suppressed()
         ):
@@ -828,6 +1450,13 @@ class LiveLogoDetector:
         self.commercial_confidence = max(
             0.0,
             min(1.0, max(self.primary_confidence, self.local_break_confidence)),
+        )
+        recognition_support = max(
+            0.0,
+            min(1.0, self.signature_match_confidence * self.signature_authority),
+        )
+        self.commercial_confidence = 1.0 - (
+            (1.0 - self.commercial_confidence) * (1.0 - recognition_support)
         )
         if self._channel_profile:
             scored = commercial_profiles.score_features(
@@ -862,7 +1491,9 @@ class LiveLogoDetector:
         )
         if not raw_logo_missing:
             self.region = matched_region
-        missing_confirmations = MISSING_CONFIRMATIONS
+        missing_confirmations = _adaptive_missing_confirmations(
+            self._channel_profile
+        )
         if model_program_veto:
             # A channel-specific pattern already corrected as program must
             # persist for the full short-window boundary before it can hide
@@ -872,16 +1503,24 @@ class LiveLogoDetector:
                 int(SHORT_FALSE_POSITIVE_SECONDS / POLL_SECONDS),
             )
         bug_override = (
-            raw_logo_missing
+            self.channel_bug_mode != "bugless"
+            and raw_logo_missing
             and self._missing_count >= missing_confirmations
             and bool(self._reference_entries())
             and not self._bug_transition_grace()
             and not self._manual_program_hold()
         )
         commercial = self.last_commercial
+        recognized_candidate = bool(
+            recognition_support >= COMMERCIAL_THRESHOLD
+            and not self._manual_program_hold()
+        )
         if commercial is not True:
             self._present_count = 0
-        if (
+        if recognized_candidate:
+            commercial = True
+            self._commercial_reason = "known-ad"
+        elif (
             bug_override
         ):
             commercial = True
@@ -903,39 +1542,77 @@ class LiveLogoDetector:
                 self._commercial_reason = "logo-missing"
                 returned = False
             elif self._commercial_reason == "logo-missing":
-                returned = bool(
-                    matched_key
-                    and best_logo_score >= BUG_RETURN_CONFIDENCE
-                )
+                returned = False
             elif self._commercial_reason == "local-layout":
                 returned = not secondary_missing
+            elif self._commercial_reason == "known-ad":
+                returned = recognition_support < 0.30
             else:
                 returned = self.color_volatility < 0.35
             required_return_confirmations = RETURN_CONFIRMATIONS
-            if self._commercial_reason == "logo-missing":
-                strong_learned_program_return = bool(
-                    not self.sports_generated
-                    and self.channel_model_ready
-                    and self.channel_model_score <= STRONG_PROGRAM_MODEL_MAX
-                    and best_logo_score >= BUG_RETURN_CONFIDENCE
-                    and visual_logo_score >= STRONG_PROGRAM_GRAPHIC_CONFIDENCE
-                )
+            if self._commercial_reason == "known-ad":
                 required_return_confirmations = (
-                    STRONG_PROGRAM_RETURN_CONFIRMATIONS
-                    if strong_learned_program_return
-                    else BUG_RETURN_CONFIRMATIONS
+                    1 if best_logo_score >= BUG_RETURN_CONFIDENCE else 2
                 )
-                candidate_key = (
-                    f"{matched_key}:{matched_region}" if returned else ""
+            if self._commercial_reason == "logo-missing":
+                return_threshold, adaptive_return_target = self._trusted_return_gate(
+                    matched_key
                 )
-                if candidate_key and candidate_key == self._return_candidate_key:
-                    self._present_count += 1
-                elif candidate_key:
-                    self._return_candidate_key = candidate_key
-                    self._present_count = 1
+                trusted_program_return = bool(
+                    not self.sports_generated
+                    and matched_key.startswith("trusted:")
+                    and best_logo_score >= return_threshold
+                    and visual_logo_score >= return_threshold
+                )
+                # A broadcast may move the same bug between known layouts for
+                # desk, weather, traffic, or field segments. Identity remains
+                # authoritative; relocation detection has already confirmed a
+                # new position before it can produce this trusted match.
+                candidate_key = matched_key if trusted_program_return else ""
+                if candidate_key:
+                    evidence = (
+                        PROGRAM_RETURN_STRONG_EVIDENCE
+                        if best_logo_score >= BUG_RETURN_CONFIDENCE
+                        and visual_logo_score >= STRONG_PROGRAM_GRAPHIC_CONFIDENCE
+                        else PROGRAM_RETURN_WEAK_EVIDENCE
+                    )
+                    if candidate_key == self._return_candidate_key:
+                        self._present_count += evidence
+                    else:
+                        # A different identity cannot inherit return confidence
+                        # from the previous candidate. Position changes for the
+                        # same trusted bug intentionally retain evidence.
+                        self._return_candidate_key = candidate_key
+                        self._present_count = evidence
+                    required_return_confirmations = adaptive_return_target
+                    returned = self._present_count >= required_return_confirmations
+                elif (
+                    matched_key
+                    and not matched_key.startswith("trusted:")
+                    and best_logo_score >= BUG_RETURN_CONFIDENCE
+                ):
+                    # A channel without a persisted trusted identity still gets
+                    # the conservative legacy return path until its session bug
+                    # has accumulated enough observations to be trusted.
+                    session_key = f"{matched_key}:{matched_region}"
+                    if session_key == self._return_candidate_key:
+                        self._present_count += 1
+                    else:
+                        self._return_candidate_key = session_key
+                        self._present_count = 1
+                    required_return_confirmations = BUG_RETURN_CONFIRMATIONS
+                    returned = self._present_count >= required_return_confirmations
                 else:
-                    self._return_candidate_key = ""
-                    self._present_count = 0
+                    # Commercial frames are visually chaotic. Let weak or
+                    # mismatched frames drain accumulated return evidence, but
+                    # do not let color/cut volatility veto a stable, exact bug
+                    # identity once it has been reacquired.
+                    self._present_count = max(
+                        0,
+                        self._present_count - PROGRAM_RETURN_MISMATCH_PENALTY,
+                    )
+                    if not self._present_count:
+                        self._return_candidate_key = ""
             else:
                 self._return_candidate_key = ""
                 self._present_count = self._present_count + 1 if returned else 0
@@ -960,7 +1637,7 @@ class LiveLogoDetector:
         stable_program_frame = (
             current_color_change is not None
             and self.last_commercial is False
-            and not raw_logo_missing
+            and (not raw_logo_missing or self.channel_bug_mode == "bugless")
             and not secondary_missing
             and self.commercial_confidence < 0.30
         )
@@ -978,7 +1655,23 @@ class LiveLogoDetector:
                 and self.commercial_confidence < 0.30
             ),
         )
+        self._track_session_bug_promotions(
+            maps,
+            stable_program=bool(
+                self.last_commercial is False
+                and not raw_logo_missing
+                and self.commercial_confidence < 0.30
+            ),
+            scene_change=bool(
+                current_color_change is not None
+                and current_color_change >= 0.18
+            ),
+        )
         if commercial is True and self.last_commercial is True:
+            if self._commercial_reason in {"known-ad", "logo-missing"}:
+                # A local-color episode becomes eligible for fingerprinting
+                # only after an independent signal corroborates it.
+                self._commercial_entry_reason = self._commercial_reason
             self._commercial_episode_frame_count += 1
             episode_seconds = self._commercial_episode_frame_count * POLL_SECONDS
             if episode_seconds >= FALSE_POSITIVE_BUFFER_SECONDS:
@@ -987,6 +1680,9 @@ class LiveLogoDetector:
             elif self._commercial_episode_frame_count % FALSE_POSITIVE_SAMPLE_FRAMES == 0:
                 self._commercial_episode_features.append(dict(self._profile_features()))
         if commercial != self.last_commercial:
+            self._bug_promotion_resume_monotonic = (
+                time.monotonic() + BUG_PROMOTION_COOLDOWN_SECONDS
+            )
             self._commercial_frame_count = 0
             self._clear_recovery()
             self.recovery_state = "idle"
@@ -997,9 +1693,11 @@ class LiveLogoDetector:
                 self._return_candidate_key = ""
                 self._commercial_event_id = f"logo-{uuid.uuid4().hex[:20]}"
                 self._commercial_started_monotonic = time.monotonic()
+                self._commercial_entry_reason = self._commercial_reason
                 self._commercial_episode_frame_count = 0
                 self._commercial_episode_features = [dict(self._profile_features())]
                 self._commercial_episode_feedback_expired = False
+                self._begin_signature_episode()
             elif self._commercial_started_monotonic is not None:
                 false_positive_duration = max(
                     0.0,
@@ -1010,7 +1708,23 @@ class LiveLogoDetector:
                     and not self._commercial_episode_feedback_expired
                     and false_positive_duration < SHORT_FALSE_POSITIVE_SECONDS
                 )
-            self._record_state_transition(commercial, next_state)
+            signature_result: dict = {}
+            if not commercial and not short_false_positive:
+                signature_result = self._finish_signature_episode()
+            elif not commercial:
+                self._signature_episode_points.clear()
+                self._signature_event_user_confirmed = False
+            self._record_state_transition(
+                commercial,
+                next_state,
+                exit_reason=(
+                    "short-false-positive"
+                    if short_false_positive
+                    else "program-return"
+                ),
+                short_false_positive=short_false_positive,
+                signature_result=signature_result,
+            )
             if short_false_positive:
                 self._record_short_false_positive(false_positive_duration)
             self.last_commercial = commercial
@@ -1020,6 +1734,7 @@ class LiveLogoDetector:
             if not commercial:
                 self._return_candidate_key = ""
                 self._commercial_event_id = ""
+                self._commercial_entry_reason = ""
                 self._commercial_started_monotonic = None
                 self._commercial_episode_frame_count = 0
                 self._commercial_episode_features.clear()
@@ -1095,6 +1810,7 @@ class LiveLogoDetector:
         self.region = name
         self.logo_detected_at = _timestamp()
         self.logo_last_seen_at = self.logo_detected_at
+        self._close_episode_ledger("replacement-accepted")
         self.last_commercial = False
         self.state = "program"
         self.last_decision_at = _timestamp()
@@ -1113,6 +1829,7 @@ class LiveLogoDetector:
 
     def _release_uncertain_normal_stream(self) -> None:
         """Fail open after four minutes rather than hiding normal TV forever."""
+        self._close_episode_ledger("safety-release", keep_signatures=False)
         self.last_commercial = False
         self.state = "learning"
         self.last_decision_at = _timestamp()
@@ -1189,6 +1906,10 @@ class LiveLogoDetector:
             "local-color",
             "logo-missing",
         }:
+            self._close_episode_ledger(
+                "program-boundary",
+                keep_signatures=False,
+            )
             self.last_commercial = False
             self.state = "program"
             self._commercial_reason = ""
@@ -1220,12 +1941,21 @@ class LiveLogoDetector:
         else:
             label = "uncertain"
         try:
-            commercial_profiles.record(
+            features = self._profile_features()
+            observation = commercial_profiles.record_with_metadata(
                 self.profile_db_path,
                 self.channel_identity,
                 label=label,
-                features=self._profile_features(),
+                features=features,
                 event_id=self._commercial_event_id if self.last_commercial is True else "",
+                detector_state=self.state,
+                commercial_reason=self._commercial_reason,
+            )
+            self._archive_decision_frame(
+                observation,
+                label=label,
+                source="inferred",
+                features=features,
                 detector_state=self.state,
                 commercial_reason=self._commercial_reason,
             )
@@ -1245,7 +1975,15 @@ class LiveLogoDetector:
         self.channel_model_ready = bool(scored.get("ready"))
         self.channel_model_score = float(scored.get("score") or 0)
 
-    def _record_state_transition(self, commercial: bool, state: str) -> None:
+    def _record_state_transition(
+        self,
+        commercial: bool,
+        state: str,
+        *,
+        exit_reason: str = "program-return",
+        short_false_positive: bool = False,
+        signature_result: dict | None = None,
+    ) -> None:
         if (
             self.sports_generated
             or self.last_commercial is None
@@ -1255,16 +1993,46 @@ class LiveLogoDetector:
             return
         try:
             label = "commercial" if commercial else "program"
-            commercial_profiles.record(
+            features = self._profile_features()
+            observation = commercial_profiles.record_with_metadata(
                 self.profile_db_path,
                 self.channel_identity,
                 label=label,
                 source="state-transition",
                 event_id=self._commercial_event_id,
-                features=self._profile_features(),
+                features=features,
                 detector_state=state,
                 commercial_reason=self._commercial_reason,
             )
+            self._archive_decision_frame(
+                observation,
+                label=label,
+                source="state-transition",
+                features=features,
+                detector_state=state,
+                commercial_reason=self._commercial_reason,
+            )
+            if commercial:
+                commercial_profiles.begin_commercial_episode(
+                    self.profile_db_path,
+                    self.channel_identity,
+                    self._commercial_event_id,
+                    entry_reason=self._commercial_entry_reason or self._commercial_reason,
+                    features=features,
+                )
+            else:
+                result = dict(signature_result or {})
+                commercial_profiles.finish_commercial_episode(
+                    self.profile_db_path,
+                    self.channel_identity,
+                    self._commercial_event_id,
+                    exit_reason=exit_reason,
+                    features=features,
+                    signature_ids=result.get("signature_ids", ()),
+                    signature_windows=int(result.get("windows") or 0),
+                    user_confirmed=bool(result.get("user_confirmed")),
+                    short_false_positive=short_false_positive,
+                )
         except (OSError, sqlite3.Error):
             return
 
@@ -1311,7 +2079,13 @@ class LiveLogoDetector:
         *,
         fallback_allowed: bool,
     ) -> bool:
-        """Observe all four corners and return whether bugless mode owns state."""
+        """Observe all four corners and return whether countdown owns state.
+
+        Countdown detection is a temporary fallback for a channel already
+        proven bugless. It must relinquish control when a trusted bug appears,
+        when the fallback is no longer eligible, or after the learned overlay
+        has remained absent. This keeps normal bug acquisition alive.
+        """
         scored: list[tuple[float, str, tuple[int, ...] | None]] = []
         for name in COUNTDOWN_REGION_NAMES:
             samples = self._countdown_samples[name]
@@ -1323,11 +2097,15 @@ class LiveLogoDetector:
         confidence, region, reference = max(scored)
         self.countdown_confidence = confidence
         if self._manual_program_hold():
-            self._countdown_candidate_count = 0
-            self._countdown_missing_count = 0
-            if self.bugless_countdown_mode:
-                self._set_countdown_commercial(False)
-            return self.bugless_countdown_mode
+            self._relinquish_countdown_mode()
+            return False
+        if self.bugless_countdown_mode and (
+            not fallback_allowed
+            or self.channel_bug_mode != "bugless"
+            or bool(self._trusted_bugs)
+        ):
+            self._relinquish_countdown_mode()
+            return False
         if not self.bugless_countdown_mode:
             self._countdown_candidate_count = (
                 self._countdown_candidate_count + 1
@@ -1340,33 +2118,58 @@ class LiveLogoDetector:
                 self.countdown_detected_at = _timestamp()
                 self._countdown_reference = reference
                 self._countdown_missing_count = 0
+                self._countdown_idle_count = 0
                 self._set_countdown_commercial(True)
             return self.bugless_countdown_mode
 
         # The learned clock disappearing is a faster return signal than
         # waiting for the full rolling periodicity window to drain.
-        presence = self._match_score(
-            self._countdown_reference,
-            maps.get(self.countdown_region, ()),
+        current = tuple(maps.get(self.countdown_region, ()))
+        presence = self._translated_match_score(
+            self._countdown_reference or (),
+            current,
         )
         self.countdown_confidence = max(self.countdown_confidence, presence)
         if self.last_commercial is not True:
             self._countdown_candidate_count = (
-                self._countdown_candidate_count + 1 if presence >= 0.42 else 0
+                self._countdown_candidate_count + 1
+                if presence >= COUNTDOWN_PRESENCE_THRESHOLD else 0
             )
-            if self._countdown_candidate_count >= COUNTDOWN_CONFIRMATIONS:
+            if presence >= COUNTDOWN_PRESENCE_THRESHOLD:
+                self._countdown_idle_count = 0
+            else:
+                self._countdown_idle_count += 1
+            if self._countdown_candidate_count >= COUNTDOWN_REENTRY_CONFIRMATIONS:
                 self._countdown_missing_count = 0
+                self._countdown_idle_count = 0
                 self._set_countdown_commercial(True)
-        elif presence >= 0.42:
+            elif self._countdown_idle_count >= COUNTDOWN_IDLE_RELEASE_FRAMES:
+                self._relinquish_countdown_mode()
+                return False
+        elif presence >= COUNTDOWN_PRESENCE_THRESHOLD:
             self._countdown_candidate_count = 0
             self._countdown_missing_count = 0
+            self._countdown_idle_count = 0
             self._set_countdown_commercial(True)
         else:
             self._countdown_missing_count += 1
             if self._countdown_missing_count >= COUNTDOWN_RELEASE_CONFIRMATIONS:
                 self._countdown_candidate_count = 0
+                self._countdown_idle_count = 0
                 self._set_countdown_commercial(False)
         return True
+
+    def _relinquish_countdown_mode(self) -> None:
+        if self.last_commercial is True and self._commercial_reason == "countdown-clock":
+            self._set_countdown_commercial(False)
+        self.bugless_countdown_mode = False
+        self.countdown_region = ""
+        self.countdown_confidence = 0.0
+        self._countdown_reference = None
+        self._countdown_candidate_count = 0
+        self._countdown_missing_count = 0
+        self._countdown_idle_count = 0
+        self._countdown_samples = {name: [] for name in COUNTDOWN_REGION_NAMES}
 
     def _set_countdown_commercial(self, commercial: bool) -> None:
         self.commercial_confidence = self.countdown_confidence if commercial else 0.0
@@ -1390,16 +2193,35 @@ class LiveLogoDetector:
         if commercial:
             self._commercial_event_id = f"clock-{uuid.uuid4().hex[:20]}"
             self._commercial_started_monotonic = time.monotonic()
-        self._record_state_transition(commercial, next_state)
+            self._commercial_entry_reason = "countdown-clock"
+            self._signature_event_user_confirmed = False
+            self._signature_episode_points.clear()
+            self._bug_promotion_resume_monotonic = (
+                time.monotonic() + BUG_PROMOTION_COOLDOWN_SECONDS
+            )
+        self._record_state_transition(
+            commercial,
+            next_state,
+            exit_reason="countdown-ended",
+        )
+        if not commercial:
+            # Countdown/filler slates are break markers, not reusable ads.
+            self._signature_episode_points.clear()
+            self._signature_event_user_confirmed = False
+            self._bug_promotion_resume_monotonic = (
+                time.monotonic() + BUG_PROMOTION_COOLDOWN_SECONDS
+            )
         self.last_commercial = commercial
         self.state = next_state
         self.last_decision_at = _timestamp()
         self.callback(commercial)
         if not commercial:
             self._commercial_event_id = ""
+            self._commercial_entry_reason = ""
             self._commercial_started_monotonic = None
 
     def _process(self, path: Path) -> None:
+        self._current_analysis_frame = path
         with Image.open(path) as image:
             maps = {name: _edge_map(region) for name, region in _regions(image).items()}
             scoreboard_maps = (
@@ -1410,26 +2232,67 @@ class LiveLogoDetector:
                 if self.sports_generated else {}
             )
             color_histogram, self.mean_saturation, self.mean_brightness = _color_features(image)
+            ad_fingerprint = commercial_signatures.fingerprint_image(
+                image,
+                color_histogram,
+            )
+        self._sample_ad_fingerprint(ad_fingerprint)
         self.edge_density = sum(sum(edge_map) for edge_map in maps.values()) / float(
             len(maps) * len(next(iter(maps.values())))
         )
         self._frames_observed += 1
         self._load_trusted_bugs()
-        if not self.sports_generated and self._update_countdown_detector(
+        self._update_channel_bug_mode()
+        countdown_owns_state = bool(
+            not self.sports_generated and self._update_countdown_detector(
             maps,
             fallback_allowed=bool(
                 self._frames_observed >= COUNTDOWN_FALLBACK_PROBATION_FRAMES
-                and not self._reference_entries()
+                and self.channel_bug_mode == "bugless"
+                and not self._trusted_bugs
             ),
-        ):
-            self._sample_channel_profile()
-            return
+            )
+        )
+        if countdown_owns_state:
+            # Once the countdown overlay disappears, continue learning the
+            # ordinary five bug regions. A real bug that survives multiple
+            # scene changes immediately restores the normal classifier.
+            if self.last_commercial is not True and self._bugless_bug_scan_ready():
+                scene_change = bool(
+                    self._bug_scan_previous_histogram is not None
+                    and _distribution_distance(
+                        self._bug_scan_previous_histogram,
+                        color_histogram,
+                    ) >= 0.18
+                )
+                self._bug_scan_previous_histogram = color_histogram
+                self._refresh_references(maps)
+                self._track_session_bug_promotions(
+                    maps,
+                    stable_program=True,
+                    scene_change=scene_change,
+                )
+                if self._trusted_bugs:
+                    self.channel_bug_mode = "bugged"
+                    self._relinquish_countdown_mode()
+                    countdown_owns_state = False
+            if countdown_owns_state:
+                self._sample_channel_profile()
+                return
         # Bootstrap from the first rolling window. Once a credible broadcast
         # graphic exists, classify the frame against that trusted evidence
         # before allowing it into the learning bank. This prevents persistent
         # commercial graphics (for example, a prescription-drug name) from
         # being learned as a replacement network bug.
-        if not self._reference_entries():
+        if self.channel_bug_mode == "bugless":
+            # "Bugless" is a fallback, not a terminal classification. Give the
+            # suspected false graphic ten seconds to disappear, then keep the
+            # normal five-region learner awake so a returning station bug can
+            # promote itself and restore bug-based decisions.
+            if self._bugless_bug_scan_ready():
+                self._refresh_references(maps)
+            self._observe(maps, scoreboard_maps, color_histogram)
+        elif not self._reference_entries():
             if not self._refresh_references(maps):
                 return
             self._observe(maps, scoreboard_maps, color_histogram)
@@ -1493,6 +2356,17 @@ class LiveLogoDetector:
             "logo_detected": bool(self._reference_entries()),
             "logo_candidates": logo_candidates,
             "trusted_bug_count": len(self._trusted_bugs),
+            "channel_bug_mode": self.channel_bug_mode,
+            "bug_rescan_seconds_remaining": round(
+                max(
+                    0,
+                    (
+                        (self._bugless_rescan_after_frame or self._frames_observed)
+                        - self._frames_observed
+                    ) * POLL_SECONDS,
+                ),
+                1,
+            ),
             "logo_detected_at": self.logo_detected_at,
             "logo_last_seen_at": self.logo_last_seen_at,
             "scoreboard_detected": self._scoreboard_reference is not None,
@@ -1506,6 +2380,7 @@ class LiveLogoDetector:
             "countdown_confidence": round(self.countdown_confidence * 100, 1),
             "countdown_fallback_available": bool(
                 self.bugless_countdown_mode
+                or self.channel_bug_mode == "bugless"
                 or (
                     self._frames_observed >= COUNTDOWN_FALLBACK_PROBATION_FRAMES
                     and not self._reference_entries()
@@ -1537,6 +2412,12 @@ class LiveLogoDetector:
             "channel_identity": self.channel_identity,
             "channel_model_ready": self.channel_model_ready,
             "channel_model_score": round(self.channel_model_score * 100, 1),
+            "signature_match_confidence": round(self.signature_match_confidence * 100, 1),
+            "signature_authority": round(self.signature_authority * 100, 1),
+            "signature_id": self.signature_id,
+            "signature_occurrences": self.signature_occurrences,
+            "classified_commercial_count": self.classified_commercial_count,
+            "probable_commercial_candidate_count": self.probable_commercial_candidate_count,
             "program_boundary_suppressed": self._boundary_suppressed(),
             "bug_transition_grace": self._bug_transition_grace(),
             "channel_features": {
@@ -1563,5 +2444,6 @@ class LiveLogoDetector:
         }
 
     def stop(self) -> None:
+        self._close_episode_ledger("stream-ended")
         self._stop.set()
         shutil.rmtree(self.directory, ignore_errors=True)

@@ -49,7 +49,7 @@ class UpdateLifecycleContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("master_update_worker.payload()", status_source)
         self.assertIn('response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"', status_source)
-        self.assertIn('"--threads=8"', dockerfile)
+        self.assertIn('"--threads=16"', dockerfile)
 
 
 if __name__ == "__main__":

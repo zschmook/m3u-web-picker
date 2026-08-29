@@ -18,11 +18,6 @@ class CommercialDetectionTests(unittest.TestCase):
         commercial_detection.set_manual(False)
         with commercial_detection._LOCK:
             commercial_detection._STATE.update(
-                last_scte35_at=None,
-                last_scte35_out_of_network=None,
-                last_scte35_event_id="",
-                last_scte35_action="",
-                scte35_state="waiting",
                 logo_state="idle",
                 last_logo_at=None,
             )
@@ -31,31 +26,9 @@ class CommercialDetectionTests(unittest.TestCase):
         started = commercial_detection.set_manual(True)
         self.assertTrue(started["active"])
         self.assertEqual(started["source"], "manual")
-        self.assertFalse(started["scte35_connected"])
-
         ended = commercial_detection.set_manual(False)
         self.assertFalse(ended["active"])
         self.assertEqual(ended["source"], "idle")
-
-    def test_scte35_boundary_updates_isolated_state(self):
-        started = commercial_detection.apply_scte35_event(
-            out_of_network=True,
-            event_id="fox-break-1",
-            break_duration_seconds=90,
-        )
-        self.assertTrue(started["active"])
-        self.assertEqual(started["source"], "scte35")
-        self.assertEqual(started["break_duration_seconds"], 90.0)
-        self.assertEqual(started["scte35_state"], "commercial")
-        self.assertEqual(started["last_scte35_action"], "break_start")
-        first_timestamp = started["last_scte35_at"]
-
-        ended = commercial_detection.apply_scte35_event(out_of_network=False)
-        self.assertFalse(ended["active"])
-        self.assertEqual(ended["scte35_state"], "program")
-        self.assertEqual(ended["last_scte35_action"], "break_end")
-        self.assertIsNotNone(first_timestamp)
-        self.assertIsNotNone(ended["last_scte35_at"])
 
     def test_elapsed_timer_uses_break_start(self):
         commercial_detection.set_manual(True)
@@ -82,6 +55,14 @@ class CommercialDetectionTests(unittest.TestCase):
         self.assertEqual(cleared["logo_state"], "idle")
         self.assertIsNone(cleared["last_logo_at"])
 
+    def test_manual_state_is_discarded_when_last_stream_ends(self):
+        commercial_detection.set_manual(True)
+
+        cleared = commercial_detection.clear_logo_state()
+
+        self.assertFalse(cleared["active"])
+        self.assertEqual(cleared["source"], "idle")
+
     def test_ui_is_manual_and_not_added_to_ffmpeg_commands(self):
         root = Path(__file__).resolve().parents[1]
         ui = (root / "static/js/ui_commercial_test.js").read_text(encoding="utf-8")
@@ -91,9 +72,8 @@ class CommercialDetectionTests(unittest.TestCase):
 
         self.assertIn("Start Commercial", sidebar)
         self.assertIn("End Commercial", ui)
-        self.assertIn("SCTE-35 pending", sidebar)
-        self.assertIn("uiScte35Timestamp", sidebar)
-        self.assertIn("Found SCTE-35", ui)
+        self.assertNotIn("SCTE-35", sidebar)
+        self.assertNotIn("SCTE-35", ui)
         self.assertIn("Logo detector idle", sidebar)
         self.assertIn("Learning broadcast logo", ui)
         self.assertIn("This Is Program", sidebar)
@@ -114,7 +94,8 @@ class CommercialDetectionTests(unittest.TestCase):
         self.assertIn("minutes=30", source)
         self.assertIn("renderChannelChart(profile)", ui)
         self.assertIn("/api/commercial-break/feedback", ui)
-        self.assertIn("commercial-in-progress-preview.gif", sidebar)
+        self.assertNotIn("commercial-in-progress-preview.gif", sidebar)
+        self.assertIn("Preview reconnecting", sidebar)
         self.assertNotIn("commercial_detection", ffmpeg)
 
     def test_feedback_records_user_labeled_channel_sample(self):

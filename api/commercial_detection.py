@@ -4,6 +4,7 @@ from flask import Response, jsonify, request
 
 import commercial_detection
 import commercial_profiles
+import commercial_signatures
 import core
 from media import mpegts
 
@@ -45,11 +46,16 @@ def register_commercial_detection_routes(app):
 
     @app.get("/api/commercial-break")
     def api_commercial_break_status():
+        channel_profile = channel_profile_payload()
         return jsonify(
             {
                 **commercial_detection.payload(),
                 "injection": mpegts.commercial_status(),
-                "channel_profile": channel_profile_payload(),
+                "channel_profile": channel_profile,
+                "signature_library": commercial_signatures.library_stats(
+                    core.DB_PATH,
+                    str(channel_profile.get("channel_identity", "") or ""),
+                ),
             }
         )
 
@@ -78,6 +84,13 @@ def register_commercial_detection_routes(app):
         identity = str(snapshot.get("channel_identity", "") or "")
         if not identity:
             return jsonify(error="No non-sports FFmpeg stream is available."), 409
+        discarded_recent = 0
+        if label == "program":
+            discarded_recent = commercial_profiles.discard_recent_possible_commercials(
+                core.DB_PATH,
+                identity,
+                seconds=10,
+            )
         commercial_profiles.record(
             core.DB_PATH,
             identity,
@@ -88,7 +101,14 @@ def register_commercial_detection_routes(app):
             commercial_reason=snapshot.get("commercial_reason", ""),
         )
         applied_to_stream = bool(
-            label == "program" and mpegts.apply_program_feedback(stream_identity)
+            (
+                label == "program"
+                and mpegts.apply_program_feedback(stream_identity)
+            )
+            or (
+                label == "commercial"
+                and mpegts.apply_commercial_feedback(stream_identity)
+            )
         )
         profile = commercial_profiles.profile(core.DB_PATH, identity)
         return jsonify(
@@ -100,6 +120,7 @@ def register_commercial_detection_routes(app):
             ready=bool(profile.get("ready")),
             effective_weight=commercial_profiles.USER_SAMPLE_WEIGHT,
             applied_to_stream=applied_to_stream,
+            discarded_recent_possible_commercials=discarded_recent,
         )
 
     @app.get("/api/commercial-break/profiles/export")

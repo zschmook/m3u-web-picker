@@ -158,18 +158,38 @@
           <a href="https://github.com/zschmook/m3u-web-picker" target="_blank" rel="noopener noreferrer">${icons.external}<span>GitHub</span></a>
         </div>
       </section>
+      <section class="ui-modern-card ui-channel-rotation-card">
+        <div class="ui-card-heading">
+          <div><span>Unattended Channel Learning</span><small>Cycles through regular guide channels using the selected window, then prioritizes likely repeat ads on later passes. Generated sports channels are skipped.</small></div>
+        </div>
+        <div class="ui-channel-rotation-status">
+          <div>
+            <strong id="uiChannelRotationStatus">Ready</strong>
+            <small id="uiChannelRotationDetail">Press Start when you want continuous channel rotation to begin.</small>
+          </div>
+          <div class="ui-channel-rotation-actions">
+            <label class="ui-channel-rotation-window" for="uiChannelRotationMinutes"><span>Minutes per channel</span><input id="uiChannelRotationMinutes" class="form-control" type="number" min="5" max="120" step="1" value="20"></label>
+            <button class="btn ui-btn-primary" id="uiChannelRotationToggle" type="button">Start Channel Rotation</button>
+          </div>
+        </div>
+        <div class="ui-channel-rotation-progress" aria-hidden="true">
+          <span id="uiChannelRotationProgressBar"></span>
+        </div>
+        <div class="ui-channel-rotation-stats">
+          <div><span>Current channel</span><strong id="uiChannelRotationCurrent">—</strong></div>
+          <div><span>Channel progress</span><strong id="uiChannelRotationTime">00:00 / 20:00</strong></div>
+          <div><span>Probable commercials</span><strong id="uiChannelRotationCommercials">0</strong></div>
+          <div><span>Channels with data</span><strong id="uiChannelRotationLearned">0</strong></div>
+        </div>
+        <small class="ui-channel-rotation-note" id="uiChannelRotationNote">The Overview page can be closed while this runs.</small>
+      </section>
       <section class="ui-modern-card ui-commercial-test-card">
         <div class="ui-card-heading">
           <div><span>Commercial Detection Test</span><small>Manual control for active Jellyfin FFmpeg streams.</small></div>
-          <span class="ui-count-badge" id="uiScte35Badge">SCTE-35 pending</span>
         </div>
         <div class="ui-commercial-test-controls">
           <div><strong id="uiCommercialTestStatus">Loading…</strong><small>Elapsed commercial time: <span id="uiCommercialTestTimer">00:00</span></small></div>
           <button class="btn ui-btn-primary" id="uiCommercialTestToggle" type="button">Start Commercial</button>
-        </div>
-        <div class="ui-commercial-marker-status">
-          <strong id="uiScte35Status">SCTE-35 not detected</strong>
-          <small id="uiScte35Timestamp">Waiting for a broadcast marker</small>
         </div>
         <div class="ui-commercial-marker-status">
           <strong id="uiLearningChannelStatus">Learning channel</strong>
@@ -194,6 +214,7 @@
             <div><span>Program samples</span><strong id="uiChannelProgramSamples">0</strong></div>
             <div><span>Commercial samples</span><strong id="uiChannelCommercialSamples">0</strong></div>
             <div><span>Shadow score</span><strong id="uiChannelShadowScore">—</strong></div>
+            <div><span>Probable commercials classified</span><strong id="uiClassifiedCommercialCount">0</strong></div>
           </div>
           <div class="ui-channel-model-chart-shell">
             <svg id="uiChannelModelChart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="Channel learning signal history">
@@ -221,8 +242,9 @@
           </div>
         </div>
         <div class="ui-commercial-test-preview d-none" id="uiCommercialTestPreview">
+          <div class="ui-commercial-decision-badge d-none" id="uiCommercialDecisionBadge" aria-live="polite">COMMERCIAL</div>
           <video id="uiCommercialTestVideo" controls autoplay playsinline preload="none"></video>
-          <img id="uiCommercialTestFallback" src="/static/images/commercial-in-progress-preview.gif" alt="Commercial in progress over a peaceful mountain lake">
+          <div class="ui-commercial-test-fallback d-none" id="uiCommercialTestFallback" role="status">Preview reconnecting…</div>
         </div>
       </section>`;
     overview.appendChild(overviewGrid);

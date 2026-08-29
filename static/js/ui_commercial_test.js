@@ -3,9 +3,13 @@
 
   const el = id => document.getElementById(id);
   let state = {active: false, elapsed_seconds: 0};
+  let rotationState = {running: false, current_channel: {}};
   let busy = false;
   let lastPreviewUrl = "";
+  let pendingPreviewUrl = "";
   let previewSessionId = "";
+  let previewSwitchGeneration = 0;
+  let previewSwitchChain = Promise.resolve();
   let lastChartSignature = "";
   const CHART_TICK_COUNT = 5;
   const CHART_HISTORY_MINUTES = 30;
@@ -143,7 +147,7 @@
     return `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function releaseCommercialPreview({keepalive = false} = {}) {
+  async function releaseCommercialPreview({keepalive = false} = {}) {
     const video = el("uiCommercialTestVideo");
     if (video) {
       video.pause();
@@ -154,39 +158,83 @@
     previewSessionId = "";
     lastPreviewUrl = "";
     if (sessionId) {
-      fetch(`/guide/play/preview/${encodeURIComponent(sessionId)}`, {
-        method: "DELETE",
-        cache: "no-store",
-        keepalive,
-      }).catch(() => {});
+      try {
+        await fetch(`/guide/play/preview/${encodeURIComponent(sessionId)}`, {
+          method: "DELETE",
+          cache: "no-store",
+          keepalive,
+        });
+      } catch (_error) {
+        // The media request closing also releases the server-side process.
+      }
     }
   }
 
-  function renderCommercialPreview(stream, hasCommercial) {
+  function showPreviewReconnect(message = "Preview reconnecting…") {
+    const video = el("uiCommercialTestVideo");
+    const fallback = el("uiCommercialTestFallback");
+    video?.classList.add("d-none");
+    if (fallback) {
+      fallback.textContent = message;
+      fallback.classList.remove("d-none");
+    }
+  }
+
+  function requestPreviewSwitch(previewUrl) {
+    if (!previewUrl || previewUrl === lastPreviewUrl || previewUrl === pendingPreviewUrl) return;
+    pendingPreviewUrl = previewUrl;
+    const generation = ++previewSwitchGeneration;
+    previewSwitchChain = previewSwitchChain.then(async () => {
+      if (generation !== previewSwitchGeneration) return;
+      showPreviewReconnect();
+      await releaseCommercialPreview();
+      // Give the old streaming response one scheduler turn to run its cleanup
+      // and release its FFmpeg session before requesting the replacement.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (generation !== previewSwitchGeneration) return;
+
+      const video = el("uiCommercialTestVideo");
+      const fallback = el("uiCommercialTestFallback");
+      if (!video || !fallback) return;
+      lastPreviewUrl = previewUrl;
+      previewSessionId = newPreviewSessionId();
+      video.muted = false;
+      video.src = `${previewUrl}?preview_session=${encodeURIComponent(previewSessionId)}&_=${Date.now()}`;
+      video.load();
+      video.play().catch(() => {
+        // Browsers may reject audible autoplay without a recent user gesture.
+        video.muted = true;
+        video.play().catch(() => showPreviewReconnect());
+      });
+    }).finally(() => {
+      if (generation === previewSwitchGeneration) pendingPreviewUrl = "";
+    });
+  }
+
+  function renderCommercialPreview(stream, visible) {
     const preview = el("uiCommercialTestPreview");
     const video = el("uiCommercialTestVideo");
     const fallback = el("uiCommercialTestFallback");
     if (!preview || !video || !fallback) return;
 
-    const previewUrl = streamToPreviewUrl(stream);
-    if (!hasCommercial || !previewUrl) {
+    const collectorPreviewUrl = String(rotationState.current_channel?.play_url || "");
+    const previewUrl = rotationState.running
+      ? collectorPreviewUrl
+      : streamToPreviewUrl(stream);
+    if (!visible || !previewUrl) {
       preview.classList.add("d-none");
-      if (previewSessionId || video.getAttribute("src")) releaseCommercialPreview();
+      if (previewSessionId || video.getAttribute("src")) {
+        previewSwitchGeneration += 1;
+        pendingPreviewUrl = "";
+        void releaseCommercialPreview();
+      }
       fallback.classList.add("d-none");
       return;
     }
 
     preview.classList.remove("d-none");
-    if (previewUrl !== lastPreviewUrl) {
-      releaseCommercialPreview();
-      lastPreviewUrl = previewUrl;
-      previewSessionId = newPreviewSessionId();
-      video.classList.remove("d-none");
-      fallback.classList.add("d-none");
-      video.muted = false;
-      video.src = `${previewUrl}?preview_session=${encodeURIComponent(previewSessionId)}&_=${Date.now()}`;
-      video.load();
-    }
+    if (previewUrl !== lastPreviewUrl) requestPreviewSwitch(previewUrl);
+    if (pendingPreviewUrl) return;
     if (!video.paused) return;
     video.muted = false;
     video.play().catch(() => {
@@ -210,8 +258,13 @@
     button.classList.toggle("ui-btn-primary", !state.active);
     const injection = state.injection || {};
     const stream = latestStream(injection);
+    const detector = stream?.logo_detector || {};
     const hasCommercial = Boolean(state.active || stream?.commercial_active);
-    renderCommercialPreview(stream, hasCommercial);
+    renderCommercialPreview(stream, Boolean(hasCommercial || rotationState.running));
+    const decisionBadge = el("uiCommercialDecisionBadge");
+    if (decisionBadge) {
+      decisionBadge.classList.toggle("d-none", !Boolean(detector.commercial));
+    }
 
     const eligible = Number(injection.eligible_streams || 0);
     const failed = Array.isArray(injection.results)
@@ -229,30 +282,8 @@
         : "No Jellyfin FFmpeg stream connected";
     }
     timer.textContent = formatElapsed(state.elapsed_seconds);
-    const markerStatus = el("uiScte35Status");
-    const markerTimestamp = el("uiScte35Timestamp");
-    const markerBadge = el("uiScte35Badge");
     const learningChannelStatus = el("uiLearningChannelStatus");
     const learningChannelValue = el("uiLearningChannelValue");
-    const detector = stream?.logo_detector || {};
-    if (markerStatus && markerTimestamp && markerBadge) {
-      if (state.last_scte35_at) {
-        const found = new Date(state.last_scte35_at);
-        const action = state.last_scte35_action === "break_start"
-          ? "Commercial start"
-          : state.last_scte35_action === "break_end" ? "Commercial end" : "Marker";
-        markerStatus.textContent = `Found SCTE-35 · ${action}`;
-        const timestamp = Number.isNaN(found.getTime())
-          ? state.last_scte35_at
-          : found.toLocaleString([], {dateStyle: "medium", timeStyle: "medium"});
-        markerTimestamp.textContent = `Latest marker: ${timestamp}`;
-        markerBadge.textContent = state.scte35_state === "commercial" ? "Commercial" : "Program";
-      } else {
-        markerStatus.textContent = "SCTE-35 not detected";
-        markerTimestamp.textContent = "Waiting for a broadcast marker";
-        markerBadge.textContent = "SCTE-35 pending";
-      }
-    }
     if (learningChannelStatus && learningChannelValue) {
       const learnedChannel = detector.channel_identity || stream?.identity || "";
       if (learnedChannel) {
@@ -375,6 +406,11 @@
         el("uiChannelShadowScore").textContent = profile.ready
           ? `${Number(profile.score || 0).toFixed(1)}%` : "Learning";
       }
+      if (el("uiClassifiedCommercialCount")) {
+        el("uiClassifiedCommercialCount").textContent = String(
+          state.signature_library?.classified || 0,
+        );
+      }
       renderChannelChart(profile);
     }
   }
@@ -389,7 +425,10 @@
   async function refresh() {
     if (!el("uiCommercialTestToggle")) return;
     try {
-      state = await api(`/api/commercial-break?_=${Date.now()}`);
+      [state, rotationState] = await Promise.all([
+        api(`/api/commercial-break?_=${Date.now()}`),
+        api(`/api/channel-learning-rotation?_=${Date.now()}`),
+      ]);
       render();
     } catch (error) {
       el("uiCommercialTestStatus").textContent = error.message;
@@ -455,7 +494,7 @@
   });
   el("uiCommercialTestVideo")?.addEventListener("error", event => {
     event.currentTarget.classList.add("d-none");
-    el("uiCommercialTestFallback")?.classList.remove("d-none");
+    showPreviewReconnect();
   });
   window.addEventListener("pagehide", () => releaseCommercialPreview({keepalive: true}));
   setInterval(() => {

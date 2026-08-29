@@ -192,6 +192,22 @@ class SharedMediaSessionTests(unittest.TestCase):
             mpegts._finish(stream)
         clear.assert_called_once_with()
 
+    def test_automatic_overlay_cannot_start_when_filtering_is_disabled(self):
+        process = Mock()
+        process.poll.return_value = None
+        stream = mpegts.SharedMpegtsStream("one", process, "pipeline")
+
+        with patch(
+            "media.mpegts.media_pipeline.commercial_filtering_active",
+            return_value=False,
+        ), patch("media.mpegts.zmq", create=True) as zmq:
+            ok, error = mpegts._set_stream_commercial(stream, True)
+
+        self.assertFalse(ok)
+        self.assertEqual(error, "Automatic commercial filtering is disabled.")
+        self.assertFalse(stream.commercial_active)
+        zmq.assert_not_called()
+
     @patch("media.mpegts.threading.Thread.start")
     @patch("media.mpegts.media_pipeline.acquire_session", return_value="pipeline")
     @patch("media.mpegts.media_pipeline.settings", return_value={"commercial_detection_enabled": False})
