@@ -1020,6 +1020,57 @@ http://provider.test/user/pass/near.ts
         names = [row["display_name"] for row in sports.generated_rows(self.db_path)]
         self.assertFalse(any("NFL 01" in name for name in names))
 
+    def test_explicit_sport_does_not_borrow_team_ids_from_another_sport(self):
+        conn = sports._connect(self.db_path)
+        try:
+            sports._upsert_catalog_item(
+                conn,
+                scope_type="team",
+                scope_id="nfl:detroit-lions",
+                display_name="Detroit Lions",
+                subtitle="NFL team",
+                league_id="nfl",
+                aliases=["Detroit Lions", "Lions"],
+                logo_url="https://example.test/lions.png",
+                metadata={"sport_id": "football"},
+                source="test",
+            )
+            sports._upsert_catalog_item(
+                conn,
+                scope_type="team",
+                scope_id="nfl:philadelphia-eagles",
+                display_name="Philadelphia Eagles",
+                subtitle="NFL team",
+                league_id="nfl",
+                aliases=["Philadelphia Eagles", "Eagles"],
+                logo_url="https://example.test/eagles.png",
+                metadata={"sport_id": "football"},
+                source="test",
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        settings = sports.get_settings(self.db_path)
+        now = datetime(2026, 8, 29, 20, 0, tzinfo=ZoneInfo("America/New_York"))
+        event = sports._event_from_text(
+            self.db_path,
+            {"name": "Sports Event", "group_title": "Sports"},
+            "Baseball • Detroit Lions at Philadelphia Eagles",
+            settings,
+            now,
+            forced_start=now,
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["sport_id"], "baseball")
+        self.assertEqual(event["away_team_id"], "")
+        self.assertEqual(event["home_team_id"], "")
+        self.assertEqual(
+            sports._matching_rules(event, sports.get_rules(self.db_path)),
+            [],
+        )
+
     def test_clear_golf_off_air_titles_are_filtered_without_dropping_real_programming(self):
         channel = core.parse_m3u_text(
             """#EXTM3U
