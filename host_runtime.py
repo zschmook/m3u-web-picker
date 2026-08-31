@@ -29,7 +29,7 @@ _load_env_file()
 # while source checkouts can run directly with local data/backups directories.
 os.environ.setdefault("M3U_DATA_DIR", str(APP_DIR / "data"))
 os.environ.setdefault("M3U_CAST_HLS_DIR", str(APP_DIR / "data" / "cast-hls"))
-os.environ.setdefault("M3U_BACKUP_CONTAINER_DIR", str(APP_DIR / "backups"))
+os.environ.setdefault("M3U_BACKUP_CONTAINER_DIR", str(APP_DIR / "runtime" / "backups"))
 os.environ.setdefault("M3U_EXTERNAL_PORT", os.environ.get("M3U_PORT", "9999"))
 os.environ.setdefault("M3U_ONBOARDING_ENABLED", "true")
 

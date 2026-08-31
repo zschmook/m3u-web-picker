@@ -60,6 +60,16 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn("https://github.com/zschmook/m3u-web-picker", sidebar)
         self.assertNotIn("uiGithubLink", brand_links)
 
+    def test_epg_and_devices_live_under_settings_not_main_navigation(self):
+        sidebar_template = (ROOT / "templates" / "_modern_sidebar.html").read_text(encoding="utf-8")
+        sidebar_script = (ROOT / "static" / "js" / "ui_sidebar.js").read_text(encoding="utf-8")
+        self.assertNotIn("('epg', 'EPG'", sidebar_template)
+        self.assertNotIn("('devices', 'Devices'", sidebar_template)
+        self.assertIn('data-settings-panel="epg"', sidebar_script)
+        self.assertIn('data-settings-panel="devices"', sidebar_script)
+        self.assertIn('epgPanel.dataset.settingsPanelContent = "epg"', sidebar_script)
+        self.assertIn('devicesPanel.dataset.settingsPanelContent = "devices"', sidebar_script)
+
     def test_jellyfin_cache_can_be_managed_after_onboarding(self):
         sidebar = (ROOT / "static/js/ui_sidebar.js").read_text(encoding="utf-8")
         sidebar += (ROOT / "templates/_modern_sidebar.html").read_text(encoding="utf-8")
@@ -103,11 +113,22 @@ class ModernUiContractTests(unittest.TestCase):
             self.assertIn(key, source)
         self.assertIn('"M3U Publish"', source)
         self.assertIn('"Combined EPG"', source)
+        self.assertIn('"Unable to clear Jellyfin cache"', source)
+        self.assertIn("_recorded_warning_stages(report)", source)
 
     def test_ui_status_routes_are_registered(self):
         routes = (ROOT / "api/routes.py").read_text(encoding="utf-8")
         self.assertIn("register_ui_status_routes", routes)
         self.assertIn("register_ui_status_routes(app)", routes)
+
+    def test_sidebar_status_refresh_preserves_the_live_update_timer(self):
+        source = (ROOT / "static" / "js" / "ui_sidebar.js").read_text(encoding="utf-8")
+        self.assertIn("const elapsed = formatElapsed(master.elapsed_seconds);", source)
+        self.assertIn("master.running ? `Updating · ${elapsed}`", source)
+        self.assertIn("master.running ? `Update in progress · ${elapsed}`", source)
+        self.assertIn("master.running || (issueCount === 0", source)
+        self.assertIn("if (state.refreshInFlight)", source)
+        self.assertIn("state.refreshQueued = true", source)
 
     def test_ui_status_returns_cached_json_during_database_publish_lock(self):
         source = (ROOT / "api/ui_status.py").read_text(encoding="utf-8")

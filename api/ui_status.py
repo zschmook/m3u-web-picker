@@ -32,6 +32,31 @@ def _stage(name: str, status: str, detail: str = "", *, kind: str = "system") ->
     }
 
 
+def _recorded_warning_stages(report: dict | None) -> list[dict]:
+    details = dict((report or {}).get("details") or {})
+    stages: list[dict] = []
+    for warning in details.get("provider_warnings") or []:
+        message = str(warning or "").strip()
+        if not message:
+            continue
+        prefix, separator, remainder = message.partition(":")
+        if prefix.strip().casefold() == "jellyfin cache cleanup":
+            stages.append(
+                _stage(
+                    "Unable to clear Jellyfin cache",
+                    "warning",
+                    remainder.strip() if separator else message,
+                    kind="jellyfin",
+                )
+            )
+        else:
+            stages.append(_stage("Master Update", "warning", message, kind="master"))
+    schedule_warning = str(details.get("schedule_api_warning") or "").strip()
+    if schedule_warning:
+        stages.append(_stage("Schedule API", "warning", schedule_warning, kind="sports"))
+    return stages
+
+
 def _active_hls_sessions() -> int:
     # The relay registry is process-local by design. Read it under the module's
     # lock and count only live ffmpeg processes; do not mutate session state.
@@ -133,6 +158,17 @@ def _update_health() -> dict:
 
     report = master_update_reports.latest(core.DB_PATH)
     report_status = str((report or {}).get("status") or "")
+    recorded_warnings = _recorded_warning_stages(report)
+    existing_warning_details = {
+        str(item.get("detail") or "").strip()
+        for item in stages
+        if item.get("status") == "warning"
+    }
+    stages.extend(
+        item
+        for item in recorded_warnings
+        if str(item.get("detail") or "").strip() not in existing_warning_details
+    )
     if report_status == "failed" and not any(item["status"] == "error" for item in stages):
         stages.append(_stage("Master Update", "error", str(report.get("summary") or "The last master update failed."), kind="master"))
     elif report_status == "warning" and not any(item["status"] in {"error", "warning"} for item in stages):

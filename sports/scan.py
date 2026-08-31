@@ -190,9 +190,23 @@ def _merge_and_filter_events(ctx: ScanContext, active_api_anchors: list[dict]) -
 
     started = perf_counter()
     window_start, window_end, _ = _s._target_window(ctx.scan_anchor, ctx.settings)
-    ctx.untimed_skipped = sum(
-        1 for event in ctx.events if not _s._event_has_usable_timing(event)
-    )
+    untimed_events = [
+        event for event in ctx.events if not _s._event_has_usable_timing(event)
+    ]
+    if ctx.settings.get("everything_mode"):
+        relevant_untimed_events = untimed_events
+    else:
+        # Provider catalogs contain many permanent sports networks and feeds
+        # whose names resemble events (F1 onboard cameras, wrestling networks,
+        # soccer placeholders, and similar channels). They are still excluded
+        # without schedule confirmation, but only an untimed candidate covered
+        # by an enabled rule should appear in the update summary.
+        relevant_untimed_events = [
+            event
+            for event in untimed_events
+            if _s._matching_rules(event, ctx.rule_index)
+        ]
+    ctx.untimed_skipped = len(relevant_untimed_events)
     ctx.events = [
         event
         for event in ctx.events

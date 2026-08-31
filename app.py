@@ -20,6 +20,14 @@ from settings import SETTINGS
 public_epg_compat.install(core)
 
 app = Flask(__name__)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """Keep legacy browser favicon requests from falling through to a 404."""
+    return app.send_static_file("favicon.svg")
+
+
 app.config["MAX_CONTENT_LENGTH"] = SETTINGS.max_upload_bytes
 
 
@@ -108,7 +116,7 @@ def guide():
 
 @app.get("/user-guide")
 def user_guide():
-    source = Path(app.root_path, "USER-GUIDE.md").read_text(encoding="utf-8")
+    source = Path(app.root_path, "docs", "USER-GUIDE.md").read_text(encoding="utf-8")
     content = markdown.markdown(
         source,
         extensions=("fenced_code", "tables", "toc", "sane_lists"),

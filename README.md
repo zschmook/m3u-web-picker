@@ -142,7 +142,7 @@ Roku permits only one sideloaded developer application at a time, so installing 
 
 After installation, use the M3U Web Picker TV Guide/Devices controls to discover or save the Roku and send a channel to it. Roku playback uses the Picker's LAN HLS relay, so `M3U_LAN_HOST` must point to the Picker host's actual LAN IPv4 address.
 
-More detailed Roku troubleshooting is in `USER-GUIDE.md`.
+More detailed Roku troubleshooting is in the [user guide](docs/USER-GUIDE.md).
 
 ## Jellyfin cache integration
 
@@ -199,4 +199,4 @@ Two non-blocking issues are still being tracked:
 
 Both are functional cleanup items rather than data-loss problems.
 
-See `USER-GUIDE.md` for the operator-oriented setup and troubleshooting notes.
+See the [user guide](docs/USER-GUIDE.md) for operator-oriented setup and troubleshooting notes.

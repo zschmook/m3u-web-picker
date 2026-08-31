@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -9,6 +10,34 @@ from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import sports as _s
+
+
+_BARE_SXX_EXX_RE = re.compile(r"^\s*S(\d+)\s*E(\d+)\s*$", re.IGNORECASE)
+_DESCRIPTION_SXX_EXX_RE = re.compile(r"^\s*S(\d+)\s*E(\d+)\b", re.IGNORECASE)
+_INLINE_NEW_MARKER_RE = re.compile(r"ᴺᵉʷ")
+_INLINE_STATUS_SUFFIX_RE = re.compile(r"(?:\s*(?:ᴺᵉʷ|ᴸᶦᵛᵉ))+\s*$")
+_RECURRING_NEWS_TIME_RE = re.compile(
+    r"^(?P<prefix>.*?\bnews\b.*?)\s+at\s+"
+    r"(?P<hour>1[0-2]|0?[1-9])"
+    r"(?::(?P<minute>[0-5]\d))?\s*"
+    r"(?P<meridiem>a(?:m)?|p(?:m)?)?\s*$",
+    re.IGNORECASE,
+)
+_DVR_SERIES_EXCLUDED_CHANNEL_IDS = {"nbcnewsnow.us"}
+_DVR_SERIES_EXCLUDED_CHANNEL_PREFIXES = ("m3u-picker-sports-",)
+_PROGRAMME_TAIL_TAGS = {
+    "video",
+    "audio",
+    "previously-shown",
+    "premiere",
+    "last-chance",
+    "new",
+    "subtitles",
+    "rating",
+    "star-rating",
+    "review",
+    "image",
+}
 
 
 def _xmltv_time(value: datetime) -> str:
@@ -26,6 +55,164 @@ def _parse_iso_datetime(value: str | None, fallback_tz: ZoneInfo) -> datetime | 
         return parsed
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _insert_before_programme_tail(
+    programme: ElementTree.Element,
+    child: ElementTree.Element,
+) -> None:
+    for index, existing in enumerate(programme):
+        if existing.tag.rsplit("}", 1)[-1] in _PROGRAMME_TAIL_TAGS:
+            programme.insert(index, child)
+            return
+    programme.append(child)
+
+
+def _stable_programme_id(title: str, season: int, episode: int) -> str:
+    identity = f"{title.strip().casefold()}\x1f{season}\x1f{episode}"
+    return "m3u-picker:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _ensure_episode_identifiers(
+    programme: ElementTree.Element,
+    *,
+    title: str,
+    season: int,
+    episode: int,
+) -> None:
+    existing_systems = {
+        str(child.attrib.get("system", "")).strip().casefold()
+        for child in programme.findall("episode-num")
+    }
+    if "xmltv_ns" not in existing_systems:
+        node = ElementTree.Element("episode-num", {"system": "xmltv_ns"})
+        node.text = f"{max(0, season - 1)}.{max(0, episode - 1)}."
+        _insert_before_programme_tail(programme, node)
+    if "dd_progid" not in existing_systems:
+        node = ElementTree.Element("episode-num", {"system": "dd_progid"})
+        node.text = _stable_programme_id(title, season, episode)
+        _insert_before_programme_tail(programme, node)
+
+
+def _canonical_recurring_news_title(
+    title: str,
+    start: datetime,
+    timezone: ZoneInfo,
+) -> str:
+    match = _RECURRING_NEWS_TIME_RE.fullmatch(title.strip())
+    if not match:
+        return ""
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    meridiem = str(match.group("meridiem") or "").lower()
+    if meridiem.startswith("a"):
+        hour24 = 0 if hour == 12 else hour
+    elif meridiem.startswith("p"):
+        hour24 = 12 if hour == 12 else hour + 12
+    else:
+        local_hour = start.astimezone(timezone).hour
+        candidates = (0, 12) if hour == 12 else (hour, hour + 12)
+        hour24 = min(
+            candidates,
+            key=lambda value: min(
+                abs(value - local_hour),
+                24 - abs(value - local_hour),
+            ),
+        )
+    display_hour = hour24 % 12 or 12
+    suffix = "AM" if hour24 < 12 else "PM"
+    prefix = re.sub(r"\s+", " ", match.group("prefix")).strip()
+    return f"{prefix} at {display_hour}:{minute:02d} {suffix}"
+
+
+def _normalize_jellyfin_series_metadata(
+    programme: ElementTree.Element,
+    timezone: ZoneInfo,
+) -> None:
+    """Make trustworthy recurring programme metadata parseable by Jellyfin."""
+    title_node = programme.find("title")
+    title = str(title_node.text or "").strip() if title_node is not None else ""
+    if not title:
+        return
+    has_inline_new_marker = _INLINE_NEW_MARKER_RE.search(title) is not None
+    clean_title = _INLINE_STATUS_SUFFIX_RE.sub("", title).strip()
+    if clean_title != title:
+        title = clean_title
+        title_node.text = title
+        if has_inline_new_marker and programme.find("new") is None:
+            programme.append(ElementTree.Element("new"))
+
+    channel_id = str(programme.attrib.get("channel", "")).strip().casefold()
+    if channel_id in _DVR_SERIES_EXCLUDED_CHANNEL_IDS or channel_id.startswith(
+        _DVR_SERIES_EXCLUDED_CHANNEL_PREFIXES
+    ):
+        return
+
+    if title.casefold().startswith("nbc nightly news"):
+        title = "NBC Nightly News"
+        title_node.text = title
+
+    for episode_node in programme.findall("episode-num"):
+        if str(episode_node.attrib.get("system", "")).strip():
+            continue
+        match = _BARE_SXX_EXX_RE.fullmatch(str(episode_node.text or ""))
+        if not match:
+            continue
+        season = int(match.group(1))
+        episode = int(match.group(2))
+        episode_node.attrib["system"] = "SxxExx"
+        episode_node.text = f"S{season:02d}E{episode:02d}"
+        _ensure_episode_identifiers(
+            programme,
+            title=title,
+            season=season,
+            episode=episode,
+        )
+        return
+
+    if programme.findall("episode-num"):
+        return
+    description = str(programme.findtext("desc") or "")
+    description_episode = _DESCRIPTION_SXX_EXX_RE.match(description)
+    if description_episode:
+        season = int(description_episode.group(1))
+        episode = int(description_episode.group(2))
+        node = ElementTree.Element("episode-num", {"system": "SxxExx"})
+        node.text = f"S{season:02d}E{episode:02d}"
+        _insert_before_programme_tail(programme, node)
+        _ensure_episode_identifiers(
+            programme,
+            title=title,
+            season=season,
+            episode=episode,
+        )
+        return
+    start = _s._parse_xmltv_time(
+        str(programme.attrib.get("start", "") or ""),
+        timezone,
+    )
+    if start is None:
+        return
+    canonical_title = _canonical_recurring_news_title(
+        title,
+        start,
+        timezone,
+    )
+    if not canonical_title:
+        return
+    title_node.text = canonical_title
+    local_date = start.astimezone(timezone).date()
+    season = local_date.year
+    episode = local_date.timetuple().tm_yday
+    node = ElementTree.Element("episode-num", {"system": "SxxExx"})
+    node.text = f"S{season}E{episode:03d}"
+    _insert_before_programme_tail(programme, node)
+    _ensure_episode_identifiers(
+        programme,
+        title=canonical_title,
+        season=season,
+        episode=episode,
+    )
 
 
 def _serialize_programme_record(programme: dict) -> dict:
@@ -501,6 +688,9 @@ def build_sports_xmltv(
             timezone=timezone,
         )
 
+    for programme in root.findall("programme"):
+        _normalize_jellyfin_series_metadata(programme, timezone)
+
     if hasattr(ElementTree, "indent"):
         ElementTree.indent(root, space="  ")
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
@@ -561,6 +751,7 @@ def _filtered_provider_xmltv(
     base_epg_path: Path,
     allowed_channel_ids: set[str],
     *,
+    timezone: ZoneInfo = ZoneInfo("UTC"),
     cancel_check: _s.CancelCheck = None,
 ) -> tuple[dict[str, str], list[bytes], list[bytes], set[str], set[str]]:
     root_attributes: dict[str, str] = {}
@@ -601,6 +792,7 @@ def _filtered_provider_xmltv(
             elif tag == "programme":
                 channel_id = str(element.attrib.get("channel", "")).strip()
                 if channel_id in allowed:
+                    _normalize_jellyfin_series_metadata(element, timezone)
                     programme_fragments.append(
                         ElementTree.tostring(element, encoding="utf-8")
                     )
@@ -675,6 +867,7 @@ def build_combined_xmltv(
     allowed_base_channel_ids: set[str] | None = None,
     *,
     fallback_epg_paths: Iterable[Path] | None = None,
+    timezone_name: str = "UTC",
     cancel_check: _s.CancelCheck = None,
 ) -> bytes:
     """Merge provider/public guide data with generated sports XMLTV."""
@@ -699,6 +892,7 @@ def build_combined_xmltv(
     supplied_programmes: set[str] = set()
     accepted_intervals: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
     xmltv_default_tz = ZoneInfo("UTC")
+    programme_timezone = ZoneInfo(str(timezone_name or "UTC"))
 
     for source_index, source_path in enumerate(
         _ordered_guide_sources(base_epg_path, fallback_epg_paths)
@@ -708,6 +902,7 @@ def build_combined_xmltv(
             _filtered_provider_xmltv(
                 source_path,
                 allowed,
+                timezone=programme_timezone,
                 cancel_check=cancel_check,
             )
         )
@@ -816,6 +1011,7 @@ def _write_prepared_epg_files(
                     sports_bytes,
                     base_channel_ids,
                     fallback_epg_paths=fallback_epg_paths,
+                    timezone_name=str(settings.get("timezone", "UTC")),
                     cancel_check=cancel_check,
                 ),
             ),
