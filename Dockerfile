@@ -4,7 +4,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
@@ -28,4 +29,4 @@ EXPOSE 9999
 
 # Master Updates run on their own application worker thread, so Waitress request
 # threads remain dedicated to navigation, static assets, and live status calls.
-CMD ["waitress-serve", "--threads=8", "--channel-request-lookahead=1", "--outbuf-high-watermark=1048576", "--host=0.0.0.0", "--port=9999", "app:app"]
+CMD ["waitress-serve", "--threads=8", "--channel-request-lookahead=1", "--outbuf-high-watermark=1048576", "--host=0.0.0.0", "--port=9999", "src.app:app"]

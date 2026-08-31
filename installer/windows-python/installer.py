@@ -236,7 +236,7 @@ def install_source() -> None:
     finally:
         temp_zip.unlink(missing_ok=True)
 
-    for required in ("app.py", "host_runtime.py", "requirements.txt"):
+    for required in ("src/app.py", "src/host_runtime.py", "requirements.txt"):
         if not (STAGING_APP / required).is_file():
             raise RuntimeError(f"Downloaded source is missing {required}")
 
@@ -456,8 +456,8 @@ def run_host() -> int:
         log.flush()
         process = subprocess.Popen(
             [
-                str(python), "-m", "waitress",
-                "--threads=8", "--host=0.0.0.0", "--port=9999", "app:app",
+        str(python), "-m", "waitress",
+                "--threads=8", "--host=0.0.0.0", "--port=9999", "src.app:app",
             ],
             cwd=str(APP_DIR),
             env=env,
