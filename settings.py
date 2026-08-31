@@ -50,7 +50,7 @@ class AppSettings:
 
 
 def load_settings() -> AppSettings:
-    data_dir = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR))).expanduser().resolve()
+    data_dir = Path(os.environ.get("M3U_DATA_DIR", str(APP_DIR / "data"))).expanduser().resolve()
     environment_external_port = _env_int("M3U_EXTERNAL_PORT", 9999)
     cast_hls_dir = Path(
         os.environ.get("M3U_CAST_HLS_DIR", "/tmp/m3u-web-picker-cast-hls")

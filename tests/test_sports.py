@@ -874,6 +874,27 @@ http://provider.test/user/pass/untimed.ts
         self.assertEqual(result["untimed_skipped"], 1)
         self.assertIn("without XMLTV schedule confirmation", result["message"])
 
+    def test_untimed_summary_only_counts_events_matching_enabled_rules(self):
+        channels = core.parse_m3u_text(
+            """#EXTM3U
+#EXTINF:-1 group-title="MLB / MiLB",(MLB 12) | Philadelphia Phillies @ Baltimore Orioles
+http://provider.test/user/pass/untimed-mlb.ts
+#EXTINF:-1 group-title="RACING",F1-TV FHD
+http://provider.test/user/pass/untimed-f1.ts
+"""
+        )
+        sports.discover_catalog_from_channels(self.db_path, channels)
+        result = sports.scan_channels(
+            self.db_path,
+            channels,
+            now=datetime(2026, 8, 3, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+            trigger="test",
+        )
+        self.assertEqual(result["events"], 0)
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["untimed_skipped"], 1)
+        self.assertIn("Skipped 1 untimed provider event", result["message"])
+
     def test_untimed_m3u_event_is_kept_when_xmltv_supplies_timing(self):
         sports.update_settings(self.db_path, {"event_window": "next_24_hours"})
         channels = core.parse_m3u_text(

@@ -12,6 +12,7 @@ config.json
 backups/
 config/
 data/
+runtime/
 epg/
 espn_logo_catalog/
 logo_cache/

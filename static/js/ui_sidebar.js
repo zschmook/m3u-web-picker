@@ -1,12 +1,15 @@
 (() => {
   "use strict";
 
-  const PAGE_IDS = ["overview", "providers", "channels", "epg", "sports", "devices", "settings"];
+  const PAGE_IDS = ["overview", "providers", "channels", "sports", "settings"];
+  const SETTINGS_PANEL_IDS = ["encoding", "network", "jellyfin", "epg", "devices"];
   const state = {
     status: null,
     activePage: "overview",
     pollTimer: null,
     elapsedTimer: null,
+    refreshInFlight: false,
+    refreshQueued: false,
   };
 
   const el = id => document.getElementById(id);
@@ -129,13 +132,14 @@
       }
     }
 
-    const epgPage = makePage("epg", "EPG", "Manage public and additional XMLTV sources used by the combined guide.");
+    const epgPanel = document.createElement("div");
+    epgPanel.className = "ui-settings-panel ui-settings-collection";
+    epgPanel.dataset.settingsPanelContent = "epg";
+    epgPanel.innerHTML = '<div class="ui-settings-section-heading"><div class="ui-page-eyebrow">Guide data</div><h2>EPG</h2><p>Manage public and additional XMLTV sources used by the combined guide.</p></div>';
     const publicCard = el("publicEpgCard");
     const epgTableCard = el("epgSources")?.closest(".card");
-    const epgInsertBefore = publicCard || epgTableCard || channelShell || sportsCard;
-    if (epgInsertBefore?.parentNode) epgInsertBefore.parentNode.insertBefore(epgPage, epgInsertBefore);
     [publicCard, epgTableCard].filter(Boolean).forEach(card => {
-      if (card.parentNode !== epgPage) epgPage.appendChild(card);
+      epgPanel.appendChild(card);
     });
 
     const overview = makePage("overview", "Overview", "Application-wide update scheduling and output access.");
@@ -159,7 +163,7 @@
         </div>
       </section>`;
     overview.appendChild(overviewGrid);
-    const firstPage = providerCard || epgPage || channelShell || sportsCard;
+    const firstPage = providerCard || channelShell || sportsCard;
     if (firstPage?.parentNode) firstPage.parentNode.insertBefore(overview, firstPage);
     else root.prepend(overview);
 
@@ -171,7 +175,10 @@
       el("masterUpdateRunning")?.classList.add("ui-legacy-hidden");
     }
 
-    const devices = makePage("devices", "Devices", "HDHomeRun support, saved Roku targets, and active remote playback sessions.");
+    const devicesPanel = document.createElement("div");
+    devicesPanel.className = "ui-settings-panel ui-settings-collection";
+    devicesPanel.dataset.settingsPanelContent = "devices";
+    devicesPanel.innerHTML = '<div class="ui-settings-section-heading"><div class="ui-page-eyebrow">Playback targets</div><h2>Devices</h2><p>HDHomeRun support, saved Roku targets, and active remote playback sessions.</p></div>';
     const devicesGrid = document.createElement("div");
     devicesGrid.className = "ui-devices-grid";
     devicesGrid.innerHTML = `
@@ -188,9 +195,7 @@
         <div class="ui-card-heading"><div><span>Remote Playback</span><small>Live HLS relays currently serving Roku or Cast receivers.</small></div></div>
         <div class="ui-big-metric"><strong id="uiDeviceStreams">0</strong><span>active streams</span></div>
       </section>`;
-    devices.appendChild(devicesGrid);
-    if (sportsCard?.parentNode) sportsCard.parentNode.insertBefore(devices, sportsCard.nextSibling);
-    else root.appendChild(devices);
+    devicesPanel.appendChild(devicesGrid);
 
     const settings = makePage("settings", "Settings", "Manage optional integrations and application behavior after initial setup.");
     settings.innerHTML += `
@@ -198,6 +203,8 @@
         <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="devices">Devices</button>
       </div>
       <div class="ui-settings-grid">
         <section class="ui-modern-card ui-settings-panel is-active" data-settings-panel-content="encoding" aria-labelledby="uiEncodingTitle">
@@ -269,12 +276,11 @@
           </div>
         </section>
       </div>`;
+    settings.querySelector(".ui-settings-grid")?.append(epgPanel, devicesPanel);
     root.appendChild(settings);
 
     settings.querySelectorAll("[data-settings-panel]").forEach(button => button.addEventListener("click", () => {
-      const panel = button.dataset.settingsPanel;
-      settings.querySelectorAll("[data-settings-panel]").forEach(item => item.classList.toggle("is-active", item === button));
-      settings.querySelectorAll("[data-settings-panel-content]").forEach(item => item.classList.toggle("is-active", item.dataset.settingsPanelContent === panel));
+      showSettingsPanel(button.dataset.settingsPanel);
     }));
 
     const hdhrPanel = document.querySelector(".hdhr-support-panel");
@@ -357,7 +363,8 @@
   }
 
   function showPage(page, {replaceHash = false} = {}) {
-    const target = PAGE_IDS.includes(page) ? page : "overview";
+    const settingsPanel = SETTINGS_PANEL_IDS.includes(page) ? page : "";
+    const target = settingsPanel ? "settings" : (PAGE_IDS.includes(page) ? page : "overview");
     state.activePage = target;
     document.querySelectorAll("[data-ui-page]").forEach(node => node.classList.toggle("ui-page-hidden", node.dataset.uiPage !== target));
     document.querySelectorAll("[data-ui-page-target]").forEach(button => {
@@ -366,6 +373,7 @@
       button.setAttribute("aria-current", active ? "page" : "false");
     });
     document.body.classList.remove("ui-sidebar-open");
+    if (settingsPanel) showSettingsPanel(settingsPanel);
     const hash = `#${target}`;
     if (location.hash !== hash) {
       if (replaceHash) history.replaceState(null, "", hash);
@@ -374,12 +382,23 @@
     window.scrollTo({top: 0, behavior: "auto"});
   }
 
+  function showSettingsPanel(panel) {
+    if (!SETTINGS_PANEL_IDS.includes(panel)) return;
+    document.querySelectorAll("#uiPage-settings [data-settings-panel]").forEach(item => {
+      item.classList.toggle("is-active", item.dataset.settingsPanel === panel);
+    });
+    document.querySelectorAll("#uiPage-settings [data-settings-panel-content]").forEach(item => {
+      item.classList.toggle("is-active", item.dataset.settingsPanelContent === panel);
+    });
+  }
+
   function bindNavigation() {
     document.querySelectorAll("[data-ui-page-target]").forEach(button => {
       button.addEventListener("click", () => showPage(button.dataset.uiPageTarget));
     });
     window.addEventListener("hashchange", () => showPage(location.hash.slice(1), {replaceHash: true}));
-    const initial = PAGE_IDS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
+    const requested = location.hash.slice(1);
+    const initial = PAGE_IDS.includes(requested) || SETTINGS_PANEL_IDS.includes(requested) ? requested : "overview";
     showPage(initial, {replaceHash: true});
   }
 
@@ -417,6 +436,7 @@
     const devices = data.devices || {};
     const master = data.master_update || {};
     const update = data.update || {};
+    const elapsed = formatElapsed(master.elapsed_seconds);
 
     el("uiProviderStatus").textContent = provider.label || "—";
     el("uiAllChannels").textContent = formatNumber(counts.all_channels);
@@ -430,21 +450,21 @@
     el("uiNextUpdate").textContent = master.enabled ? formatTime(master.next_update, "—") : "Disabled";
 
     const overall = master.running ? "running" : update.status;
-    const overallText = master.running ? "Updating" : (provider.status === "setup" ? "Setup needed" : update.status === "failed" ? "Attention needed" : update.status === "warning" ? "Needs review" : "Ready");
+    const overallText = master.running ? `Updating · ${elapsed}` : (provider.status === "setup" ? "Setup needed" : update.status === "failed" ? "Attention needed" : update.status === "warning" ? "Needs review" : "Ready");
     el("uiSystemHealth").textContent = overallText;
     setHealthClass(el("uiSystemHealthDot"), overall);
 
     const result = el("uiUpdateResult");
     setHealthClass(result, update.status);
-    el("uiUpdateResultText").textContent = update.label || "—";
+    el("uiUpdateResultText").textContent = master.running ? `Update in progress · ${elapsed}` : (update.label || "—");
     const detailsButton = el("uiUpdateDetailsBtn");
     const issueCount = Number(update.error_count || 0) + Number(update.warning_count || 0);
-    detailsButton.classList.toggle("d-none", issueCount === 0 && update.status !== "failed" && update.status !== "warning");
+    detailsButton.classList.toggle("d-none", master.running || (issueCount === 0 && update.status !== "failed" && update.status !== "warning"));
 
     const updateButton = el("uiUpdateNowBtn");
     if (master.running) {
       updateButton.disabled = true;
-      updateButton.textContent = `Updating · ${formatElapsed(master.elapsed_seconds)}`;
+      updateButton.textContent = `Updating · ${elapsed}`;
     } else {
       updateButton.disabled = false;
       updateButton.textContent = "Update Now";
@@ -490,6 +510,11 @@
   }
 
   async function refreshStatus() {
+    if (state.refreshInFlight) {
+      state.refreshQueued = true;
+      return;
+    }
+    state.refreshInFlight = true;
     try {
       const response = await fetch(`/api/ui/status?_=${Date.now()}`, {cache: "no-store"});
       const data = await response.json();
@@ -502,6 +527,12 @@
       setHealthClass(result, "failed");
       el("uiUpdateResultText").textContent = error?.message || "Could not load status";
       el("uiUpdateDetailsBtn")?.classList.add("d-none");
+    } finally {
+      state.refreshInFlight = false;
+      if (state.refreshQueued) {
+        state.refreshQueued = false;
+        void refreshStatus();
+      }
     }
   }
 

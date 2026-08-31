@@ -348,6 +348,28 @@ body {
 
 .ui-settings-status.is-success { color: var(--ui-success); }
 .ui-settings-status.is-error { color: var(--ui-danger); }
+
+.ui-settings-collection {
+  min-width: 0;
+}
+
+.ui-settings-section-heading {
+  margin-bottom: 16px;
+}
+
+.ui-settings-section-heading h2 {
+  margin: 2px 0 4px;
+  font-size: 1.35rem;
+}
+
+.ui-settings-section-heading p {
+  margin: 0;
+  color: var(--ui-muted);
+}
+
+.ui-settings-collection > .card + .card {
+  margin-top: 16px;
+}
 .ui-count-badge.is-enabled { color: var(--ui-success); }
 
 .btn.ui-btn-primary,
@@ -1087,4 +1109,4 @@ body {
     width: 100%;
   }
 }
-.ui-settings-tabs{display:flex;gap:.5rem;margin-bottom:1rem}.ui-settings-tab{border:1px solid var(--ui-border,#334155);background:transparent;color:inherit;border-radius:.5rem;padding:.55rem .9rem}.ui-settings-tab.is-active{background:#2563eb;border-color:#2563eb;color:#fff}.ui-settings-panel{display:none}.ui-settings-panel.is-active{display:block}
+.ui-settings-tabs{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}.ui-settings-tab{border:1px solid var(--ui-border,#334155);background:transparent;color:inherit;border-radius:.5rem;padding:.55rem .9rem}.ui-settings-tab.is-active{background:#2563eb;border-color:#2563eb;color:#fff}.ui-settings-panel{display:none}.ui-settings-panel.is-active{display:block}

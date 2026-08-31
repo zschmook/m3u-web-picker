@@ -41,10 +41,10 @@ services:
 
     volumes:
       - type: bind
-        source: "${M3U_DEV_BACKUP_DIR:-./data/backups-dev}"
+        source: "${M3U_DEV_BACKUP_DIR:-./runtime/backups-dev}"
         target: /backups
       - type: bind
-        source: "${M3U_JELLYFIN_CACHE_DIR:-./data/jellyfin-cache-disabled}"
+        source: "${M3U_JELLYFIN_CACHE_DIR:-./runtime/jellyfin-cache-disabled}"
         target: /jellyfin-cache
       - type: volume
         source: m3u-picker-dev-data

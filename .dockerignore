@@ -14,6 +14,7 @@ public_epg/
 screens/
 tmp/
 exports/
+runtime/
 .vscode/
 .idea/
 config.json

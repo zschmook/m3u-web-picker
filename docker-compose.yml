@@ -5,6 +5,7 @@
 # A genuinely fresh volume launches the first-run setup wizard.
 #
 # M3U_BACKUP_DIR controls the host directory mapped to /backups.
+# This project uses a dedicated runtime path by default.
 # M3U_JELLYFIN_CACHE_DIR optionally maps a Jellyfin cache directory for the
 # experimental post-update cache cleanup integration.
 
@@ -47,10 +48,10 @@ services:
 
     volumes:
       - type: bind
-        source: "${M3U_BACKUP_DIR:-./backups}"
+        source: "${M3U_BACKUP_DIR:-./runtime/backups}"
         target: /backups
       - type: bind
-        source: "${M3U_JELLYFIN_CACHE_DIR:-./data/jellyfin-cache-disabled}"
+        source: "${M3U_JELLYFIN_CACHE_DIR:-./runtime/jellyfin-cache-disabled}"
         target: /jellyfin-cache
       - type: volume
         source: m3u-picker-data
