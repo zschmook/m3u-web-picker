@@ -11,18 +11,18 @@ ROOT = Path(__file__).resolve().parents[1]
 class UpdateLifecycleContractTests(unittest.TestCase):
     def test_changed_python_sources_parse(self):
         for relative in (
-            "app.py",
+            "src/app.py",
             "api/epg.py",
             "api/onboarding.py",
             "api/ui_status.py",
-            "master_update_worker.py",
+            "src/master_update_worker.py",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")
             ast.parse(source, filename=relative)
 
     def test_main_ui_loads_live_update_lifecycle_after_sidebar(self):
         template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
-        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_source = (ROOT / "src" / "app.py").read_text(encoding="utf-8")
         self.assertIn("update_lifecycle.css?v=update-lifecycle-1", template)
         self.assertIn("update_lifecycle.js?v=update-lifecycle-1", template)
         self.assertLess(template.index("ui_sidebar.js?v=sidebar-2"), template.index("update_lifecycle.js?v=update-lifecycle-1"))

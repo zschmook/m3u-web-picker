@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_first_guide_gate_is_loaded_and_blocks_direct_guide_access():
-    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    app_source = (ROOT / "src" / "app.py").read_text(encoding="utf-8")
     template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
     assert "/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1" in template
     assert "onboarding-initial-refresh-pending" in app_source
@@ -17,7 +17,7 @@ def test_first_guide_gate_waits_for_public_epg_and_combined_publish():
     gate = (ROOT / "static" / "js" / "onboarding_initial_refresh_gate.js").read_text(
         encoding="utf-8"
     )
-    worker = (ROOT / "master_update_worker.py").read_text(encoding="utf-8")
+    worker = (ROOT / "src" / "master_update_worker.py").read_text(encoding="utf-8")
 
     assert "Building Your First Guide" in gate
     assert "TV Guide is temporarily locked." in gate

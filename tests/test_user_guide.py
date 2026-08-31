@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class UserGuideContractTests(unittest.TestCase):
     def test_user_guide_is_rendered_as_html(self):
-        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_source = (ROOT / "src" / "app.py").read_text(encoding="utf-8")
         template = (ROOT / "templates" / "user_guide.html").read_text(encoding="utf-8")
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 

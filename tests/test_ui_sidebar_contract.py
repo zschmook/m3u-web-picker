@@ -20,7 +20,7 @@ class ModernUiContractTests(unittest.TestCase):
         )
 
     def test_modern_shell_is_server_rendered_instead_of_injected(self):
-        app_text = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_text = (ROOT / "src" / "app.py").read_text(encoding="utf-8")
         template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
         self.assertNotIn('render_template("index.html")\n    html = html.replace', app_text)
         self.assertIn('id="uiAppShell"', template)

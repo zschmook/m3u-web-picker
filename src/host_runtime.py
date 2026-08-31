@@ -5,11 +5,12 @@ import os
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
+REPO_DIR = APP_DIR.parent
 
 
 def _load_env_file() -> None:
     raw = os.environ.get("M3U_HOST_ENV", "").strip()
-    env_path = Path(raw).expanduser() if raw else APP_DIR / ".env"
+    env_path = Path(raw).expanduser() if raw else REPO_DIR / ".env"
     if not env_path.exists():
         return
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
@@ -27,9 +28,9 @@ _load_env_file()
 
 # Host-friendly defaults. The Windows installer writes explicit absolute paths,
 # while source checkouts can run directly with local data/backups directories.
-os.environ.setdefault("M3U_DATA_DIR", str(APP_DIR / "data"))
-os.environ.setdefault("M3U_CAST_HLS_DIR", str(APP_DIR / "data" / "cast-hls"))
-os.environ.setdefault("M3U_BACKUP_CONTAINER_DIR", str(APP_DIR / "runtime" / "backups"))
+os.environ.setdefault("M3U_DATA_DIR", str(REPO_DIR / "data"))
+os.environ.setdefault("M3U_CAST_HLS_DIR", str(REPO_DIR / "data" / "cast-hls"))
+os.environ.setdefault("M3U_BACKUP_CONTAINER_DIR", str(REPO_DIR / "runtime" / "backups"))
 os.environ.setdefault("M3U_EXTERNAL_PORT", os.environ.get("M3U_PORT", "9999"))
 os.environ.setdefault("M3U_ONBOARDING_ENABLED", "true")
 
