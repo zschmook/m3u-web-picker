@@ -61,7 +61,7 @@ curl -fL "$SOURCE_URL" -o "$TMP/source.zip"
 mkdir -p "$TMP/source"
 ditto -x -k "$TMP/source.zip" "$TMP/source"
 SOURCE_DIR="$(find "$TMP/source" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/app.py" ] || [ ! -f "$SOURCE_DIR/host_runtime.py" ]; then
+if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/src/app.py" ] || [ ! -f "$SOURCE_DIR/src/host_runtime.py" ]; then
     echo "Downloaded source archive is missing required application files."
     exit 1
 fi
@@ -107,7 +107,7 @@ MASTER_REFRESH_HOUR=3
 MASTER_REFRESH_MINUTE=0
 ENV
 
-"$VENV_DIR/bin/python" - "$PLIST" "$VENV_DIR/bin/python" "$APP_DIR/host_runtime.py" "$APP_DIR" "$HOST_ENV" "$HOST_LOG" <<'PY'
+"$VENV_DIR/bin/python" - "$PLIST" "$VENV_DIR/bin/python" "$APP_DIR/src/host_runtime.py" "$APP_DIR" "$HOST_ENV" "$HOST_LOG" <<'PY'
 import plistlib
 import sys
 from pathlib import Path
