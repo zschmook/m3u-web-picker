@@ -192,10 +192,11 @@ find static -name '*.js' -print0 | xargs -0 -n1 node --check
 
 ## Current known cleanup items
 
-Two non-blocking issues are still being tracked:
+Three non-blocking issues are still being tracked:
 
 - update-state indicators can visibly finish a fraction of a cycle apart because the sidebar/status layer and Master Update lifecycle layer still have overlapping rendering responsibilities;
 - provider events that lose a recognized league classification can fall into generic `football`/`sports` numbering blocks, producing very high sports channel numbers and occasional duplicate event rows.
+- background update queue warnings can briefly spike and emit repetitive depth logs; tune Waitress/threading and UI polling during scheduled runs before considering it a production signal.
 
 Both are functional cleanup items rather than data-loss problems.
 
