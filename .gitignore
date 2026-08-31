@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.venv/
 .DS_Store
 
 config.json
@@ -10,6 +12,11 @@ config.json
 backups/
 data/
 espn_logo_catalog/
+logo_cache/
+screens/
+tmp/
+exports/*
+!exports/.gitkeep
 .env
 .vscode/
 .idea/
