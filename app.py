@@ -116,7 +116,7 @@ def guide():
 
 @app.get("/user-guide")
 def user_guide():
-    source = Path(app.root_path, "USER-GUIDE.md").read_text(encoding="utf-8")
+    source = Path(app.root_path, "docs", "USER-GUIDE.md").read_text(encoding="utf-8")
     content = markdown.markdown(
         source,
         extensions=("fenced_code", "tables", "toc", "sane_lists"),

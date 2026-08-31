@@ -22,7 +22,7 @@ class UserGuideContractTests(unittest.TestCase):
         self.assertIn("Markdown>=3.6,<4", requirements)
 
     def test_user_guide_tracks_current_runtime_documentation(self):
-        guide = (ROOT / "USER-GUIDE.md").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "USER-GUIDE.md").read_text(encoding="utf-8")
 
         for current_detail in (
             "current v31 application",

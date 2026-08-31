@@ -10,9 +10,13 @@ config.json
 *.xml
 
 backups/
+config/
 data/
+epg/
 espn_logo_catalog/
 logo_cache/
+providers/
+public_epg/
 screens/
 tmp/
 exports/*

@@ -4,9 +4,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_demo_provider_helper_is_loaded_by_app():
-    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "/static/js/onboarding_demo_provider.js?v=demo-provider-1" in app_source
+def test_demo_provider_helper_is_loaded_by_index_template():
+    template_source = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "/static/js/onboarding_demo_provider.js?v=demo-provider-1" in template_source
 
 
 def test_demo_provider_defaults_to_iptv_org_us_playlist():
