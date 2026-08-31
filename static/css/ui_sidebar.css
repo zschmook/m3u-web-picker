@@ -614,6 +614,10 @@ body {
   margin-bottom: 18px;
 }
 
+.ui-modern-pending {
+  visibility: hidden;
+}
+
 .ui-overview-resource-links {
   display: flex;
   flex-wrap: wrap;

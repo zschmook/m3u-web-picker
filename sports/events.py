@@ -412,15 +412,22 @@ def _event_from_text(
                 teams,
                 team_lookup,
             )
+        # A title can identify a sport without identifying a supported league
+        # (for example, "Baseball • Detroit Lions at Philadelphia Eagles").
+        # In that case a global team lookup would incorrectly borrow NFL team
+        # identities, causing an enabled Eagles rule to generate a baseball
+        # channel with football artwork.  Keep unresolved participants scoped
+        # away from every catalog league whenever the sport is explicit.
+        team_lookup_league = league_id or ("__unclassified__" if sport_id else "")
         away_id, away_name = _find_team_id(
             left,
-            league_id,
+            team_lookup_league,
             teams,
             team_lookup,
         )
         home_id, home_name = _find_team_id(
             right,
-            league_id,
+            team_lookup_league,
             teams,
             team_lookup,
         )

@@ -25,7 +25,7 @@
     const state = payload?.state || {};
     const answers = state.answers || {};
     return Boolean(
-      (payload?.enabled ?? payload?.dev_enabled)
+      payload?.enabled
       && state.required
       && state.completed
       && answers.initial_refresh_required

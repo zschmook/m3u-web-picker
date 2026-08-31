@@ -36,9 +36,6 @@ def _payload() -> dict:
         )
     return {
         "enabled": enabled,
-        # Compatibility for the first wizard implementation. New UI code should
-        # prefer `enabled`; older cached clients can continue to read this key.
-        "dev_enabled": enabled,
         "state": state,
         "provider_configured": provider_configured,
         "sports": {

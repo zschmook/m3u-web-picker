@@ -4,6 +4,7 @@
   const el = id => document.getElementById(id);
   let current = null;
   let mountConfigured = false;
+  let busy = false;
 
   async function api(path, options = {}) {
     const response = await fetch(path, {...options, cache: "no-store"});
@@ -24,11 +25,21 @@
     target.className = `ui-settings-status${kind ? ` is-${kind}` : ""}`;
   }
 
-  function setBusy(busy) {
-    const validateButton = el("uiJellyfinValidate");
+  function syncDependencies() {
+    const usingJellyfin = Boolean(el("uiJellyfinUsing")?.checked);
+    const acknowledged = Boolean(el("uiJellyfinAcknowledge")?.checked);
+    const cleanup = el("uiJellyfinCleanupEnabled");
+    if (cleanup && (!usingJellyfin || !acknowledged)) cleanup.checked = false;
+    if (cleanup) cleanup.disabled = busy || !mountConfigured || !usingJellyfin || !acknowledged;
     const saveButton = el("uiJellyfinSave");
+    if (saveButton) saveButton.disabled = busy || !mountConfigured || !acknowledged;
+  }
+
+  function setBusy(value) {
+    busy = Boolean(value);
+    const validateButton = el("uiJellyfinValidate");
     if (validateButton) validateButton.disabled = busy;
-    if (saveButton) saveButton.disabled = busy || !mountConfigured;
+    syncDependencies();
   }
 
   function render(settings) {
@@ -42,10 +53,12 @@
       : "Configure M3U_JELLYFIN_CACHE_DIR and restart the container to use Jellyfin cache cleanup.";
     el("uiJellyfinCachePath").value = current.host_path || runtime.configured_host_path || "";
     el("uiJellyfinAcknowledge").checked = Boolean(current.acknowledged);
-    el("uiJellyfinCleanupEnabled").checked = Boolean(current.cleanup_enabled);
+    el("uiJellyfinCleanupEnabled").checked = Boolean(
+      current.cleanup_enabled && current.acknowledged && current.using_jellyfin
+    );
     const mountAvailable = runtime.container_exists && runtime.container_is_dir && runtime.container_writable;
     const cleanupAvailable = Boolean(current.cleanup_enabled && mountConfigured && mountAvailable);
-    el("uiJellyfinCleanupEnabled").disabled = !mountConfigured;
+    syncDependencies();
     el("uiJellyfinSettingsBadge").textContent = cleanupAvailable
       ? "Enabled"
       : current.cleanup_enabled ? "Unavailable" : "Disabled";
@@ -95,6 +108,11 @@
     const cleanupEnabled = usingJellyfin && el("uiJellyfinCleanupEnabled").checked;
     const acknowledged = el("uiJellyfinAcknowledge").checked;
     const hostPath = el("uiJellyfinCachePath").value.trim();
+    if (!acknowledged) {
+      setStatus("Turn on ‘I understand the risks’ before saving Jellyfin cache settings.", "error");
+      syncDependencies();
+      return;
+    }
     if (cleanupEnabled && !acknowledged) {
       setStatus("Turn on ‘I understand the risks’ before enabling cache cleanup.", "error");
       return;
@@ -125,7 +143,9 @@
   el("uiJellyfinSave")?.addEventListener("click", save);
   el("uiJellyfinUsing")?.addEventListener("change", event => {
     if (!event.target.checked) el("uiJellyfinCleanupEnabled").checked = false;
+    syncDependencies();
   });
+  el("uiJellyfinAcknowledge")?.addEventListener("change", syncDependencies);
   document.querySelector('[data-settings-panel="jellyfin"]')?.addEventListener("click", load);
   window.addEventListener("pageshow", load);
   document.addEventListener("visibilitychange", () => {

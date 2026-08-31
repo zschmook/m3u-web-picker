@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_first_guide_gate_is_loaded_and_blocks_direct_guide_access():
     app_source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1" in app_source
+    template = (ROOT / "templates/index.html").read_text(encoding="utf-8")
+    assert "/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1" in template
     assert "onboarding-initial-refresh-pending" in app_source
     assert "if _onboarding_initial_refresh_required():" in app_source
     assert 'return redirect("/")' in app_source
@@ -39,3 +40,26 @@ def test_first_guide_gate_waits_for_public_epg_and_combined_publish():
     assert 'item.get("filtered_bytes")' in worker
     assert "core.COMBINED_EPG_PATH.exists()" in worker
     assert "_finish_onboarding_refresh(success=ready" in worker
+
+
+def test_onboarding_can_hide_sd_and_low_bandwidth_channels():
+    onboarding_ui = (ROOT / "static" / "js" / "onboarding.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Hide SD / Low Bandwidth Channels" in onboarding_ui
+    assert 'document.getElementById("devExcludeSdChannels")?.checked' in onboarding_ui
+    assert "JSON.stringify({enabled, exclude_sd: excludeSd})" in onboarding_ui
+    assert "ctx.payload.sports.settings.exclude_sd = excludeSd" in onboarding_ui
+
+
+def test_onboarding_jellyfin_save_requires_risk_acknowledgement():
+    onboarding_ui = (ROOT / "static" / "js" / "onboarding.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'button.disabled = !ack?.checked' in onboarding_ui
+    assert 'if (!ack?.checked)' in onboarding_ui
+    assert "before enabling cache cleanup" in onboarding_ui
+    assert "cleanup_enabled: true" in onboarding_ui
+    assert "acknowledged: true" in onboarding_ui

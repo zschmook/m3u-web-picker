@@ -301,7 +301,7 @@
     try {
       const payload = await api("/api/onboarding");
       const state = payload.state || {};
-      if (!payload.dev_enabled || !state.completed || !state.answers?.initial_refresh_pending) return;
+      if (!payload.enabled || !state.completed || !state.answers?.initial_refresh_pending) return;
       await api("/api/onboarding/initial-refresh", {method: "POST"});
     } catch (error) {
       console.warn("Could not start initial post-onboarding update:", error);

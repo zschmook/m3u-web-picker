@@ -1,10 +1,18 @@
 # M3U Web Picker — User Guide
 
-This guide describes the current v30 application. Historical RC/experiment documents have been removed from the active tree; older material remains available in Git history if needed.
+This guide describes the current v31 application. Docker is the supported runtime while packaged installation workflows are being revised.
 
 ## 1. Start the application
 
-From the repository directory:
+Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
+```
+
+The setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. Set `M3U_PICKER_DIR` first to choose another checkout location.
+
+To start manually from an existing checkout:
 
 ```bash
 docker compose up -d --build
@@ -13,6 +21,8 @@ docker compose up -d --build
 Open `http://localhost:9999`.
 
 The normal Compose stack uses a persistent Docker volume. Rebuilding the container does not erase configured providers, channel selections, sports rules, cached guides, or generated outputs.
+
+On Linux and Windows, the installer requests NVIDIA GPU passthrough when `nvidia-smi` is available. GPU passthrough is not supported for Docker installs on macOS, so FFmpeg uses CPU fallback there.
 
 ## 2. First-run setup
 
@@ -23,7 +33,8 @@ A blank install opens the setup wizard automatically.
 Enter either:
 
 - an M3U URL; or
-- an Xtream server/base URL plus username and password.
+- an Xtream server/base URL plus username and password; or
+- the built-in free public M3U demo for testing without an IPTV service.
 
 Xtream users should enter the server/base URL only. M3U Web Picker probes the Xtream API and builds playlist/XMLTV URLs internally.
 
@@ -37,6 +48,8 @@ The Master Update schedule controls the application-wide provider/EPG/sports ref
 
 Choose any normal provider channels that should always remain in the curated lineup. Selecting zero manual channels is allowed when the install is intended mainly for generated sports channels.
 
+**Hide SD / Low Bandwidth Channels** hides low-bandwidth provider entries from the normal catalog and sports-generated feed selection. The same setting remains available on the Channels page after setup.
+
 ### Sports Automation
 
 Sports Automation is optional. If enabled, select teams, leagues, conferences, or broad sports to follow.
@@ -49,9 +62,9 @@ API-SPORTS integration is optional. The current adapters support canonical sched
 
 ### Jellyfin
 
-Jellyfin integration is optional. The cache cleanup feature is experimental and requires an explicit acknowledgement.
+Jellyfin integration is optional. Cache cleanup requires an explicit risk acknowledgement before it can be enabled or saved.
 
-**Warning:** clearing Jellyfin cache data may affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
+**Warning:** the cleanup path is trusted as configured. The application verifies that the mounted path exists and is writable, but it cannot prove that the path contains only Jellyfin cache data. A wrong host path or mount can recursively delete unrelated data. Clearing the correct Jellyfin cache may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
 
 If cache cleanup is desired, start the container with the Jellyfin cache directory mounted:
 
@@ -59,7 +72,7 @@ If cache cleanup is desired, start the container with the Jellyfin cache directo
 M3U_JELLYFIN_CACHE_DIR="/absolute/path/to/jellyfin/cache" docker compose up -d --build
 ```
 
-The wizard validates that the mounted directory exists and is writable before cleanup can be enabled.
+The wizard validates that the mounted directory exists and is writable before cleanup can be enabled. Manually confirm the host path and container mount before accepting the risk.
 
 ## 3. Providers
 
@@ -72,6 +85,8 @@ Removing/replacing the primary provider is the supported way to change stored pr
 The Channels page is the manual/static lineup manager. Search by channel, provider group, or source; add/remove visible channels; and manage saved ordering.
 
 Manual channels are preserved independently from generated sports rows. Sports deduplication must never delete, replace, or suppress a saved manual selection.
+
+The **Hide SD / Low Bandwidth Channels** filter hides low-bandwidth catalog entries while preserving already-saved channels in Saved Channels mode.
 
 ## 5. EPG
 
@@ -103,10 +118,15 @@ Normal client URLs are:
 
 ```text
 /playlist/channels.m3u
+/playlist/channels.direct.m3u
 /epg/epg.xml
 ```
 
 Use the Outputs button in the UI to copy fully qualified URLs for the current host.
+
+When application-wide encoding is enabled under **Settings → Encoding**, `/playlist/channels.m3u` uses Picker's FFmpeg path. `/playlist/channels.direct.m3u` is the permanent direct-provider fallback and bypasses encoding.
+
+Encoding is disabled by default. Enabling it runs a functional hardware check. Supported Docker acceleration can use NVIDIA NVENC, Intel QSV, or VA-API when passed through successfully; otherwise CPU `libx264` fallback requires an explicit performance-risk acknowledgement. Browser fragmented MP4, shared MPEG-TS, and shared HLS are separate sessions, so different client types can open separate FFmpeg processes for the same channel.
 
 ## 9. TV Guide and LAN playback
 
@@ -118,10 +138,10 @@ For LAN playback/discovery, configure the host LAN IPv4 address in `.env`:
 M3U_LAN_HOST=192.168.x.x
 ```
 
-On macOS:
+On macOS or Linux:
 
 ```bash
-./scripts/detect-lan-host.sh
+./scripts/detect-lan-host.sh --write-env
 ```
 
 GPU passthrough is not supported yet for Docker installs on macOS. FFmpeg uses CPU fallback even if the Mac has supported graphics hardware.
@@ -130,7 +150,7 @@ Rebuild/restart after changing `.env`.
 
 ### Browser and Google Cast
 
-The browser player uses the server-side ffmpeg normalization path. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
+With application-wide encoding enabled, the browser player uses server-side FFmpeg and fragmented MP4. With encoding disabled, clients retain the direct-provider path. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
 
 ### Roku
 
@@ -204,6 +224,15 @@ docker compose up -d --build
 ```
 
 Do **not** use `-v` unless you intentionally want to delete the normal application data volume.
+
+For a normal source update:
+
+```bash
+git pull --ff-only origin main
+docker compose up -d --build
+```
+
+Do not remove the data volume during a normal update.
 
 ## 11. Clean setup-wizard test
 

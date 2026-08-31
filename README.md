@@ -146,7 +146,7 @@ More detailed Roku troubleshooting is in `USER-GUIDE.md`.
 
 ## Jellyfin cache integration
 
-Jellyfin cache cleanup is optional and experimental. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
+Jellyfin cache cleanup is optional. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
 
 **WARNING: the Jellyfin cleanup path is trusted exactly as configured. There is currently no path-safety validation to prove that it points only at a Jellyfin cache directory. A wrong host path, container mount, or configuration could cause recursive deletion of unrelated data — in the worst case, potentially an entire mounted drive/filesystem. Use this feature only after manually verifying the path and mount.**
 
