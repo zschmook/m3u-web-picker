@@ -19,7 +19,16 @@ from settings import SETTINGS
 
 public_epg_compat.install(core)
 
-app = Flask(__name__)
+REPO_DIR = Path(__file__).resolve().parent.parent
+APP_STATIC_DIR = REPO_DIR / "static"
+APP_TEMPLATE_DIR = REPO_DIR / "templates"
+APP_DOCS_DIR = REPO_DIR / "docs"
+
+app = Flask(
+    __name__,
+    static_folder=str(APP_STATIC_DIR),
+    template_folder=str(APP_TEMPLATE_DIR),
+)
 
 
 @app.get("/favicon.ico")
@@ -116,7 +125,8 @@ def guide():
 
 @app.get("/user-guide")
 def user_guide():
-    source = Path(app.root_path, "docs", "USER-GUIDE.md").read_text(encoding="utf-8")
+    source = APP_DOCS_DIR / "USER-GUIDE.md"
+    source = source.read_text(encoding="utf-8")
     content = markdown.markdown(
         source,
         extensions=("fenced_code", "tables", "toc", "sane_lists"),
