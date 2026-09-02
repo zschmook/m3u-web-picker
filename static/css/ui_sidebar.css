@@ -63,9 +63,13 @@ body {
   border-radius: 12px;
   background: linear-gradient(145deg, #568fff, #3b72dc);
   box-shadow: 0 10px 24px rgba(59, 114, 220, 0.27);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  color: #fff;
+}
+
+.ui-sidebar-mark img {
+  width: 30px;
+  height: 30px;
+  display: block;
 }
 
 .ui-sidebar-title {
@@ -73,13 +77,6 @@ body {
   font-weight: 760;
   line-height: 1.15;
   letter-spacing: -0.025em;
-}
-
-.ui-sidebar-version {
-  margin-top: 3px;
-  color: var(--ui-muted);
-  font-size: 0.72rem;
-  font-weight: 600;
 }
 
 .ui-side-nav {
@@ -142,6 +139,37 @@ body {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--ui-border);
+}
+
+.ui-side-links .ui-side-link-child {
+  min-height: 36px;
+  margin-left: 0;
+  width: 100%;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 0.82rem;
+}
+
+.ui-side-links .ui-side-link-child svg {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+}
+
+.ui-side-link-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ui-danger);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .ui-system-card {

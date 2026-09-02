@@ -46,6 +46,7 @@ class AppSettings:
     max_provider_json_bytes: int
     max_public_epg_compressed_bytes: int
     cast_hls_dir: Path
+    dvr_dir: Path
     lan_host: str
     external_port: int
 
@@ -57,6 +58,9 @@ def load_settings() -> AppSettings:
     environment_external_port = _env_int("M3U_EXTERNAL_PORT", 9999)
     cast_hls_dir = Path(
         os.environ.get("M3U_CAST_HLS_DIR", "/tmp/m3u-web-picker-cast-hls")
+    ).expanduser()
+    dvr_dir = Path(
+        os.environ.get("M3U_DVR_CONTAINER_DIR", str(data_dir / "recordings"))
     ).expanduser()
     return AppSettings(
         data_dir=data_dir,
@@ -73,6 +77,7 @@ def load_settings() -> AppSettings:
             "M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES", 256 * 1024 * 1024
         ),
         cast_hls_dir=cast_hls_dir,
+        dvr_dir=dvr_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
         external_port=_saved_external_port(data_dir, environment_external_port),
     )

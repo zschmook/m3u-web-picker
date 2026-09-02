@@ -1,5 +1,5 @@
 .guide-controls {
-  max-width: 1000px;
+  width: 100%;
 }
 
 .guide-timeline-wrap {
@@ -221,6 +221,12 @@
 .guide-programme-block.is-current {
   border-color: #22c55e;
   background: #123525;
+}
+
+.guide-programme-block.is-search-match {
+  border-color: #fbbf24;
+  background: rgba(120, 53, 15, .55);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, .65);
 }
 
 .guide-programme-block-title,

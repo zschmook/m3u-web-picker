@@ -28,7 +28,43 @@ else
   git clone --branch main --single-branch "$REPOSITORY_URL" "$INSTALL_DIR"
 fi
 
+if [ -f "$INSTALL_DIR/.env" ]; then
+  env_preexisting=1
+else
+  env_preexisting=0
+fi
+
 "$INSTALL_DIR/scripts/detect-lan-host.sh" --write-env
+
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    env_file="$INSTALL_DIR/.env"
+    configured_dvr_dir="$(awk -F= '$1 == "M3U_DVR_DIR" {sub(/^[^=]*=/, ""); print; exit}' "$env_file" | tr -d '\r')"
+    if [ "$env_preexisting" -eq 0 ] || [ -z "$configured_dvr_dir" ]; then
+      tmp_file="${env_file}.tmp.$$"
+      awk '
+        BEGIN { written = 0 }
+        /^M3U_DVR_DIR=/ {
+          if (!written) {
+            print "M3U_DVR_DIR=C:/DVR"
+            written = 1
+          }
+          next
+        }
+        { print }
+        END {
+          if (!written) print "M3U_DVR_DIR=C:/DVR"
+        }
+      ' "$env_file" > "$tmp_file"
+      mv "$tmp_file" "$env_file"
+      configured_dvr_dir="C:/DVR"
+    fi
+    if [ "$configured_dvr_dir" = "C:/DVR" ]; then
+      mkdir -p /c/DVR
+      echo "Using C:/DVR for persistent DVR recordings."
+    fi
+    ;;
+esac
 
 cd "$INSTALL_DIR"
 compose_files="-f docker-compose.yml"

@@ -6,6 +6,7 @@ import threading
 from flask import jsonify
 
 import core
+import dvr
 import hdhr_config
 import master_update_reports
 import master_update_worker
@@ -210,6 +211,10 @@ def ui_status_payload() -> dict:
     saved_roku = roku_devices.list_saved(core.DB_PATH)
     report = master_update_reports.latest(core.DB_PATH)
     master = dict(master_update_worker.payload())
+    active_recordings = sum(
+        1 for item in dvr.list_recordings(core.DB_PATH)
+        if str(item.get("status") or "") in {"recording", "processing"}
+    )
     if report:
         master["last_update"] = report.get("finished_at") or master.get("last_update")
         master["last_duration_seconds"] = report.get("duration_seconds")
@@ -235,6 +240,7 @@ def ui_status_payload() -> dict:
             "all_channels": len(core.channels),
             "indexed_channels": len(core.selected_ids),
             "sports_channels": generated_count,
+            "active_recordings": active_recordings,
         },
         "devices": {
             "hdhr": {

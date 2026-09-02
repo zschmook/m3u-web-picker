@@ -30,8 +30,95 @@
   min-width: 0;
 }
 
+.guide-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.guide-day-nav {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid #475569;
+  border-radius: .4rem;
+}
+
+.guide-day-button {
+  min-width: 2.7rem;
+  padding: .28rem .48rem;
+  border: 0;
+  border-right: 1px solid #475569;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.guide-day-button:last-child {
+  border-right: 0;
+}
+
+.guide-day-button:hover,
+.guide-day-button:focus-visible {
+  background: #374151;
+  color: #fff;
+}
+
+.guide-day-button[aria-pressed="true"] {
+  background: #2563eb;
+  color: #fff;
+}
+
+.guide-stream-menu {
+  position: relative;
+}
+
+.guide-stream-toggle {
+  display: list-item;
+  list-style: none;
+  user-select: none;
+}
+
+.guide-stream-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.guide-stream-toggle::after {
+  content: " ▾";
+  color: #9ca3af;
+}
+
+.guide-stream-menu[open] .guide-stream-toggle {
+  background: #374151;
+}
+
+.guide-stream-popup {
+  position: absolute;
+  top: calc(100% + .4rem);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  gap: .35rem;
+  min-width: 190px;
+  padding: .45rem;
+  border: 1px solid #475569;
+  border-radius: .5rem;
+  background: #111827;
+  box-shadow: 0 .75rem 1.5rem rgba(0, 0, 0, .3);
+}
+
+.guide-stream-popup .btn {
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .guide-player-panel {
   padding: .9rem;
+  scroll-margin-top: 5rem;
   border: 1px solid #374151;
   border-radius: .65rem;
   background: #1f2937;
@@ -156,7 +243,7 @@
 }
 
 .guide-controls {
-  max-width: 900px;
+  width: 100%;
 }
 
 .guide-filter-heading {

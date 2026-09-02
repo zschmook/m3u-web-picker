@@ -158,6 +158,8 @@ The normal Compose project is `m3u-picker` and stores application state in the `
 
 Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
 
+In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `C:/DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default. An optional Plex folder in **Settings → DVR** moves successful conversions into Plex-friendly show and season folders with episode names such as `The Wall.S06E10.mkv`. For the current Docker setup, that destination must be inside the mounted DVR folder (for example, `C:/DVR/PLEX`). DVR conversion automatically prefers NVIDIA NVENC when the GPU Compose override is active, targets 3 Mbps with 4.5 Mbps peak headroom for 1080p recordings, and safely retries with CPU `libx265` if hardware encoding is unavailable. Comskip commercial detection and all conversion work also stay on that host-mounted storage; recording data is never written into the container layer.
+
 ## Clean first-run testing
 
 An isolated development Compose file is kept specifically for testing the setup wizard without touching the normal instance:

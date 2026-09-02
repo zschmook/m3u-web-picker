@@ -7,7 +7,7 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/guide.css', v='v30-experiments-exp11-roku-bundled') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/guide.css', v='guide-days-2') }}">
 </head>
 <body class="guide-body">
   <main class="guide-shell container-fluid py-3">
@@ -16,9 +16,18 @@
         <h1 class="h4 mb-1">TV Guide</h1>
         <div id="guideStatus" class="small-muted" aria-live="polite">Loading curated lineup…</div>
       </div>
-      <div class="d-flex gap-2 align-items-center">
-        <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Google Cast receivers">Cast</button>
-        <button id="guideRokuBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Roku devices">Roku</button>
+      <div class="d-flex gap-2 align-items-center guide-header-actions">
+        <button id="guideDvrBtn" class="btn btn-outline-light btn-sm" type="button">
+          DVR <span id="guideDvrBadge" class="badge rounded-pill text-bg-danger d-none">0</span>
+        </button>
+        <button id="guideMultiviewBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Multiview is coming soon">Multiview</button>
+        <details id="guideStreamMenu" class="guide-stream-menu">
+          <summary class="btn btn-outline-light btn-sm guide-stream-toggle">Stream</summary>
+          <div class="guide-stream-popup" role="group" aria-label="Streaming destinations">
+            <button id="guideRokuBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Roku devices">Roku</button>
+            <button id="guideCastBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Looking for Google Cast receivers">Cast</button>
+          </div>
+        </details>
         <button id="guideRefreshBtn" class="btn btn-outline-light btn-sm" type="button">Refresh</button>
         <button id="guideCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
       </div>
@@ -35,6 +44,7 @@
           <div id="guidePlayerMeta" class="small-muted guide-player-meta"></div>
         </div>
         <div class="guide-player-actions">
+          <button id="guidePopoutBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Pop out</button>
           <button id="guideStopBtn" class="btn btn-outline-light btn-sm" type="button">Stop</button>
         </div>
       </div>
@@ -71,10 +81,43 @@
       </details>
     </section>
 
+    <section id="guideDvrPanel" class="guide-dvr-panel d-none mb-3" aria-live="polite">
+      <div class="guide-dvr-heading">
+        <div>
+          <div class="guide-dvr-eyebrow">In-app recorder</div>
+          <h2 class="h5 mb-1">DVR</h2>
+          <div id="guideDvrStorage" class="small-muted">Checking recording storage…</div>
+        </div>
+        <div class="guide-dvr-heading-actions">
+          <button id="guideDvrCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
+        </div>
+      </div>
+      <div id="guideDvrMessage" class="guide-dvr-message small-muted"></div>
+      <div class="guide-dvr-content">
+        <div class="guide-dvr-recordings">
+          <div class="guide-dvr-queue-heading">
+            <div class="guide-dvr-queue-title">
+              <h3 id="guideDvrQueueTitle">Recordings</h3>
+              <button id="guideDvrShowAll" class="btn btn-link btn-sm d-none" type="button">All recordings</button>
+            </div>
+            <div id="guideDvrDayNav" class="guide-day-nav" role="group" aria-label="DVR guide day"></div>
+          </div>
+          <div id="guideDvrQueue" class="guide-dvr-list"></div>
+        </div>
+        <details id="guideDvrSeriesDetails" class="guide-dvr-series-details" open>
+          <summary>
+            <span>Series</span>
+            <span id="guideDvrSeriesCount" class="guide-dvr-series-count">0</span>
+          </summary>
+          <div id="guideDvrSeries" class="guide-dvr-list"></div>
+        </details>
+      </div>
+    </section>
+
     <section class="guide-controls mb-3">
       <div class="guide-filter-heading">
-        <label class="form-label mb-1" for="guideSearch">Filter channels</label>
-        <div id="guideVisibleCount" class="small-muted guide-count">0 channels</div>
+        <label class="form-label mb-1" for="guideSearch">Search Guide <span id="guideVisibleCount" class="small-muted guide-count">(0 Channels)</span></label>
+        <div id="guideDayNav" class="guide-day-nav" role="group" aria-label="Guide day"></div>
       </div>
       <input id="guideSearch" class="form-control" type="search" placeholder="Channel, group, sports event…" autocomplete="off">
     </section>
@@ -95,7 +138,23 @@
     </section>
   </main>
 
-  <script src="{{ url_for('static', filename='js/guide.js', v='v30-experiments-auto-discovery') }}"></script>
+  <dialog id="guideProgrammeDialog" class="guide-programme-dialog">
+    <div class="guide-programme-dialog-card">
+      <div class="guide-dvr-eyebrow">Program</div>
+      <h2 id="guideProgrammeTitle" class="h5">—</h2>
+      <div id="guideProgrammeMeta" class="small-muted"></div>
+      <p id="guideProgrammeDescription"></p>
+      <div id="guideProgrammeMessage" class="guide-dvr-message small-muted"></div>
+      <div class="guide-programme-actions">
+        <button id="guideProgrammePlay" class="btn btn-success btn-sm" type="button">Play now</button>
+        <button id="guideRecordOnce" class="btn btn-danger btn-sm" type="button">Record episode</button>
+        <button id="guideRecordSeries" class="btn btn-outline-light btn-sm" type="button">Record series</button>
+        <button id="guideProgrammeClose" class="btn btn-outline-light btn-sm" type="button">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='js/guide.js', v='timestamp-rebase-1') }}"></script>
   <script>
     (() => {
       const castButton = document.getElementById("guideCastBtn");

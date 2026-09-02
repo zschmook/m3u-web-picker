@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
 $envExamplePath = Join-Path $repoRoot ".env.example"
+$envPreexisting = Test-Path -LiteralPath $envPath
 
 function Get-LanIPv4 {
     $configuration = try {
@@ -67,6 +68,20 @@ function Set-DotEnvValue([string]$Path, [string]$Name, [string]$Value) {
     Set-Content -LiteralPath $Path -Value $updated -Encoding utf8
 }
 
+function Get-DotEnvValue([string]$Path, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    $prefix = "$Name="
+    $line = Get-Content -LiteralPath $Path |
+        Where-Object { $_.StartsWith($prefix, [System.StringComparison]::Ordinal) } |
+        Select-Object -First 1
+    if ($null -eq $line) {
+        return $null
+    }
+    return $line.Substring($prefix.Length).Trim()
+}
+
 $lanHost = Get-LanIPv4
 if (-not $lanHost) {
     throw "Could not detect this computer's LAN IPv4 address."
@@ -84,6 +99,16 @@ if (-not (Test-Path -LiteralPath $envPath)) {
 
 Set-DotEnvValue -Path $envPath -Name "M3U_LAN_HOST" -Value $lanHost
 Write-Host "Advertising M3U Web Picker at http://${lanHost}:9999"
+
+$dvrPath = Get-DotEnvValue -Path $envPath -Name "M3U_DVR_DIR"
+if (-not $envPreexisting -or [string]::IsNullOrWhiteSpace($dvrPath)) {
+    $dvrPath = "C:/DVR"
+    Set-DotEnvValue -Path $envPath -Name "M3U_DVR_DIR" -Value $dvrPath
+}
+if ($dvrPath -eq "C:/DVR") {
+    New-Item -ItemType Directory -Path "C:\DVR" -Force | Out-Null
+    Write-Host "Using C:/DVR for persistent DVR recordings."
+}
 
 if ($ConfigureOnly) {
     return

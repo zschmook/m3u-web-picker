@@ -2,7 +2,7 @@
   "use strict";
 
   const PAGE_IDS = ["overview", "providers", "channels", "sports", "settings"];
-  const SETTINGS_PANEL_IDS = ["encoding", "network", "jellyfin", "epg", "devices"];
+  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "jellyfin", "epg", "devices"];
   const state = {
     status: null,
     activePage: "overview",
@@ -84,10 +84,6 @@
   function preparePages() {
     const root = document.querySelector(".ui-modern-root");
     if (!root) return;
-
-    const originalBrand = document.querySelector(".app-brand-block h1");
-    const badge = originalBrand?.querySelector(".badge");
-    if (badge?.textContent?.trim()) el("uiSidebarVersion").textContent = badge.textContent.trim();
 
     document.querySelector(".app-topbar")?.classList.add("ui-legacy-hidden");
     document.querySelector(".ui-jump-nav")?.classList.add("ui-legacy-hidden");
@@ -201,6 +197,7 @@
     settings.innerHTML += `
       <div class="ui-settings-tabs" role="tablist">
         <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="dvr">DVR</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
@@ -228,6 +225,42 @@
             <div class="ui-output-summary"><div><span>Normal M3U</span><code>/playlist/channels.m3u</code></div><div><span>Always-direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
             <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiEncodingTest" type="button">Run Hardware Check</button><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
             <div class="ui-settings-status" id="uiEncodingStatus" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+        <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="dvr" aria-labelledby="uiDvrTitle">
+          <div class="ui-card-heading">
+            <div><span id="uiDvrTitle">In-App DVR</span><small>Schedule individual programs or entire series from the TV Guide.</small></div>
+            <span class="ui-count-badge" id="uiDvrBadge">Loading</span>
+          </div>
+          <div class="ui-settings-form">
+            <label class="ui-settings-toggle" for="uiDvrEnabled">
+              <input id="uiDvrEnabled" type="checkbox" role="switch" autocomplete="off">
+              <span><strong>Enable in-app DVR</strong><small>Recording buttons remain unavailable until storage is mounted and validated.</small></span>
+            </label>
+            <label class="ui-settings-field" for="uiDvrPath">
+              <span>Local recording folder</span>
+              <input id="uiDvrPath" class="form-control" autocomplete="off" placeholder="C:\\Media\\DVR">
+            </label>
+            <div class="ui-settings-warning">Docker must mount this exact host folder through <code>M3U_DVR_DIR</code>. Changing it requires updating <code>.env</code> and restarting the container.</div>
+            <label class="ui-settings-field" for="uiDvrPlexPath">
+              <span>Plex folder</span>
+              <input id="uiDvrPlexPath" class="form-control" autocomplete="off" placeholder="C:\\DVR\\PLEX">
+              <small>Successful H.265 recordings move here using Plex-friendly show and episode names. Leave blank to keep them in the DVR converted folder.</small>
+            </label>
+            <label class="ui-settings-toggle" for="uiDvrHevc">
+              <input id="uiDvrHevc" type="checkbox" role="switch" autocomplete="off">
+              <span><strong>Convert completed recordings to H.265/MKV</strong><small>Nightly and manual updates check that each file is idle before conversion. The original capture is kept if conversion fails.</small></span>
+            </label>
+            <label class="ui-settings-toggle" for="uiDvrRemoveCommercials">
+              <input id="uiDvrRemoveCommercials" type="checkbox" role="switch" autocomplete="off">
+              <span><strong>Remove detected commercials</strong><small>Comskip finds commercial breaks before conversion. Suspicious or failed detection falls back to an uncut recording.</small></span>
+            </label>
+            <label class="ui-settings-field" for="uiDvrPaddingBefore"><span>Start early (minutes)</span><input id="uiDvrPaddingBefore" class="form-control" type="number" min="0" max="30" value="1"></label>
+            <label class="ui-settings-field" for="uiDvrPaddingAfter"><span>End late (minutes)</span><input id="uiDvrPaddingAfter" class="form-control" type="number" min="0" max="60" value="2"></label>
+            <label class="ui-settings-field" for="uiDvrMaxConcurrent"><span>Maximum simultaneous recordings</span><input id="uiDvrMaxConcurrent" class="form-control" type="number" min="1" max="8" value="2"></label>
+            <div class="ui-settings-runtime" id="uiDvrRuntime">Loading recording mount status…</div>
+            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiDvrValidate" type="button">Validate Path</button><button class="btn ui-btn-primary" id="uiDvrSave" type="button">Save DVR Settings</button></div>
+            <div class="ui-settings-status" id="uiDvrStatus" role="status" aria-live="polite"></div>
           </div>
         </section>
         <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="network" aria-labelledby="uiNetworkTitle">
@@ -442,6 +475,13 @@
     el("uiAllChannels").textContent = formatNumber(counts.all_channels);
     el("uiIndexedChannels").textContent = formatNumber(counts.indexed_channels);
     el("uiSportsChannels").textContent = formatNumber(counts.sports_channels);
+    const activeRecordings = Math.max(0, Number(counts.active_recordings || 0));
+    const dvrBadge = el("uiDvrRecordingCount");
+    if (dvrBadge) {
+      dvrBadge.textContent = String(activeRecordings);
+      dvrBadge.classList.toggle("d-none", activeRecordings === 0);
+      dvrBadge.setAttribute("aria-label", `${activeRecordings} recording${activeRecordings === 1 ? "" : "s"} in progress`);
+    }
     el("uiHdhrStatus").textContent = devices.hdhr?.enabled ? `On · ${formatNumber(devices.hdhr.tuners)} tuners` : "Off";
     el("uiRokuStatus").textContent = `${formatNumber(devices.roku_saved)} saved`;
     el("uiStreamsStatus").textContent = `${formatNumber(devices.active_streams)} active`;

@@ -11,6 +11,7 @@ into a monolith.
 import shutil  # noqa: F401
 
 from .epg import register_epg_routes
+from .dvr import register_dvr_routes
 from .event_images import register_event_image_routes
 from .groups import register_group_routes
 from .guide import register_guide_routes
@@ -35,6 +36,7 @@ def register_routes(app):
     register_group_routes(app)
     register_sports_routes(app)
     register_guide_routes(app)
+    register_dvr_routes(app)
     register_guide_debug_routes(app)
     register_hdhr_routes(app)
     register_image_routes(app)

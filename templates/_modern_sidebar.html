@@ -1,9 +1,10 @@
 <aside id="uiSidebar" class="ui-sidebar" aria-label="Application navigation">
   <div class="ui-sidebar-brand">
-    <div class="ui-sidebar-mark">M3U</div>
+    <div class="ui-sidebar-mark" aria-hidden="true">
+      <img src="{{ url_for('static', filename='favicon.svg') }}" alt="">
+    </div>
     <div>
       <div class="ui-sidebar-title">Web Picker</div>
-      <div class="ui-sidebar-version" id="uiSidebarVersion">v31</div>
     </div>
   </div>
   <nav class="ui-side-nav" aria-label="Main sections">
@@ -21,6 +22,7 @@
   </nav>
   <div class="ui-side-links">
     <a href="{{ url_for('guide') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M19 13v6H5V5h6"/></svg><span>TV Guide</span></a>
+    <a class="ui-side-link-child" href="{{ url_for('guide') }}?dvr=1"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg><span>DVR Recordings</span><span class="ui-side-link-badge d-none" id="uiDvrRecordingCount" aria-label="No recordings in progress">0</span></a>
   </div>
   <section class="ui-system-card" aria-labelledby="uiSystemStatusTitle">
     <div class="ui-system-card-heading"><span id="uiSystemStatusTitle">System Status</span><span class="ui-health-dot is-loading" id="uiSystemHealthDot" aria-hidden="true"></span></div>

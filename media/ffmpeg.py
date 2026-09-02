@@ -29,6 +29,22 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
     adapters only choose their container/muxer details.
     """
     encoder = media_pipeline.active_encoder()
+    if encoder == "libx264":
+        encoder_options = ["-preset", "ultrafast", "-tune", "zerolatency"]
+    elif encoder == "h264_nvenc":
+        # NVENC's quality defaults can hold a large reordered timestamp window
+        # on MPEG-TS inputs. For live playback that appeared as a frozen player
+        # followed by video roughly 100 seconds behind the audio.
+        encoder_options = [
+            "-preset", "p1",
+            "-tune", "ll",
+            "-zerolatency", "1",
+            "-delay", "0",
+            "-bf", "0",
+            "-rc-lookahead", "0",
+        ]
+    else:
+        encoder_options = []
     return [
         executable(),
         "-nostdin",
@@ -45,9 +61,14 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         "0:a:0?",
         "-c:v",
         encoder,
-        *(["-preset", "ultrafast", "-tune", "zerolatency"] if encoder == "libx264" else []),
+        *encoder_options,
         "-pix_fmt",
         "yuv420p",
+        # Provider MPEG-TS feeds can begin with a large video PTS offset while
+        # audio starts at zero. Rebase video at every new live session so
+        # browsers do not wait for or replay that stale timestamp gap.
+        "-vf",
+        "setpts=PTS-STARTPTS",
         *video_extra,
         "-c:a",
         "aac",

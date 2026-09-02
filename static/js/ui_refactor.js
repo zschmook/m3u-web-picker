@@ -48,13 +48,6 @@
     if (!topbar || !brand || !toolbar || el("uiStatusStrip")) return;
 
     document.body.classList.add("ui-refactor");
-    const badge = brand.querySelector("h1 .badge");
-    if (badge) {
-      badge.textContent = "experients-ui";
-      badge.classList.remove("text-bg-warning");
-      badge.classList.add("text-bg-info");
-    }
-
     const strip = document.createElement("div");
     strip.id = "uiStatusStrip";
     strip.className = "ui-status-strip";

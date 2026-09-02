@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
+  const GUIDE_COVERAGE_DAYS = 5;
   const GUIDE_WINDOW_HOURS = 8;
+  const GUIDE_DAY_WINDOW_HOURS = 24;
   const GUIDE_SLOT_MINUTES = 30;
   const GUIDE_PX_PER_MINUTE = 5;
   const TEAM_CATALOG_TTL_MS = 15 * 60 * 1000;
@@ -10,6 +12,10 @@
   let lastGeneratedLogoSignature = "";
   let teamLeagueLookup = new Map();
   let teamGlobalLookup = new Map();
+  const programmeChoices = new Map();
+  const guideDayNav = document.getElementById("guideDayNav");
+  let selectedGuideDay = null;
+  let positionSelectedDay = true;
 
   function formatGuideClock(value) {
     if (!value) return "";
@@ -26,24 +32,27 @@
     return start || stop || "";
   }
 
-  function programmeSearchText(channel) {
-    const now = channel.now || {};
-    const next = channel.next || {};
-    const upcoming = Array.isArray(channel.upcoming) ? channel.upcoming : [];
-    const programmeBits = programme => [
+  function individualProgrammeSearchText(programme) {
+    return [
       programme?.title,
       programme?.subtitle,
       programme?.description,
       ...(Array.isArray(programme?.categories) ? programme.categories : []),
-    ];
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function programmeSearchText(channel) {
+    const now = channel.now || {};
+    const next = channel.next || {};
+    const upcoming = Array.isArray(channel.upcoming) ? channel.upcoming : [];
     return [
       channel.number,
       channel.name,
       channel.group,
       channel.subtitle,
-      ...programmeBits(now),
-      ...programmeBits(next),
-      ...upcoming.flatMap(programmeBits),
+      individualProgrammeSearchText(now),
+      individualProgrammeSearchText(next),
+      ...upcoming.map(individualProgrammeSearchText),
     ].filter(Boolean).join(" ").toLowerCase();
   }
 
@@ -250,10 +259,38 @@
     return value;
   }
 
+  function guideDayStart(dayOffset) {
+    const value = new Date();
+    value.setHours(0, 0, 0, 0);
+    value.setDate(value.getDate() + dayOffset);
+    return value;
+  }
+
+  function guideDayLabel(dayOffset) {
+    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return labels[guideDayStart(dayOffset).getDay()];
+  }
+
+  function populateGuideDays() {
+    if (!guideDayNav) return;
+    const nowButton = '<button type="button" class="guide-day-button" data-guide-day="now" aria-pressed="true">Now</button>';
+    const dayButtons = Array.from({length: GUIDE_COVERAGE_DAYS}, (_, dayOffset) => {
+      const day = guideDayStart(dayOffset);
+      const title = day.toLocaleDateString([], {weekday: "long", month: "long", day: "numeric"});
+      return `<button type="button" class="guide-day-button" data-guide-day="${dayOffset}" aria-pressed="false" title="${escapeHtml(title)}">${escapeHtml(guideDayLabel(dayOffset))}</button>`;
+    }).join("");
+    guideDayNav.innerHTML = nowButton + dayButtons;
+  }
+
   function timelineBounds() {
     const now = new Date();
-    const start = floorToGuideSlot(now);
-    const end = new Date(start.getTime() + GUIDE_WINDOW_HOURS * 60 * 60 * 1000);
+    const daySelected = selectedGuideDay !== null;
+    const futureDaySelected = daySelected && selectedGuideDay > 0;
+    const start = futureDaySelected
+      ? guideDayStart(selectedGuideDay)
+      : floorToGuideSlot(now);
+    const windowHours = futureDaySelected ? GUIDE_DAY_WINDOW_HOURS : GUIDE_WINDOW_HOURS;
+    const end = new Date(start.getTime() + windowHours * 60 * 60 * 1000);
     const totalMinutes = (end.getTime() - start.getTime()) / 60000;
     return {
       now,
@@ -283,6 +320,13 @@
       if (!target) return;
       event.preventDefault();
       const channel = actualGuideChannel(target.dataset.guidePlayUrl);
+      const programmeKey = String(target.dataset.guideProgrammeKey || "");
+      if (programmeKey && programmeChoices.has(programmeKey)) {
+        window.dispatchEvent(new CustomEvent("m3u-guide-programme", {
+          detail: programmeChoices.get(programmeKey),
+        }));
+        return;
+      }
       if (channel) playChannel(channel);
     });
     return timelineRoot;
@@ -332,7 +376,7 @@
     };
   }
 
-  function renderProgrammeBlocks(channel, bounds) {
+  function renderProgrammeBlocks(channel, bounds, query) {
     const programmes = channelProgrammes(channel);
     const blocks = programmes.map((programme, index) => {
       const geometry = programmeGeometry(programme, bounds, index, programmes);
@@ -343,10 +387,19 @@
       const tooltip = [programme.title, time, subtitle, description]
         .filter(Boolean)
         .join(" — ");
+      const programmeKey = `${channel.tvg_id || channel.play_url}|${programme.start || ""}|${programme.title || ""}`;
+      programmeChoices.set(programmeKey, {channel, programme});
+      const dvrClass = typeof window.m3uDvrProgrammeClass === "function"
+        ? window.m3uDvrProgrammeClass(channel, programme)
+        : "";
+      const searchClass = query && individualProgrammeSearchText(programme).includes(query)
+        ? " is-search-match"
+        : "";
       return `<button type="button"
-        class="guide-programme-block${geometry.current ? " is-current" : ""}"
+        class="guide-programme-block${geometry.current ? " is-current" : ""}${dvrClass ? ` ${dvrClass}` : ""}${searchClass}"
         style="left:${geometry.left}px;width:${geometry.width}px"
         data-guide-play-url="${escapeHtml(channel.play_url)}"
+        data-guide-programme-key="${escapeHtml(programmeKey)}"
         title="${escapeHtml(tooltip)}">
           <span class="guide-programme-block-title">${escapeHtml(programme.title || "Untitled")}</span>
           ${time ? `<span class="guide-programme-block-time">${escapeHtml(time)}</span>` : ""}
@@ -382,7 +435,7 @@
     </div>`;
   }
 
-  function renderChannelRow(channel, bounds) {
+  function renderChannelRow(channel, bounds, query) {
     const logo = renderStationLogo(channel);
     const generated = channel.generated
       ? '<span class="badge text-bg-primary guide-generated-badge">Auto</span>'
@@ -405,7 +458,7 @@
           data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
       </div>
       <div class="guide-programme-track" style="width:${bounds.width}px;--guide-slot-width:${bounds.slotWidth}px">
-        ${renderProgrammeBlocks(channel, bounds)}
+        ${renderProgrammeBlocks(channel, bounds, query)}
         ${nowMarker}
       </div>
     </div>`;
@@ -420,12 +473,20 @@
   renderGuide = function() {
     const root = ensureTimelineShell();
     if (!root) return;
+    const query = guideEls.search.value.trim().toLowerCase();
     const visible = filteredGuideChannels();
+    programmeChoices.clear();
     const bounds = timelineBounds();
     root.style.setProperty("--guide-timeline-width", `${bounds.width}px`);
-    root.innerHTML = `${renderTimeHeader(bounds)}<div class="guide-timeline-body">${visible.map(channel => renderChannelRow(channel, bounds)).join("")}</div>`;
+    root.innerHTML = `${renderTimeHeader(bounds)}<div class="guide-timeline-body">${visible.map(channel => renderChannelRow(channel, bounds, query)).join("")}</div>`;
 
-    guideEls.visibleCount.textContent = `${visible.length.toLocaleString()} channel${visible.length === 1 ? "" : "s"}`;
+    if (positionSelectedDay) {
+      const wrap = root.parentElement;
+      if (wrap) wrap.scrollLeft = 0;
+      positionSelectedDay = false;
+    }
+
+    guideEls.visibleCount.textContent = `(${visible.length.toLocaleString()} Channel${visible.length === 1 ? "" : "s"})`;
     guideEls.empty.classList.toggle("d-none", visible.length !== 0);
   };
 
@@ -510,8 +571,23 @@
     event.stopImmediatePropagation();
     renderGuide();
   }, true);
-  const searchLabel = document.querySelector('label[for="guideSearch"]');
-  if (searchLabel) searchLabel.textContent = "Search guide";
+  guideDayNav?.addEventListener("click", event => {
+    const button = event.target.closest("[data-guide-day]");
+    if (!button) return;
+    const value = String(button.dataset.guideDay || "now");
+    selectedGuideDay = value === "now"
+      ? null
+      : Math.max(0, Math.min(GUIDE_COVERAGE_DAYS - 1, Number(value) || 0));
+    guideDayNav.querySelectorAll("[data-guide-day]").forEach(candidate => {
+      const candidateValue = String(candidate.dataset.guideDay || "now");
+      const active = selectedGuideDay === null
+        ? candidateValue === "now"
+        : candidateValue === String(selectedGuideDay);
+      candidate.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    positionSelectedDay = true;
+    renderGuide();
+  });
   guideEls.search.placeholder = "Channel, show, group, sports event…";
 
   document.getElementById("guideRefreshBtn")?.addEventListener("click", event => {
@@ -521,6 +597,7 @@
   }, true);
 
   window.setInterval(() => loadGuide({silent: true}), 60_000);
+  populateGuideDays();
   ensureTimelineShell();
   loadGuide();
 })();

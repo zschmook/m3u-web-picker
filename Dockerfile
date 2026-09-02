@@ -1,7 +1,7 @@
 # M3U Web Picker runs as a Linux container on Docker Desktop (macOS/Windows)
 # and Docker Engine (Linux). The application listens on port 9999 in the
 # container; Compose controls the host-facing port.
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,11 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Browser/Roku/Cast playback uses ffmpeg to normalize provider media when a
-# client cannot consume the source format directly. Keep ffmpeg in the image so
-# the host does not need its own installation.
+# client cannot consume the source format directly. DVR maintenance uses
+# Comskip to detect commercial breaks before the H.265 conversion. Keep both in
+# the image so the host does not need its own installation.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ffmpeg comskip \
+    && find /var/lib/apt/lists -mindepth 1 -delete
 
 # Install Python packages before copying the application so dependency layers
 # can be reused when only source files change.
@@ -23,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
-RUN mkdir -p /app/exports /app/data /backups
+RUN mkdir -p /app/exports /app/data /backups /recordings
 
 EXPOSE 9999
 

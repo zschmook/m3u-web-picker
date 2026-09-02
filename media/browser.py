@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import threading
+from collections.abc import Callable
 
 from flask import Response, request, stream_with_context
 
@@ -8,7 +10,11 @@ from .ffmpeg import normalized_live_input_args, terminate
 import media_pipeline
 
 
-def response_for(target: str) -> Response:
+def response_for(
+    target: str,
+    *,
+    on_stop: Callable[[], None] | None = None,
+) -> Response:
     """Transcode one curated IPTV stream to browser-friendly fragmented MP4."""
     session_token = ""
     try:
@@ -45,6 +51,17 @@ def response_for(target: str) -> Response:
             content_type="text/plain; charset=utf-8",
         )
     client_disconnected = request.environ.get("waitress.client_disconnected")
+    stop_lock = threading.Lock()
+    stopped = False
+
+    def notify_stop() -> None:
+        nonlocal stopped
+        with stop_lock:
+            if stopped:
+                return
+            stopped = True
+        if on_stop is not None:
+            on_stop()
 
     def generate():
         try:
@@ -65,6 +82,7 @@ def response_for(target: str) -> Response:
                     pass
             terminate(process)
             media_pipeline.release_session(session_token)
+            notify_stop()
 
     response = Response(
         stream_with_context(generate()),
@@ -81,4 +99,5 @@ def response_for(target: str) -> Response:
     response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Range, Content-Type"
     response.headers["Access-Control-Expose-Headers"] = "Content-Type"
+    response.call_on_close(notify_stop)
     return response

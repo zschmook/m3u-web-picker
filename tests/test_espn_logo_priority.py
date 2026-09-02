@@ -165,7 +165,7 @@ class EspnLogoPriorityTests(unittest.TestCase):
         )
 
     def test_event_compositor_checks_exact_preferred_cache_before_provider(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         ast.parse(source, filename="event_logos.py")
         self.assertIn('"fallback_url"', source)
         self.assertIn("_registered_cache_for_current_preferred", source)
@@ -174,7 +174,7 @@ class EspnLogoPriorityTests(unittest.TestCase):
         self.assertIn('add(team.get("fallback_url"), "event-logo:provider-fallback")', source)
 
     def test_event_placeholder_initials_use_first_and_last_words(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         self.assertIn("def _fallback_initials", source)
         self.assertIn("words[0][0] + words[-1][0]", source)
 

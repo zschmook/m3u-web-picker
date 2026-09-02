@@ -8,6 +8,8 @@
 # This project uses a dedicated runtime path by default.
 # M3U_JELLYFIN_CACHE_DIR optionally maps a Jellyfin cache directory for the
 # experimental post-update cache cleanup integration.
+# M3U_DVR_DIR maps a host folder where both in-progress captures and completed
+# recordings live. DVR media is never written into the container layer.
 
 name: m3u-picker
 
@@ -40,6 +42,9 @@ services:
       M3U_BACKUP_CONTAINER_DIR: /backups
       M3U_JELLYFIN_CACHE_HOST_DIR: "${M3U_JELLYFIN_CACHE_DIR:-}"
       M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
+      M3U_DVR_HOST_DIR: "${M3U_DVR_DIR:-./runtime/recordings}"
+      M3U_DVR_CONTAINER_DIR: /recordings
+      M3U_DVR_HEVC_ENCODER: "${M3U_DVR_HEVC_ENCODER:-auto}"
       BACKUP_TIME: "03:15"
       BACKUP_TIMEZONE: "America/New_York"
       BACKUP_RETENTION_DAYS: "30"
@@ -53,6 +58,9 @@ services:
       - type: bind
         source: "${M3U_JELLYFIN_CACHE_DIR:-./runtime/jellyfin-cache-disabled}"
         target: /jellyfin-cache
+      - type: bind
+        source: "${M3U_DVR_DIR:-./runtime/recordings}"
+        target: /recordings
       - type: volume
         source: m3u-picker-data
         target: /app/data

@@ -10,7 +10,7 @@ Install Docker Desktop first. On Windows, also install [Git for Windows](https:/
 curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
 ```
 
-The setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. Set `M3U_PICKER_DIR` first to choose another checkout location.
+The setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. On Windows, a new setup also creates `C:/DVR` and uses it as the persistent DVR mount. Existing custom DVR paths are preserved. Set `M3U_PICKER_DIR` first to choose another checkout location.
 
 To start manually from an existing checkout:
 
@@ -130,7 +130,23 @@ Encoding is disabled by default. Enabling it runs a functional hardware check. S
 
 ## 9. TV Guide and LAN playback
 
-The built-in TV Guide displays the curated lineup and programme windows. Provider URLs and credentials remain server-side; browser/Cast/Roku/HDHomeRun playback uses Picker-owned routes.
+The built-in TV Guide displays the curated lineup and program windows. Provider URLs and credentials remain server-side; browser/Cast/Roku/HDHomeRun playback uses Picker-owned routes.
+
+### In-app DVR
+
+The in-app DVR is disabled by default. Before enabling it, set `M3U_DVR_DIR` in `.env` to a dedicated folder on the Docker host and rebuild/restart the container:
+
+```text
+M3U_DVR_DIR=C:/DVR
+```
+
+Then open **Settings → DVR**, enter that exact local host path, validate it, and enable DVR. The application refuses to schedule recordings until the path matches the active Docker bind mount and `/recordings` is writable inside the container.
+
+Select a program in the TV Guide to record that airing or create an exact-title series rule for the same channel. Capture begins with a temporary transport stream on the host-mounted recording folder. During the nightly scheduled update or a manual Master Update, each completed `.ts` is checked to confirm that it is not active or still changing before H.265/MKV conversion begins.
+
+When **Remove detected commercials** is enabled, Comskip creates a proposed cut list before FFmpeg performs the H.265 conversion. The app rejects implausibly large cut lists. If detection or cutting fails, it creates an uncut MKV instead and reports the fallback on the DVR recording. H.265 conversion prefers NVIDIA NVENC when GPU passthrough is active and retries safely with CPU `libx265` if NVENC fails. NVENC conversions target 3 Mbps with 4.5 Mbps peak headroom so ordinary 1080p provider recordings remain smaller than their raw transport streams. A failed conversion always leaves the original `.ts` capture in place.
+
+By default, successful MKVs are stored under the DVR folder's `converted/` directory. To hand completed shows to Plex, enter a **Plex folder** in **Settings → DVR**. The current Docker setup requires this folder to be inside the mounted DVR folder, such as `C:/DVR/PLEX`. Successful recordings then move into show and season folders with Plex-friendly names; an episode described as `S06 E10` becomes `Show Name/Season 06/Show Name.S06E10.mkv`. Raw `.ts` captures and completed files do not share the same folder. Neither temporary nor completed recording data is stored in the container layer.
 
 For LAN playback/discovery, configure the host LAN IPv4 address in `.env`:
 

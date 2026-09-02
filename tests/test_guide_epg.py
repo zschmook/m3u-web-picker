@@ -126,6 +126,37 @@ class GuideEpgTests(unittest.TestCase):
         self.assertEqual(status["matched_channels"], 1)
         self.assertEqual(status["current_channels"], 0)
 
+    def test_upcoming_schedule_covers_five_days_but_not_beyond_it(self):
+        self.epg_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="station-1"><display-name>Station 1</display-name></channel>
+  <programme start="20260810140000 -0400" stop="20260810150000 -0400" channel="station-1">
+    <title>Current Show</title>
+  </programme>
+  <programme start="20260814190000 -0400" stop="20260814200000 -0400" channel="station-1">
+    <title>Within Five Days</title>
+  </programme>
+  <programme start="20260815150000 -0400" stop="20260815160000 -0400" channel="station-1">
+    <title>Beyond Five Days</title>
+  </programme>
+</tv>
+""",
+            encoding="utf-8",
+        )
+
+        enriched, _status = enrich_guide_channels(
+            [{"number": 10, "name": "NBC 10", "tvg_id": "station-1", "play_url": "/guide/play/manual/abc"}],
+            self.epg_path,
+            timezone_name="America/New_York",
+            now=self.now,
+        )
+
+        self.assertEqual(
+            [programme["title"] for programme in enriched[0]["upcoming"]],
+            ["Within Five Days"],
+        )
+
     def test_missing_served_epg_is_reported_without_failing_channel_list(self):
         channels = [
             {

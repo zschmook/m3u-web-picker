@@ -9,6 +9,8 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -23,6 +25,8 @@ from typing import Iterable, List
 
 import sports
 import app_config
+import dvr
+import commercial_lab_rotation
 from backup import create_database_backup
 from database import connect as connect_database
 from settings import SETTINGS
@@ -2862,6 +2866,24 @@ def _date_from_iso(value: str | None) -> str:
         return ""
 
 
+def _run_dvr_maintenance() -> dict:
+    try:
+        maintenance = dvr.nightly_maintenance(DB_PATH)
+        if maintenance.get("checked") or maintenance.get("error"):
+            print(f"DVR update maintenance: {maintenance}")
+        return maintenance
+    except Exception as exc:
+        print(f"DVR update maintenance failed: {type(exc).__name__}.")
+        return {
+            "checked": 0,
+            "converted": 0,
+            "commercials_removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "error": f"DVR maintenance could not run ({type(exc).__name__}).",
+        }
+
+
 def run_master_update(*, trigger: str = "manual") -> dict:
     """Run the one dependency-ordered application update cycle.
 
@@ -2881,6 +2903,7 @@ def run_master_update(*, trigger: str = "manual") -> dict:
         "trigger": trigger,
         "started_monotonic": started_monotonic,
     })
+    dvr_maintenance_ran = False
 
     try:
         sports_settings = sports.get_settings(DB_PATH)
@@ -2944,6 +2967,8 @@ def run_master_update(*, trigger: str = "manual") -> dict:
                 },
             }
 
+        result["dvr_maintenance"] = _run_dvr_maintenance()
+        dvr_maintenance_ran = True
         finished_at = datetime.now().astimezone(timezone)
         last_master_update = finished_at.isoformat(timespec="seconds")
         last_master_duration_seconds = round(max(0.0, time.monotonic() - started_monotonic), 1)
@@ -2952,6 +2977,8 @@ def run_master_update(*, trigger: str = "manual") -> dict:
         result["master_update"] = master_update_payload()
         return result
     finally:
+        if not dvr_maintenance_ran:
+            _run_dvr_maintenance()
         master_update_runtime.update({
             "running": False,
             "started_at": None,
@@ -3051,6 +3078,91 @@ def scheduler_loop() -> None:
             print(f"Scheduler error: {exc}")
         time.sleep(30)
 
+
+def dvr_scheduler_loop() -> None:
+    last_series_sync = 0.0
+    while True:
+        try:
+            now_monotonic = time.monotonic()
+            if now_monotonic - last_series_sync >= 60:
+                last_series_sync = now_monotonic
+                if dvr.has_enabled_series_rules(DB_PATH):
+                    dvr_timezone = str(
+                        sports.get_settings(DB_PATH).get("timezone")
+                        or "America/New_York"
+                    )
+                    dvr.sync_series_rules(
+                        DB_PATH,
+                        channels=curated_channels_for_guide(),
+                        epg_path=COMBINED_EPG_PATH,
+                        timezone_name=dvr_timezone,
+                    )
+            dvr.tick(DB_PATH)
+            lab_control = commercial_lab_rotation.control(DB_PATH)
+            if lab_control["enabled"]:
+                commercial_lab_rotation.ensure_capacity(
+                    DB_PATH,
+                    curated_channels_for_guide(),
+                    dvr.schedule_recording,
+                    current=lab_control,
+                )
+                dvr.tick(DB_PATH)
+        except Exception as exc:
+            print(f"DVR scheduler failed: {exc}")
+        time.sleep(5)
+
+
+def commercial_lab_processing_loop() -> None:
+    """Immediately drain completed lab captures without using DVR maintenance."""
+    retry_after: dict[int, float] = {}
+    script_path = APP_DIR.parent / "scripts" / "commercial_lab.py"
+    recordings_root = Path(os.environ.get("M3U_DVR_CONTAINER_DIR", "/recordings"))
+    while True:
+        try:
+            now_monotonic = time.monotonic()
+            retry_after = {
+                recording_id: deadline
+                for recording_id, deadline in retry_after.items()
+                if deadline > now_monotonic
+            }
+            lab_control = commercial_lab_rotation.control(DB_PATH)
+            if not lab_control["enabled"]:
+                time.sleep(2)
+                continue
+            recording_id = commercial_lab_rotation.next_completed_recording(
+                DB_PATH,
+                excluded_ids=set(retry_after),
+            )
+            if recording_id is None:
+                time.sleep(2)
+                continue
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "process",
+                    "--db",
+                    str(DB_PATH),
+                    "--recordings-root",
+                    str(recordings_root),
+                    "--recording-id",
+                    str(recording_id),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                print(f"Commercial lab processed DVR recording {recording_id}: {result.stdout.strip()}")
+                retry_after.pop(recording_id, None)
+            else:
+                retry_after[recording_id] = time.monotonic() + 300
+                detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+                print(f"Commercial lab processing failed for DVR recording {recording_id}: {detail}")
+        except Exception as exc:
+            print(f"Commercial lab worker failed: {type(exc).__name__}: {exc}")
+            time.sleep(2)
+
 def start_scheduler_once() -> None:
     global scheduler_started
     if scheduler_started or os.environ.get("M3U_DISABLE_SCHEDULER", "").lower() in {"1", "true", "yes"}:
@@ -3061,6 +3173,12 @@ def start_scheduler_once() -> None:
         return
     scheduler_started = True
     threading.Thread(target=scheduler_loop, daemon=True, name="m3u-scheduler").start()
+    threading.Thread(target=dvr_scheduler_loop, daemon=True, name="m3u-dvr-scheduler").start()
+    threading.Thread(
+        target=commercial_lab_processing_loop,
+        daemon=True,
+        name="m3u-commercial-lab-worker",
+    ).start()
 
 
 restore_config()
@@ -3069,6 +3187,10 @@ restore_config()
 def load_cached_master_playlist_on_startup() -> None:
     global channels
     db_connect().close()
+    dvr.init_db(DB_PATH)
+    recovered_dvr = dvr.recover_interrupted(DB_PATH)
+    if recovered_dvr:
+        print(f"Recovered {recovered_dvr} interrupted DVR recording(s).")
     if sports.recover_interrupted_scan(DB_PATH):
         print("Recovered an interrupted sports scan state from the previous app process.")
     # Do the same cheap lifecycle cleanup used by the scheduler before serving

@@ -34,6 +34,14 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertIn('$composeArgs += @("-f", "docker-compose.gpu.yml")', script)
         self.assertIn("docker compose @composeArgs up -d --build", script)
 
+    def test_windows_docker_setup_defaults_dvr_to_c_drive_folder(self):
+        shell_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")
+        powershell_setup = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn('M3U_DVR_DIR=C:/DVR', shell_setup)
+        self.assertIn('mkdir -p /c/DVR', shell_setup)
+        self.assertIn('$dvrPath = "C:/DVR"', powershell_setup)
+        self.assertIn('New-Item -ItemType Directory -Path "C:\\DVR"', powershell_setup)
+
     def test_cross_platform_installers_describe_gpu_behavior(self):
         docker_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")
         macos_setup = (ROOT / "installer" / "macos" / "install.command").read_text(encoding="utf-8")
@@ -91,14 +99,24 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertEqual(settings.external_port, 9997)
 
     def test_shared_ffmpeg_normalization_preserves_option_order(self):
-        with patch("media.ffmpeg.shutil.which", return_value="/usr/bin/ffmpeg"):
+        with (
+            patch("media.ffmpeg.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("media.ffmpeg.media_pipeline.active_encoder", return_value="h264_nvenc"),
+        ):
             args = ffmpeg.normalized_live_input_args(
                 "http://provider.test/live.ts",
                 video_extra=("-force_key_frames", "expr:gte(t,n_forced*2)"),
             )
         self.assertEqual(args[0], "/usr/bin/ffmpeg")
-        self.assertLess(args.index("-pix_fmt"), args.index("-force_key_frames"))
+        self.assertLess(args.index("-pix_fmt"), args.index("-vf"))
+        self.assertEqual(args[args.index("-vf") + 1], "setpts=PTS-STARTPTS")
+        self.assertLess(args.index("-vf"), args.index("-force_key_frames"))
         self.assertLess(args.index("-force_key_frames"), args.index("-c:a"))
+        self.assertEqual(args[args.index("-preset") + 1], "p1")
+        self.assertEqual(args[args.index("-tune") + 1], "ll")
+        self.assertEqual(args[args.index("-zerolatency") + 1], "1")
+        self.assertEqual(args[args.index("-delay") + 1], "0")
+        self.assertEqual(args[args.index("-bf") + 1], "0")
         self.assertIn("http://provider.test/live.ts", args)
 
     def test_roku_adapter_rejects_public_ip(self):

@@ -10,14 +10,22 @@ ROOT = Path(__file__).resolve().parents[1]
 class ModernUiContractTests(unittest.TestCase):
     def test_app_loads_sidebar_assets_after_existing_ui_layers(self):
         app_text = (ROOT / "templates/index.html").read_text(encoding="utf-8")
-        self.assertIn('/static/css/ui_sidebar.css?v=sidebar-2', app_text)
-        self.assertIn('/static/js/ui_sidebar.js?v=sidebar-2', app_text)
+        self.assertIn('/static/css/ui_sidebar.css?v=sidebar-6', app_text)
+        self.assertIn('/static/js/ui_sidebar.js?v=sidebar-brand-1', app_text)
         self.assertIn('/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1', app_text)
         self.assertIn('/static/js/ui_network_settings.js?v=network-settings-1', app_text)
         self.assertGreater(
-            app_text.index('/static/js/ui_sidebar.js?v=sidebar-2'),
+            app_text.index('/static/js/ui_sidebar.js?v=sidebar-brand-1'),
             app_text.index('/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1'),
         )
+
+    def test_sidebar_brand_uses_globe_without_version_label(self):
+        sidebar = (ROOT / "templates/_modern_sidebar.html").read_text(encoding="utf-8")
+        self.assertIn('class="ui-sidebar-mark"', sidebar)
+        self.assertIn("filename='favicon.svg'", sidebar)
+        self.assertIn('<img src="{{ url_for', sidebar)
+        self.assertNotIn('>M3U</div>', sidebar)
+        self.assertNotIn("uiSidebarVersion", sidebar)
 
     def test_modern_shell_is_server_rendered_instead_of_injected(self):
         app_text = (ROOT / "src" / "app.py").read_text(encoding="utf-8")
@@ -106,6 +114,7 @@ class ModernUiContractTests(unittest.TestCase):
             '"indexed_channels"',
             '"sports_channels"',
             '"active_streams"',
+            '"active_recordings"',
             '"master_update"',
             '"update"',
             '"outputs"',
@@ -115,6 +124,13 @@ class ModernUiContractTests(unittest.TestCase):
         self.assertIn('"Combined EPG"', source)
         self.assertIn('"Unable to clear Jellyfin cache"', source)
         self.assertIn("_recorded_warning_stages(report)", source)
+
+    def test_sidebar_shows_live_dvr_recording_count(self):
+        sidebar = (ROOT / "templates" / "_modern_sidebar.html").read_text(encoding="utf-8")
+        script = (ROOT / "static" / "js" / "ui_sidebar.js").read_text(encoding="utf-8")
+        self.assertIn('id="uiDvrRecordingCount"', sidebar)
+        self.assertIn("counts.active_recordings", script)
+        self.assertIn('dvrBadge.classList.toggle("d-none", activeRecordings === 0)', script)
 
     def test_ui_status_routes_are_registered(self):
         routes = (ROOT / "api/routes.py").read_text(encoding="utf-8")

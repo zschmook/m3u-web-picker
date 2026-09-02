@@ -1,0 +1,326 @@
+.guide-dvr-panel {
+  padding: 1rem;
+  border: 1px solid #475569;
+  border-radius: .65rem;
+  background: #111827;
+}
+
+.guide-dvr-heading,
+.guide-programme-actions {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.guide-dvr-heading {
+  justify-content: space-between;
+}
+
+.guide-dvr-heading-actions {
+  display: flex;
+  gap: .5rem;
+}
+
+.guide-dvr-eyebrow {
+  color: #60a5fa;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.guide-dvr-message {
+  min-height: 1.4rem;
+  margin-top: .5rem;
+}
+
+.guide-dvr-content {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(250px, 1fr);
+  align-items: start;
+  gap: .8rem;
+}
+
+.guide-dvr-queue-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: .35rem 0 .55rem;
+}
+
+.guide-dvr-queue-heading h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.guide-dvr-queue-title {
+  display: flex;
+  align-items: baseline;
+  gap: .4rem;
+}
+
+.guide-dvr-queue-title .btn-link {
+  padding: 0;
+  color: #93c5fd;
+  font-size: .72rem;
+  text-decoration: none;
+}
+
+.guide-dvr-list {
+  display: grid;
+  gap: .45rem;
+}
+
+.guide-dvr-item {
+  padding: .65rem;
+  border: 1px solid #334155;
+  border-radius: .45rem;
+  background: #0f172a;
+}
+
+.guide-dvr-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.guide-dvr-item-title {
+  color: #f8fafc;
+  font-size: .82rem;
+  font-weight: 750;
+}
+
+.guide-dvr-item-time {
+  margin-top: .3rem;
+  color: #cbd5e1;
+  font-size: .74rem;
+}
+
+.guide-dvr-item-meta,
+.guide-dvr-item-error {
+  margin-top: .2rem;
+  color: #94a3b8;
+  font-size: .69rem;
+}
+
+.guide-dvr-item-error {
+  color: #fbbf24;
+}
+
+.guide-dvr-status {
+  flex: 0 0 auto;
+  padding: .16rem .48rem;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: .64rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.guide-dvr-status.is-recording {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, .16);
+  color: #fca5a5;
+}
+
+.guide-dvr-status.is-processing,
+.guide-dvr-status.is-queued {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, .16);
+  color: #93c5fd;
+}
+
+.guide-dvr-status.is-scheduled {
+  border-color: #64748b;
+  color: #e2e8f0;
+}
+
+.guide-dvr-status.is-ready,
+.guide-dvr-status.is-enabled {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, .14);
+  color: #86efac;
+}
+
+.guide-dvr-status.is-failed,
+.guide-dvr-status.is-cancelled {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, .12);
+  color: #fcd34d;
+}
+
+.guide-dvr-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .5rem;
+}
+
+.guide-dvr-series-select {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.guide-dvr-series-select .guide-dvr-item-header,
+.guide-dvr-series-select .guide-dvr-item-time,
+.guide-dvr-series-select .guide-dvr-item-meta {
+  display: flex;
+}
+
+.guide-dvr-series-item.is-selected {
+  border-color: #3b82f6;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .35);
+}
+
+.guide-dvr-series-select:hover .guide-dvr-item-title,
+.guide-dvr-series-select:focus-visible .guide-dvr-item-title {
+  color: #93c5fd;
+}
+
+.guide-dvr-empty {
+  padding: .7rem;
+  border: 1px dashed #334155;
+  border-radius: .45rem;
+  color: #64748b;
+  font-size: .74rem;
+}
+
+.guide-dvr-series-details {
+  margin-top: .35rem;
+  border: 1px solid #334155;
+  border-radius: .5rem;
+  background: rgba(15, 23, 42, .5);
+}
+
+.guide-dvr-series-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .7rem .8rem;
+  color: #e2e8f0;
+  font-size: .78rem;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.guide-dvr-series-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.guide-dvr-series-details > summary::after {
+  content: "▾";
+  margin-left: auto;
+  padding-left: .65rem;
+  color: #94a3b8;
+}
+
+.guide-dvr-series-details[open] > summary::after {
+  content: "▴";
+}
+
+.guide-dvr-series-count {
+  min-width: 1.4rem;
+  margin-left: .5rem;
+  padding: .08rem .38rem;
+  border-radius: 999px;
+  background: #334155;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.guide-dvr-series-details > .guide-dvr-list {
+  padding: 0 .7rem .7rem;
+}
+
+.guide-programme-dialog {
+  width: min(560px, calc(100vw - 2rem));
+  padding: 0;
+  border: 1px solid #64748b;
+  border-radius: .7rem;
+  background: transparent;
+  color: #f8fafc;
+}
+
+.guide-programme-dialog::backdrop {
+  background: rgba(2, 6, 23, .76);
+  backdrop-filter: blur(3px);
+}
+
+.guide-programme-dialog-card {
+  padding: 1.1rem;
+  background: #111827;
+}
+
+.guide-programme-dialog p {
+  max-height: 12rem;
+  margin: .8rem 0;
+  overflow: auto;
+  color: #cbd5e1;
+  font-size: .84rem;
+  line-height: 1.45;
+}
+
+.guide-programme-block.is-dvr-scheduled::after,
+.guide-programme-block.is-dvr-recording::after {
+  content: "REC";
+  position: absolute;
+  top: .22rem;
+  right: .28rem;
+  color: #f87171;
+  font-size: .56rem;
+  font-weight: 900;
+  letter-spacing: .05em;
+}
+
+.guide-programme-block.is-dvr-recording {
+  border-color: #ef4444;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .4);
+}
+
+@media (max-width: 620px) {
+  .guide-dvr-heading,
+  .guide-dvr-heading-actions,
+  .guide-programme-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guide-programme-actions .btn {
+    width: 100%;
+  }
+
+  .guide-dvr-heading-actions .btn {
+    width: 100%;
+  }
+
+  .guide-dvr-queue-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .2rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .guide-dvr-content {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-dvr-series-details {
+    margin-top: 0;
+  }
+}

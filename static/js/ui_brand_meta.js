@@ -1,9 +1,6 @@
 (() => {
   "use strict";
 
-  const badge = document.querySelector(".app-brand-block .badge");
-  if (badge) badge.textContent = "v30";
-
   const meta = document.querySelector(".app-brand-meta");
   if (!meta) return;
 

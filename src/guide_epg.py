@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import threading
 from zoneinfo import ZoneInfo
@@ -14,7 +14,8 @@ _cache_signature: tuple | None = None
 _cache_index: dict[str, list[dict]] = {}
 _cache_programme_count = 0
 _cache_updated_at: str | None = None
-GUIDE_UPCOMING_PROGRAMME_LIMIT = 16
+GUIDE_UPCOMING_DAYS = 5
+GUIDE_UPCOMING_PROGRAMME_LIMIT = 256
 
 
 def _local_tag(element) -> str:
@@ -179,8 +180,10 @@ def _upcoming_programmes(
     current: dict | None,
     *,
     limit: int = GUIDE_UPCOMING_PROGRAMME_LIMIT,
+    horizon_days: int = GUIDE_UPCOMING_DAYS,
 ) -> list[dict]:
     threshold = current.get("_stop") if current else now
+    horizon = now + timedelta(days=max(1, int(horizon_days)))
     upcoming = []
     for record in records:
         if record is current:
@@ -188,6 +191,8 @@ def _upcoming_programmes(
         start = record.get("_start")
         if start is None or start < threshold:
             continue
+        if start >= horizon:
+            break
         upcoming.append(record)
         if len(upcoming) >= limit:
             break
@@ -254,3 +259,30 @@ def enrich_guide_channels(
         }
     )
     return enriched, metadata
+
+
+def programme_schedule(
+    epg_path: Path,
+    *,
+    timezone_name: str,
+    channel_ids: set[str] | None = None,
+) -> dict[str, list[dict]]:
+    """Return serialized programme rows for DVR scheduling.
+
+    This deliberately reuses the guide cache so opening the guide and syncing
+    series rules do not parse the same multi-megabyte XMLTV file twice.
+    """
+    index, metadata = _cached_programme_index(Path(epg_path), timezone_name)
+    if not metadata.get("available"):
+        return {}
+    selected = {str(value).strip() for value in (channel_ids or set()) if str(value).strip()}
+    result: dict[str, list[dict]] = {}
+    for channel_id, records in index.items():
+        if selected and channel_id not in selected:
+            continue
+        result[channel_id] = [
+            serialized
+            for record in records
+            if (serialized := _serialize_programme(record)) is not None
+        ]
+    return result

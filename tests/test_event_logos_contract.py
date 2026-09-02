@@ -10,12 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class EventLogoContractTests(unittest.TestCase):
     def test_event_logo_python_sources_parse(self):
-        for relative in ("event_logos.py", "api/event_images.py", "sports/feeds.py"):
+        for relative in ("src/event_logos.py", "api/event_images.py", "sports/feeds.py"):
             source = (ROOT / relative).read_text(encoding="utf-8")
             ast.parse(source, filename=relative)
 
     def test_matchup_logo_never_refreshes_schedule_api(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         self.assertNotIn("refresh_schedule_api", source)
         self.assertNotIn("schedule_api_requests", source)
         self.assertIn("logo_registry.lookup", source)
@@ -30,7 +30,7 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertIn("home_team_id", source)
 
     def test_event_logo_is_stable_by_logical_event_and_teams(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         self.assertIn("def event_digest", source)
         self.assertIn('str(event_key or "").strip()', source)
         self.assertIn('str(away_team_id or "").strip().casefold()', source)
@@ -38,13 +38,13 @@ class EventLogoContractTests(unittest.TestCase):
         self.assertNotIn("assigned_number", source)
 
     def test_city_only_matchups_use_name_scoped_fallback_identities(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         self.assertIn('away_digest_identity = away_id or f"name:{away_name.casefold()}"', source)
         self.assertIn('home_digest_identity = home_id or f"name:{home_name.casefold()}"', source)
         self.assertIn('logo_registry.team_identity(away_id) if away_id else ""', source)
 
     def test_compositor_trims_padding_and_preserves_aspect_ratio(self):
-        source = (ROOT / "event_logos.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "event_logos.py").read_text(encoding="utf-8")
         self.assertIn('alpha = source.getchannel("A")', source)
         self.assertIn("bbox = alpha.getbbox()", source)
         self.assertIn("min(inner / source.width, inner / source.height)", source)

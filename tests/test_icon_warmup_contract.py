@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class LogoUpdateContractTests(unittest.TestCase):
     def test_logo_python_sources_parse(self):
-        for relative in ("api/images.py", "api/epg.py", "espn_team_logos.py"):
+        for relative in ("api/images.py", "api/epg.py", "src/espn_team_logos.py"):
             source = (ROOT / relative).read_text(encoding="utf-8")
             ast.parse(source, filename=relative)
 
@@ -28,7 +28,7 @@ class LogoUpdateContractTests(unittest.TestCase):
 
     def test_generated_logos_use_automatic_espn_lookup(self):
         source = (ROOT / "sports" / "feeds.py").read_text(encoding="utf-8")
-        resolver = (ROOT / "espn_team_logos.py").read_text(encoding="utf-8")
+        resolver = (ROOT / "src" / "espn_team_logos.py").read_text(encoding="utf-8")
         self.assertIn("espn_team_logos.espn_full_default_url", source)
         self.assertIn('event.get("sport_id") or ""', source)
         self.assertIn("_available_espn_sports", resolver)
