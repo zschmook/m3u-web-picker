@@ -7,9 +7,10 @@ unchanged.
 
 ## Goal
 
-Run setup before the normal application so every host folder and Docker bind
-mount exists when the real container starts. The user should experience one
-continuous browser wizard at the normal application address.
+Run setup before the normal application so the user chooses features first and
+only the host folders and Docker bind mounts required by those features are
+created. The user should experience one continuous browser wizard at the normal
+application address.
 
 The setup application must not receive the Docker socket and must not mount an
 entire host drive. A small host-side launcher owns Docker lifecycle operations,
@@ -30,47 +31,48 @@ flowchart TD
 
     C --> D[Start setup-only web app on the final host port]
     D --> E[Open browser to Setup]
-    E --> F[Choose host storage]
+    E --> F[Choose optional features: provider, Sports API, Jellyfin, DVR]
 
-    F --> F1[Application backup folder]
-    F --> F2[DVR recording folder]
-    F --> F3[Optional Plex destination]
-    F --> F4[Optional Jellyfin cache folder]
-
-    F1 --> G[Setup writes a storage request]
-    F2 --> G
-    F3 --> G
-    F4 --> G
-    G --> H[Host launcher validates and creates allowed folders]
+    F --> G[Always request application backup folder]
+    F -- Jellyfin selected --> G1[Also request Jellyfin cache folder]
+    F -- DVR selected --> G2[Also request DVR folder and optional media server folder]
+    G --> H[Host launcher validates and creates only required folders]
+    G1 --> H
+    G2 --> H
     H --> H1{All required paths valid and writable?}
     H1 -- No --> H2[Return a specific error to the setup page]
-    H2 --> F
+    H2 --> G
     H1 -- Yes --> I[Write .env and generated Compose override]
 
-    I --> J[Configure primary provider]
-    J --> J1{Provider validates?}
-    J1 -- No --> J2[Show validation error and remain in Setup]
-    J2 --> J
-    J1 -- Yes --> K[Configure update schedule and timezone]
+    I --> J{Provider selected?}
+    J -- No --> J0[Use the built-in free public provider]
+    J -- Yes --> J1[Configure and validate the selected provider]
+    J1 -- Invalid --> J2[Show validation error and remain in provider setup]
+    J2 --> J1
+    J0 --> K[Configure update schedule and timezone]
+    J1 -- Valid --> K
     K --> L[Select manual channels]
-    L --> M{Enable Sports Automation?}
-    M -- Yes --> M1[Choose sports rules and optional schedule API]
-    M -- No --> N
-    M1 --> N{Use Jellyfin cache cleanup?}
-    N -- Yes --> N1[Confirm exact cache folder and acknowledge deletion risk]
-    N -- No --> O
-    N1 --> O[Choose direct streaming or tested encoding mode]
+    L --> M[Choose sports automation rules]
+    M --> N{Sports API selected?}
+    N -- Yes --> N1[Configure and validate Sports API]
+    N -- No --> O{Jellyfin selected?}
+    N1 --> O
+    O -- Yes --> O1[Confirm cache folder and acknowledge deletion risk]
+    O -- No --> P{DVR selected?}
+    O1 --> P
+    P -- Yes --> P1[Configure DVR, media server handoff, and recording limits]
+    P -- No --> Q[Choose direct streaming or tested encoding mode]
+    P1 --> Q
 
-    O --> P[Persist application settings in m3u-picker-data]
-    P --> Q[Setup writes completion marker]
-    Q --> R[Browser displays Starting M3U Web Picker]
-    R --> S[Host launcher stops Setup]
-    S --> T[Host launcher starts the normal Compose stack]
-    T --> U{Startup checks pass?}
+    Q --> R[Persist application settings in m3u-picker-data]
+    R --> S[Setup writes completion marker]
+    S --> T[Browser displays Starting M3U Web Picker]
+    T --> U[Host launcher replaces Setup with the normal Compose stack]
+    U --> V{Startup checks pass?}
 
-    U -- No --> V[Show recovery page with failed mount or service]
-    V --> D
-    U -- Yes --> W[Browser detects application health endpoint]
+    V -- No --> V1[Show recovery page with failed mount or service]
+    V1 --> D
+    V -- Yes --> W[Browser detects application health endpoint]
     W --> X[Browser reloads into the normal application]
     X --> Y[Run first Master Update]
     Y --> Z[Open configured TV Guide]
@@ -83,9 +85,9 @@ the application uses today.
 
 | Destination | Setup-owned values |
 | --- | --- |
-| `.env` | Host port, LAN host, backup directory, DVR directory, Jellyfin cache directory, encoder preference |
-| Generated Compose override | GPU reservation and explicit host bind mounts |
-| `m3u-picker-data` | Provider, update schedule, manual channels, sports rules, optional API settings, DVR settings, encoding settings |
+| `.env` | Host port, LAN host, backup directory, encoder preference, and only the selected Jellyfin/DVR paths |
+| Generated Compose override | GPU reservation and explicit bind mounts required by selected features |
+| `m3u-picker-data` | Provider or free-source selection, update schedule, manual channels, sports rules, optional API settings, optional DVR settings, encoding settings |
 | Setup completion marker | Schema version, completion state, and non-secret startup diagnostics |
 
 Provider credentials remain in the persistent application database as they do
@@ -125,8 +127,8 @@ the application or requiring the user to run another command.
 - The free public provider remains available for first-run testing.
 - Paid and free providers use the same downstream guide pipeline.
 - DVR media never lives in the container layer.
-- Plex output may remain inside the DVR mount initially; support for a separate
-  Plex bind mount can be added without changing the handoff design.
+- Media server output may remain inside the DVR mount initially; support for a
+  separate library bind mount can be added without changing the handoff design.
 - Jellyfin cache cleanup remains optional and requires explicit acknowledgement.
 - Direct streaming remains the safe default when hardware encoding is not
   tested or available.

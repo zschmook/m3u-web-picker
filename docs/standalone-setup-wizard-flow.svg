@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="3960" viewBox="0 0 2400 3960" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="4880" viewBox="0 0 2400 4880" role="img" aria-labelledby="title desc">
   <title id="title">Standalone Setup Wizard Flow</title>
-  <desc id="desc">Flow from host installer through storage and provider configuration, container handoff, startup validation, and the configured TV Guide.</desc>
+  <desc id="desc">Feature-first setup flow. Optional provider, Sports API, Jellyfin, and DVR choices determine which directories and settings the wizard requests.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0f172a"/>
@@ -14,172 +14,126 @@
       <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#020617" flood-opacity="0.45"/>
     </filter>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M 0 0 L 12 6 L 0 12 z" fill="#60a5fa"/>
+      <path d="M0 0 L12 6 L0 12 z" fill="#60a5fa"/>
     </marker>
     <marker id="error-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M 0 0 L 12 6 L 0 12 z" fill="#fb7185"/>
+      <path d="M0 0 L12 6 L0 12 z" fill="#fb7185"/>
     </marker>
     <style>
-      .phase { fill:#93c5fd; font:700 30px Arial, sans-serif; letter-spacing:3px; }
-      .title { fill:#f8fafc; font:700 58px Arial, sans-serif; }
-      .subtitle { fill:#94a3b8; font:400 26px Arial, sans-serif; }
-      .node { fill:#1e293b; stroke:#475569; stroke-width:3; rx:20; filter:url(#shadow); }
-      .node-primary { fill:url(#primary); stroke:#60a5fa; stroke-width:3; rx:20; filter:url(#shadow); }
-      .node-decision { fill:#312e81; stroke:#818cf8; stroke-width:3; rx:20; filter:url(#shadow); }
-      .node-recovery { fill:#3f1d2e; stroke:#fb7185; stroke-width:3; rx:20; filter:url(#shadow); }
-      .node-success { fill:#064e3b; stroke:#34d399; stroke-width:3; rx:20; filter:url(#shadow); }
-      .label { fill:#f8fafc; font:700 31px Arial, sans-serif; text-anchor:middle; }
-      .detail { fill:#cbd5e1; font:400 23px Arial, sans-serif; text-anchor:middle; }
-      .step { fill:#bfdbfe; font:700 22px Arial, sans-serif; text-anchor:middle; }
-      .arrow { fill:none; stroke:#60a5fa; stroke-width:7; marker-end:url(#arrow); }
-      .error { fill:none; stroke:#fb7185; stroke-width:7; marker-end:url(#error-arrow); }
-      .edge-label { fill:#cbd5e1; font:700 22px Arial, sans-serif; }
-      .section-line { stroke:#334155; stroke-width:3; }
+      .phase{fill:#93c5fd;font:700 30px Arial,sans-serif;letter-spacing:3px}.title{fill:#f8fafc;font:700 58px Arial,sans-serif}.subtitle{fill:#94a3b8;font:400 26px Arial,sans-serif}.node{fill:#1e293b;stroke:#475569;stroke-width:3;rx:20;filter:url(#shadow)}.node-primary{fill:url(#primary);stroke:#60a5fa;stroke-width:3;rx:20;filter:url(#shadow)}.node-decision{fill:#312e81;stroke:#818cf8;stroke-width:3;rx:20;filter:url(#shadow)}.node-optional{fill:#172554;stroke:#60a5fa;stroke-width:3;rx:20;filter:url(#shadow)}.node-recovery{fill:#3f1d2e;stroke:#fb7185;stroke-width:3;rx:20;filter:url(#shadow)}.node-success{fill:#064e3b;stroke:#34d399;stroke-width:3;rx:20;filter:url(#shadow)}.label{fill:#f8fafc;font:700 31px Arial,sans-serif;text-anchor:middle}.detail{fill:#cbd5e1;font:400 23px Arial,sans-serif;text-anchor:middle}.step{fill:#bfdbfe;font:700 22px Arial,sans-serif;text-anchor:middle}.optional{fill:#93c5fd;font:700 20px Arial,sans-serif;text-anchor:middle;letter-spacing:1px}.arrow{fill:none;stroke:#60a5fa;stroke-width:7;marker-end:url(#arrow)}.branch{fill:none;stroke:#60a5fa;stroke-width:5;marker-end:url(#arrow)}.error{fill:none;stroke:#fb7185;stroke-width:7;marker-end:url(#error-arrow)}.edge-label{fill:#cbd5e1;font:700 22px Arial,sans-serif}.section-line{stroke:#334155;stroke-width:3}
     </style>
   </defs>
 
-  <rect width="2400" height="3960" fill="url(#background)"/>
+  <rect width="2400" height="4880" fill="url(#background)"/>
   <text x="1200" y="90" class="title" text-anchor="middle">Standalone Setup Wizard</text>
-  <text x="1200" y="138" class="subtitle" text-anchor="middle">Host-controlled Docker setup with a seamless browser handoff</text>
+  <text x="1200" y="138" class="subtitle" text-anchor="middle">Choose features first; request only the configuration those features need</text>
 
   <text x="210" y="225" class="phase">1 · HOST PREFLIGHT</text>
   <line x1="210" y1="245" x2="2190" y2="245" class="section-line"/>
-
   <rect x="550" y="280" width="1300" height="110" class="node-primary"/>
-  <text x="1200" y="325" class="step">STEP 1</text>
-  <text x="1200" y="363" class="label">User runs the Windows or Unix installer</text>
-
+  <text x="1200" y="325" class="step">STEP 1</text><text x="1200" y="363" class="label">Run the Windows or Unix installer</text>
   <path d="M1200 390 L1200 435" class="arrow"/>
   <rect x="550" y="440" width="1300" height="120" class="node-decision"/>
-  <text x="1200" y="485" class="step">STEP 2</text>
-  <text x="1200" y="525" class="label">Docker and Compose available?</text>
-
-  <path d="M1850 500 L1955 500" class="error"/>
-  <text x="1880" y="477" class="edge-label">NO</text>
+  <text x="1200" y="485" class="step">STEP 2</text><text x="1200" y="525" class="label">Docker and Compose available?</text>
+  <path d="M1850 500 L1955 500" class="error"/><text x="1880" y="477" class="edge-label">NO</text>
   <rect x="1980" y="440" width="330" height="120" class="node-recovery"/>
-  <text x="2145" y="488" class="label" style="font-size:25px">Show prerequisite</text>
-  <text x="2145" y="524" class="detail" style="font-size:20px">instructions, then retry</text>
-
-  <path d="M1200 560 L1200 605" class="arrow"/>
-  <text x="1220" y="592" class="edge-label">YES</text>
+  <text x="2145" y="488" class="label" style="font-size:25px">Show prerequisite</text><text x="2145" y="524" class="detail" style="font-size:20px">instructions, then retry</text>
+  <path d="M1200 560 L1200 605" class="arrow"/><text x="1220" y="592" class="edge-label">YES</text>
   <rect x="550" y="610" width="1300" height="120" class="node"/>
-  <text x="1200" y="655" class="step">STEP 3</text>
-  <text x="1200" y="695" class="label">Detect OS, LAN address, ports, and GPU capability</text>
+  <text x="1200" y="655" class="step">STEP 3</text><text x="1200" y="695" class="label">Detect OS, LAN address, ports, and GPU capability</text>
+  <path d="M1200 730 L1200 775" class="arrow"/>
+  <rect x="550" y="780" width="1300" height="120" class="node-primary"/>
+  <text x="1200" y="825" class="step">STEP 4</text><text x="1200" y="865" class="label">Start Setup on the final application address</text>
 
-  <text x="210" y="810" class="phase">2 · SETUP AND STORAGE</text>
-  <line x1="210" y1="830" x2="2190" y2="830" class="section-line"/>
+  <text x="210" y="980" class="phase">2 · PICK FEATURES</text>
+  <line x1="210" y1="1000" x2="2190" y2="1000" class="section-line"/>
+  <path d="M1200 900 L1200 1045" class="arrow"/>
+  <rect x="450" y="1050" width="1500" height="125" class="node-primary"/>
+  <text x="1200" y="1095" class="step">STEP 5</text><text x="1200" y="1137" class="label">Choose the optional features you actually want</text>
 
-  <path d="M1200 730 L1200 875" class="arrow"/>
-  <rect x="550" y="880" width="1300" height="120" class="node-primary"/>
-  <text x="1200" y="925" class="step">STEP 4</text>
-  <text x="1200" y="965" class="label">Start setup-only web app on the final host port</text>
+  <path d="M1200 1175 L1200 1205 M380 1205 L2020 1205" class="branch" style="marker-end:none"/>
+  <path d="M380 1205 L380 1230" class="branch"/><path d="M925 1205 L925 1230" class="branch"/><path d="M1470 1205 L1470 1230" class="branch"/><path d="M2015 1205 L2015 1230" class="branch"/>
+  <rect x="130" y="1235" width="500" height="150" class="node-optional"/>
+  <text x="380" y="1275" class="optional">OPTIONAL PROVIDER</text><text x="380" y="1320" class="label" style="font-size:28px">Paid/custom provider</text><text x="380" y="1355" class="detail" style="font-size:20px">Otherwise use the free source</text>
+  <rect x="675" y="1235" width="500" height="150" class="node-optional"/>
+  <text x="925" y="1275" class="optional">OPTIONAL SPORTS API</text><text x="925" y="1320" class="label" style="font-size:28px">Canonical schedules</text><text x="925" y="1355" class="detail" style="font-size:20px">Only request a key if selected</text>
+  <rect x="1220" y="1235" width="500" height="150" class="node-optional"/>
+  <text x="1470" y="1275" class="optional">OPTIONAL JELLYFIN</text><text x="1470" y="1320" class="label" style="font-size:28px">Cache cleanup</text><text x="1470" y="1355" class="detail" style="font-size:20px">Only then request its cache folder</text>
+  <rect x="1765" y="1235" width="500" height="150" class="node-optional"/>
+  <text x="2015" y="1275" class="optional">OPTIONAL DVR</text><text x="2015" y="1320" class="label" style="font-size:28px">Recording and handoff</text><text x="2015" y="1355" class="detail" style="font-size:20px">Only then request media folders</text>
 
-  <path d="M1200 1000 L1200 1045" class="arrow"/>
-  <rect x="550" y="1050" width="1300" height="145" class="node"/>
-  <text x="1200" y="1095" class="step">STEP 5</text>
-  <text x="1200" y="1135" class="label">Choose host storage</text>
-  <text x="1200" y="1170" class="detail">Backups · DVR recordings · optional Plex · optional Jellyfin cache</text>
+  <text x="210" y="1490" class="phase">3 · PICK REQUIRED DIRECTORIES</text>
+  <line x1="210" y1="1510" x2="2190" y2="1510" class="section-line"/>
+  <path d="M1200 1385 L1200 1555" class="arrow"/>
+  <rect x="550" y="1560" width="1300" height="120" class="node-decision"/>
+  <text x="1200" y="1605" class="step">STEP 6</text><text x="1200" y="1645" class="label">Build the directory list from selected features</text>
+  <path d="M1200 1680 L1200 1710 M520 1710 L1880 1710" class="branch" style="marker-end:none"/>
+  <path d="M520 1710 L520 1740" class="branch"/><path d="M1200 1710 L1200 1740" class="branch"/><path d="M1880 1710 L1880 1740" class="branch"/>
+  <rect x="250" y="1745" width="540" height="135" class="node"/>
+  <text x="520" y="1790" class="optional">ALWAYS</text><text x="520" y="1835" class="label" style="font-size:28px">Backup folder</text>
+  <rect x="930" y="1745" width="540" height="135" class="node-optional"/>
+  <text x="1200" y="1790" class="optional">IF JELLYFIN</text><text x="1200" y="1835" class="label" style="font-size:28px">Jellyfin cache folder</text>
+  <rect x="1610" y="1745" width="540" height="135" class="node-optional"/>
+  <text x="1880" y="1790" class="optional">IF DVR</text><text x="1880" y="1827" class="label" style="font-size:27px">DVR + media server folders</text><text x="1880" y="1858" class="detail" style="font-size:19px">Server folder remains optional</text>
+  <path d="M520 1880 L520 1910 L1200 1940 M1200 1880 L1200 1940 M1880 1880 L1880 1910 L1200 1940" class="branch" style="marker-end:none"/>
+  <rect x="550" y="1945" width="1300" height="120" class="node-decision"/>
+  <text x="1200" y="1990" class="step">STEP 7</text><text x="1200" y="2030" class="label">Host validates and creates only the requested folders</text>
+  <path d="M1850 2005 L1955 2005" class="error"/><text x="1880" y="1982" class="edge-label">FAIL</text>
+  <rect x="1980" y="1945" width="330" height="120" class="node-recovery"/>
+  <text x="2145" y="1993" class="label" style="font-size:25px">Explain exact path</text><text x="2145" y="2029" class="detail" style="font-size:20px">error and retry</text>
+  <path d="M1200 2065 L1200 2110" class="arrow"/>
+  <rect x="550" y="2115" width="1300" height="120" class="node"/>
+  <text x="1200" y="2160" class="step">STEP 8</text><text x="1200" y="2200" class="label">Write .env and generated Compose override</text>
 
-  <path d="M1200 1195 L1200 1240" class="arrow"/>
-  <rect x="550" y="1245" width="1300" height="120" class="node-decision"/>
-  <text x="1200" y="1290" class="step">STEP 6</text>
-  <text x="1200" y="1330" class="label">Host launcher validates and creates dedicated folders</text>
+  <text x="210" y="2315" class="phase">4 · CONFIGURE THE APPLICATION</text>
+  <line x1="210" y1="2335" x2="2190" y2="2335" class="section-line"/>
+  <path d="M1200 2235 L1200 2380" class="arrow"/>
+  <rect x="550" y="2385" width="1300" height="135" class="node-decision"/>
+  <text x="1200" y="2430" class="step">STEP 9</text><text x="1200" y="2470" class="label">Provider selected?</text><text x="1200" y="2503" class="detail">Validate it when selected; otherwise activate the built-in free provider</text>
+  <path d="M1200 2520 L1200 2565" class="arrow"/>
+  <rect x="550" y="2570" width="1300" height="120" class="node"/>
+  <text x="1200" y="2615" class="step">STEP 10</text><text x="1200" y="2655" class="label">Update schedule, timezone, and manual channels</text>
+  <path d="M1200 2690 L1200 2735" class="arrow"/>
+  <rect x="550" y="2740" width="1300" height="135" class="node"/>
+  <text x="1200" y="2785" class="step">STEP 11</text><text x="1200" y="2825" class="label">Sports automation rules</text><text x="1200" y="2858" class="detail">Request and validate a Sports API key only when that feature was selected</text>
+  <path d="M1200 2875 L1200 2920" class="arrow"/>
+  <rect x="550" y="2925" width="1300" height="135" class="node"/>
+  <text x="1200" y="2970" class="step">STEP 12 · IF SELECTED</text><text x="1200" y="3010" class="label">Jellyfin cleanup settings</text><text x="1200" y="3043" class="detail">Confirm the cache folder and acknowledge deletion risk</text>
+  <path d="M1200 3060 L1200 3105" class="arrow"/>
+  <rect x="550" y="3110" width="1300" height="135" class="node"/>
+  <text x="1200" y="3155" class="step">STEP 13 · IF SELECTED</text><text x="1200" y="3195" class="label">DVR settings</text><text x="1200" y="3228" class="detail">Recording limits, conversion, commercial removal, and media server handoff</text>
+  <path d="M1200 3245 L1200 3290" class="arrow"/>
+  <rect x="550" y="3295" width="1300" height="120" class="node"/>
+  <text x="1200" y="3340" class="step">STEP 14</text><text x="1200" y="3380" class="label">Choose direct streaming or tested encoding mode</text>
 
-  <path d="M1850 1305 L1955 1305" class="error"/>
-  <text x="1880" y="1282" class="edge-label">FAIL</text>
-  <rect x="1980" y="1245" width="330" height="120" class="node-recovery"/>
-  <text x="2145" y="1293" class="label" style="font-size:25px">Explain exact path</text>
-  <text x="2145" y="1329" class="detail" style="font-size:20px">error and retry</text>
+  <text x="210" y="3495" class="phase">5 · HANDOFF TO THE NORMAL APP</text>
+  <line x1="210" y1="3515" x2="2190" y2="3515" class="section-line"/>
+  <path d="M1200 3415 L1200 3560" class="arrow"/>
+  <rect x="550" y="3565" width="1300" height="120" class="node"/>
+  <text x="1200" y="3610" class="step">STEP 15</text><text x="1200" y="3650" class="label">Persist settings and write the completion marker</text>
+  <path d="M1200 3685 L1200 3730" class="arrow"/>
+  <rect x="550" y="3735" width="1300" height="135" class="node-primary"/>
+  <text x="1200" y="3780" class="step">STEP 16</text><text x="1200" y="3820" class="label">Browser displays “Starting M3U Web Picker…”</text><text x="1200" y="3853" class="detail">The page polls the normal application health endpoint</text>
+  <path d="M1200 3870 L1200 3915" class="arrow"/>
+  <rect x="550" y="3920" width="1300" height="135" class="node"/>
+  <text x="1200" y="3965" class="step">STEP 17</text><text x="1200" y="4005" class="label">Host replaces Setup with the normal Compose stack</text><text x="1200" y="4038" class="detail">Setup stops first; both services never bind the port simultaneously</text>
 
-  <path d="M1200 1365 L1200 1410" class="arrow"/>
-  <rect x="550" y="1415" width="1300" height="120" class="node"/>
-  <text x="1200" y="1460" class="step">STEP 7</text>
-  <text x="1200" y="1500" class="label">Write .env and generated Compose override</text>
-
-  <text x="210" y="1580" class="phase">3 · APPLICATION CONFIGURATION</text>
-  <line x1="210" y1="1600" x2="2190" y2="1600" class="section-line"/>
-
-  <path d="M1200 1535 L1200 1645" class="arrow"/>
-  <rect x="550" y="1650" width="1300" height="120" class="node-decision"/>
-  <text x="1200" y="1695" class="step">STEP 8</text>
-  <text x="1200" y="1735" class="label">Configure and validate primary provider</text>
-
-  <path d="M1850 1710 L1955 1710" class="error"/>
-  <text x="1880" y="1687" class="edge-label">FAIL</text>
-  <rect x="1980" y="1650" width="330" height="120" class="node-recovery"/>
-  <text x="2145" y="1698" class="label" style="font-size:25px">Keep user in</text>
-  <text x="2145" y="1734" class="detail" style="font-size:20px">provider setup</text>
-
-  <path d="M1200 1770 L1200 1815" class="arrow"/>
-  <rect x="550" y="1820" width="1300" height="120" class="node"/>
-  <text x="1200" y="1865" class="step">STEP 9</text>
-  <text x="1200" y="1905" class="label">Choose update schedule, timezone, and manual channels</text>
-
-  <path d="M1200 1940 L1200 1985" class="arrow"/>
-  <rect x="550" y="1990" width="1300" height="120" class="node"/>
-  <text x="1200" y="2035" class="step">STEP 10</text>
-  <text x="1200" y="2075" class="label">Optional sports rules and schedule API</text>
-
-  <path d="M1200 2110 L1200 2155" class="arrow"/>
-  <rect x="550" y="2160" width="1300" height="135" class="node"/>
-  <text x="1200" y="2205" class="step">STEP 11</text>
-  <text x="1200" y="2245" class="label">Optional Jellyfin cache cleanup</text>
-  <text x="1200" y="2278" class="detail">Exact folder confirmation and explicit deletion-risk acknowledgement</text>
-
-  <path d="M1200 2295 L1200 2340" class="arrow"/>
-  <rect x="550" y="2345" width="1300" height="120" class="node"/>
-  <text x="1200" y="2390" class="step">STEP 12</text>
-  <text x="1200" y="2430" class="label">Choose direct streaming or tested encoding mode</text>
-
-  <text x="210" y="2545" class="phase">4 · CONTAINER HANDOFF</text>
-  <line x1="210" y1="2565" x2="2190" y2="2565" class="section-line"/>
-
-  <path d="M1200 2465 L1200 2610" class="arrow"/>
-  <rect x="550" y="2615" width="1300" height="120" class="node"/>
-  <text x="1200" y="2660" class="step">STEP 13</text>
-  <text x="1200" y="2700" class="label">Persist app settings and write completion marker</text>
-
-  <path d="M1200 2735 L1200 2780" class="arrow"/>
-  <rect x="550" y="2785" width="1300" height="135" class="node-primary"/>
-  <text x="1200" y="2830" class="step">STEP 14</text>
-  <text x="1200" y="2870" class="label">Browser displays “Starting M3U Web Picker…”</text>
-  <text x="1200" y="2903" class="detail">The page begins polling the normal application health endpoint</text>
-
-  <path d="M1200 2920 L1200 2965" class="arrow"/>
-  <rect x="550" y="2970" width="1300" height="135" class="node"/>
-  <text x="1200" y="3015" class="step">STEP 15</text>
-  <text x="1200" y="3055" class="label">Host launcher replaces Setup with the normal stack</text>
-  <text x="1200" y="3088" class="detail">Setup stops first; both services never bind the port simultaneously</text>
-
-  <text x="210" y="3185" class="phase">5 · VERIFY AND LAUNCH</text>
-  <line x1="210" y1="3205" x2="2190" y2="3205" class="section-line"/>
-
-  <path d="M1200 3105 L1200 3250" class="arrow"/>
-  <rect x="550" y="3255" width="1300" height="120" class="node-decision"/>
-  <text x="1200" y="3300" class="step">STEP 16</text>
-  <text x="1200" y="3340" class="label">Normal application startup checks pass?</text>
-
-  <path d="M1850 3315 L1955 3315" class="error"/>
-  <text x="1880" y="3292" class="edge-label">NO</text>
-  <rect x="1980" y="3255" width="330" height="120" class="node-recovery"/>
-  <text x="2145" y="3303" class="label" style="font-size:25px">Return to Setup</text>
-  <text x="2145" y="3339" class="detail" style="font-size:20px">with exact failure</text>
-
-  <path d="M1200 3375 L1200 3420" class="arrow"/>
-  <text x="1220" y="3407" class="edge-label">YES</text>
-  <rect x="550" y="3425" width="1300" height="120" class="node"/>
-  <text x="1200" y="3470" class="step">STEP 17</text>
-  <text x="1200" y="3510" class="label">Browser detects health and reloads automatically</text>
-
-  <path d="M1200 3545 L1200 3590" class="arrow"/>
-  <rect x="550" y="3595" width="1300" height="120" class="node"/>
-  <text x="1200" y="3640" class="step">STEP 18</text>
-  <text x="1200" y="3680" class="label">Run the first Master Update</text>
-
-  <path d="M1200 3715 L1200 3760" class="arrow"/>
-  <rect x="550" y="3765" width="1300" height="125" class="node-success"/>
-  <text x="1200" y="3812" class="step" style="fill:#a7f3d0">READY</text>
-  <text x="1200" y="3854" class="label">Open the configured TV Guide</text>
-
-  <text x="1200" y="3930" class="subtitle" text-anchor="middle">The setup app never receives the Docker socket or a broad host-drive mount.</text>
+  <text x="210" y="4150" class="phase">6 · VERIFY AND OPEN</text>
+  <line x1="210" y1="4170" x2="2190" y2="4170" class="section-line"/>
+  <path d="M1200 4055 L1200 4215" class="arrow"/>
+  <rect x="550" y="4220" width="1300" height="120" class="node-decision"/>
+  <text x="1200" y="4265" class="step">STEP 18</text><text x="1200" y="4305" class="label">Normal application startup checks pass?</text>
+  <path d="M1850 4280 L1955 4280" class="error"/><text x="1880" y="4257" class="edge-label">NO</text>
+  <rect x="1980" y="4220" width="330" height="120" class="node-recovery"/>
+  <text x="2145" y="4268" class="label" style="font-size:25px">Return to Setup</text><text x="2145" y="4304" class="detail" style="font-size:20px">with exact failure</text>
+  <path d="M1200 4340 L1200 4385" class="arrow"/>
+  <rect x="550" y="4390" width="1300" height="120" class="node"/>
+  <text x="1200" y="4435" class="step">STEP 19</text><text x="1200" y="4475" class="label">Browser detects health and reloads automatically</text>
+  <path d="M1200 4510 L1200 4555" class="arrow"/>
+  <rect x="550" y="4560" width="1300" height="120" class="node"/>
+  <text x="1200" y="4605" class="step">STEP 20</text><text x="1200" y="4645" class="label">Run the first Master Update</text>
+  <path d="M1200 4680 L1200 4725" class="arrow"/>
+  <rect x="550" y="4730" width="1300" height="110" class="node-success"/>
+  <text x="1200" y="4772" class="step" style="fill:#a7f3d0">READY</text><text x="1200" y="4813" class="label">Open the configured TV Guide</text>
+  <text x="1200" y="4865" class="subtitle" text-anchor="middle">No DVR selected means no DVR folder question. No Jellyfin selected means no cache path.</text>
 </svg>
