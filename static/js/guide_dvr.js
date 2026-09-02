@@ -238,6 +238,8 @@
       return itemIsInGuideWindow(item, bounds);
     });
     const badgeCount = active.length;
+    el("guideDvrProcessBtn").disabled = state.busy || Boolean(maintenance.running) || !settings.enabled;
+    el("guideDvrProcessBtn").textContent = maintenance.running ? "Processing…" : "Process Recordings Now";
     el("guideDvrBadge").textContent = String(badgeCount);
     el("guideDvrBadge").classList.toggle("d-none", badgeCount === 0);
     syncDvrDayNav();
@@ -363,6 +365,28 @@
       setMessage(error.message, "error");
     } finally {
       state.busy = false;
+      const running = Boolean(state.data?.maintenance?.running);
+      el("guideDvrProcessBtn").disabled = running || !state.data?.settings?.enabled;
+      el("guideDvrProcessBtn").textContent = running ? "Processing…" : "Process Recordings Now";
+    }
+  }
+
+  async function processRecordingsNow() {
+    if (state.busy) return;
+    state.busy = true;
+    el("guideDvrProcessBtn").disabled = true;
+    setMessage("Starting DVR processing…");
+    try {
+      const result = await api("/api/dvr/maintenance", {method: "POST"});
+      state.data = result.dvr || state.data;
+      render();
+    } catch (error) {
+      setMessage(error.message, "error");
+    } finally {
+      state.busy = false;
+      const running = Boolean(state.data?.maintenance?.running);
+      el("guideDvrProcessBtn").disabled = running || !state.data?.settings?.enabled;
+      el("guideDvrProcessBtn").textContent = running ? "Processing…" : "Process Recordings Now";
     }
   }
 
@@ -401,6 +425,8 @@
     if (channel) playChannel(channel);
   });
   el("guideDvrPanel")?.addEventListener("click", event => {
+    const process = event.target.closest("#guideDvrProcessBtn");
+    if (process) return void processRecordingsNow();
     const day = event.target.closest("[data-dvr-weekday]");
     if (day) {
       state.selectedDvrWeekday = Math.max(0, Math.min(6, Number(day.dataset.dvrWeekday) || 0));
