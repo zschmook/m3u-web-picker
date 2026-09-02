@@ -17,6 +17,9 @@ folder creation, and host-path validation.
 
 ## Proposed first-run flow
 
+[Download the large PNG](standalone-setup-wizard-flow-large.png) ·
+[Download the scalable SVG](standalone-setup-wizard-flow.svg)
+
 ```mermaid
 flowchart TD
     A[User runs Windows or Unix installer] --> B[Host launcher checks prerequisites]
