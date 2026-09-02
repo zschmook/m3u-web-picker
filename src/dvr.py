@@ -41,6 +41,7 @@ DEFAULTS = {
 }
 _PRESETS = {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"}
 _PROCESSING_POLICIES = {"immediate", "scheduled", "manual"}
+_SERIES_TIME_WINDOW_MINUTES = 90
 _ACTIVE_LOCK = threading.RLock()
 _ACTIVE: dict[int, dict[str, Any]] = {}
 _PLAYING: set[int] = set()
@@ -99,6 +100,16 @@ def _episode_identity(item: Any) -> tuple[str, int] | None:
     season = int(match.group(1))
     episode = int(match.group(2))
     return f"S{season:02d}E{episode:02d}", season
+
+
+def _start_minute_utc(value: Any) -> int:
+    parsed = _parse_datetime(value)
+    return parsed.hour * 60 + parsed.minute
+
+
+def _minute_distance(left: int, right: int) -> int:
+    difference = abs(int(left) - int(right)) % 1440
+    return min(difference, 1440 - difference)
 
 
 def _processed_destination(destination_root: Path, item: Any, source: Path, *, plex_enabled: bool) -> Path:
@@ -553,25 +564,41 @@ def create_series_rule(
     title: str,
     tvg_id: str,
     channel_name: str,
+    start_at: Any = None,
 ) -> dict[str, Any]:
     title_value = str(title or "").strip()
     tvg_value = str(tvg_id or "").strip()
     if not title_value or not tvg_value:
         raise ValueError("A series rule needs a show title and channel identity.")
     now_text = _iso(_now())
+    anchor_start_minute_utc = _start_minute_utc(start_at) if start_at else None
     conn = connect_database(db_path)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute(
             """
-            INSERT INTO dvr_series_rules (title, title_key, tvg_id, channel_name, enabled, created_at)
-            VALUES (?, ?, ?, ?, 1, ?)
+            INSERT INTO dvr_series_rules (
+                title, title_key, tvg_id, channel_name, anchor_start_minute_utc,
+                enabled, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(title_key, tvg_id) DO UPDATE SET
                 title = excluded.title,
                 channel_name = excluded.channel_name,
+                anchor_start_minute_utc = COALESCE(
+                    excluded.anchor_start_minute_utc,
+                    dvr_series_rules.anchor_start_minute_utc
+                ),
                 enabled = 1
             """,
-            (title_value, _title_key(title_value), tvg_value, str(channel_name or "").strip(), now_text),
+            (
+                title_value,
+                _title_key(title_value),
+                tvg_value,
+                str(channel_name or "").strip(),
+                anchor_start_minute_utc,
+                now_text,
+            ),
         )
         conn.commit()
         row = conn.execute(
@@ -601,8 +628,61 @@ def sync_series_rules(
     wanted_ids = {str(rule["tvg_id"]) for rule in rules}
     schedules = programme_schedule(epg_path, timezone_name=timezone_name, channel_ids=wanted_ids)
     conn = connect_database(db_path)
+    conn.row_factory = sqlite3.Row
     try:
         known_keys = {str(row[0]) for row in conn.execute("SELECT dedupe_key FROM dvr_recordings").fetchall()}
+        existing_by_rule: dict[int, list[dict[str, Any]]] = {}
+        for row in conn.execute(
+            """
+            SELECT id, rule_id, title, subtitle, description, start_at, status
+            FROM dvr_recordings
+            WHERE rule_id IS NOT NULL
+            ORDER BY id ASC
+            """
+        ).fetchall():
+            existing_by_rule.setdefault(int(row["rule_id"]), []).append(dict(row))
+
+        rules_by_id = {int(rule["id"]): rule for rule in rules}
+        seen_episodes: dict[int, set[str]] = {}
+        now_text = _iso(_now())
+        for rule_id, items in existing_by_rule.items():
+            rule = rules_by_id.get(rule_id)
+            if not rule:
+                continue
+            anchor = rule.get("anchor_start_minute_utc")
+            known = seen_episodes.setdefault(rule_id, set())
+            for item in items:
+                status = str(item.get("status") or "")
+                if status in {"cancelled", "failed", "missed", "discarded"}:
+                    continue
+                episode = _episode_identity(item)
+                duplicate_episode = episode is not None and episode[0] in known
+                off_slot_repeat = (
+                    episode is None
+                    and anchor is not None
+                    and _minute_distance(_start_minute_utc(item.get("start_at")), int(anchor))
+                    > _SERIES_TIME_WINDOW_MINUTES
+                )
+                if status == "scheduled" and (duplicate_episode or off_slot_repeat):
+                    item["status"] = "cancelled"
+                    conn.execute(
+                        """
+                        UPDATE dvr_recordings
+                        SET status = 'cancelled', error = ?, updated_at = ?
+                        WHERE id = ? AND status = 'scheduled'
+                        """,
+                        (
+                            "Skipped a duplicate episode."
+                            if duplicate_episode
+                            else "Skipped a same-title rebroadcast outside the series time slot.",
+                            now_text,
+                            int(item["id"]),
+                        ),
+                    )
+                    continue
+                if episode is not None:
+                    known.add(episode[0])
+        conn.commit()
     finally:
         conn.close()
     created = 0
@@ -610,17 +690,34 @@ def sync_series_rules(
         channel = by_tvg.get(str(rule["tvg_id"]))
         if not channel:
             continue
+        rule_id = int(rule["id"])
+        known_episodes = {
+            episode[0]
+            for item in existing_by_rule.get(rule_id, [])
+            if str(item.get("status") or "") not in {"cancelled", "failed", "missed", "discarded"}
+            if (episode := _episode_identity(item)) is not None
+        }
+        anchor = rule.get("anchor_start_minute_utc")
         for programme in schedules.get(str(rule["tvg_id"]), []):
             if _title_key(programme.get("title")) != str(rule["title_key"]):
                 continue
             try:
                 programme_start = _parse_datetime(programme.get("start"))
+                episode = _episode_identity(programme)
+                if episode is not None:
+                    if episode[0] in known_episodes:
+                        continue
+                elif anchor is not None and _minute_distance(
+                    _start_minute_utc(programme.get("start")),
+                    int(anchor),
+                ) > _SERIES_TIME_WINDOW_MINUTES:
+                    continue
                 key = _dedupe_key(str(rule["tvg_id"]), str(programme.get("title") or rule["title"]), programme_start)
                 if key in known_keys:
                     continue
                 schedule_recording(
                     db_path,
-                    rule_id=int(rule["id"]),
+                    rule_id=rule_id,
                     play_url=str(channel.get("play_url") or ""),
                     tvg_id=str(rule["tvg_id"]),
                     channel_name=str(channel.get("name") or rule.get("channel_name") or ""),
@@ -631,6 +728,8 @@ def sync_series_rules(
                     stop_at=programme.get("stop"),
                 )
                 known_keys.add(key)
+                if episode is not None:
+                    known_episodes.add(episode[0])
                 created += 1
             except ValueError:
                 continue

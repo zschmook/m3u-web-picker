@@ -94,11 +94,16 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
             title_key TEXT NOT NULL,
             tvg_id TEXT NOT NULL,
             channel_name TEXT NOT NULL DEFAULT '',
+            anchor_start_minute_utc INTEGER,
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             UNIQUE(title_key, tvg_id)
         )
         """
+    )
+    _add_column_if_missing(
+        conn,
+        "ALTER TABLE dvr_series_rules ADD COLUMN anchor_start_minute_utc INTEGER",
     )
     conn.execute(
         """
@@ -137,6 +142,24 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "ALTER TABLE dvr_recordings ADD COLUMN commercial_error TEXT NOT NULL DEFAULT ''")
     _add_column_if_missing(conn, "ALTER TABLE dvr_recordings ADD COLUMN commercial_count INTEGER NOT NULL DEFAULT 0")
     _add_column_if_missing(conn, "ALTER TABLE dvr_recordings ADD COLUMN commercial_seconds REAL NOT NULL DEFAULT 0")
+    conn.execute(
+        """
+        UPDATE dvr_series_rules
+        SET anchor_start_minute_utc = (
+            SELECT
+                CAST(substr(dvr_recordings.start_at, 12, 2) AS INTEGER) * 60
+                + CAST(substr(dvr_recordings.start_at, 15, 2) AS INTEGER)
+            FROM dvr_recordings
+            WHERE dvr_recordings.rule_id = dvr_series_rules.id
+            ORDER BY dvr_recordings.id ASC
+            LIMIT 1
+        )
+        WHERE anchor_start_minute_utc IS NULL
+          AND EXISTS (
+            SELECT 1 FROM dvr_recordings WHERE dvr_recordings.rule_id = dvr_series_rules.id
+          )
+        """
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_dvr_recordings_status_start ON dvr_recordings(status, start_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_dvr_recordings_rule ON dvr_recordings(rule_id)")
     conn.execute(

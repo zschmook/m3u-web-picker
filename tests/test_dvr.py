@@ -354,6 +354,113 @@ class DvrTests(unittest.TestCase):
             0,
         )
 
+    def test_series_rule_uses_time_slot_for_shows_without_episode_numbers(self):
+        self.enable_dvr()
+        epg_path = self.root / "epg.xml"
+        epg_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="station-1"><display-name>Station 1</display-name></channel>
+  <programme start="20350830200000 -0400" stop="20350830210000 -0400" channel="station-1"><title>Nightly News</title></programme>
+  <programme start="20350830223700 -0400" stop="20350830230900 -0400" channel="station-1"><title>Nightly News</title></programme>
+</tv>
+""",
+            encoding="utf-8",
+        )
+        dvr.create_series_rule(
+            self.db_path,
+            title="Nightly News",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            start_at="2035-08-30T20:00:00-04:00",
+        )
+
+        created = dvr.sync_series_rules(
+            self.db_path,
+            channels=[{"name": "Station 1", "tvg_id": "station-1", "play_url": "/guide/play/manual/channel-key"}],
+            epg_path=epg_path,
+            timezone_name="America/New_York",
+        )
+
+        self.assertEqual(created, 1)
+        self.assertEqual(dvr.list_recordings(self.db_path)[0]["start_at"], "2035-08-31T00:00:00+00:00")
+
+    def test_episode_number_prevents_repeats_without_enforcing_time_slot(self):
+        self.enable_dvr()
+        epg_path = self.root / "epg.xml"
+        epg_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="station-1"><display-name>Station 1</display-name></channel>
+  <programme start="20350830200000 -0400" stop="20350830210000 -0400" channel="station-1"><title>Dateline</title><desc>S01 E01 First airing</desc></programme>
+  <programme start="20350831010000 -0400" stop="20350831020000 -0400" channel="station-1"><title>Dateline</title><desc>S01 E01 Repeat</desc></programme>
+  <programme start="20350906223700 -0400" stop="20350906233700 -0400" channel="station-1"><title>Dateline</title><desc>S01 E02 Moved airing</desc></programme>
+</tv>
+""",
+            encoding="utf-8",
+        )
+        dvr.create_series_rule(
+            self.db_path,
+            title="Dateline",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            start_at="2035-08-30T20:00:00-04:00",
+        )
+
+        created = dvr.sync_series_rules(
+            self.db_path,
+            channels=[{"name": "Station 1", "tvg_id": "station-1", "play_url": "/guide/play/manual/channel-key"}],
+            epg_path=epg_path,
+            timezone_name="America/New_York",
+        )
+
+        recordings = dvr.list_recordings(self.db_path)
+        self.assertEqual(created, 2)
+        self.assertEqual({dvr._episode_identity(item)[0] for item in recordings}, {"S01E01", "S01E02"})
+
+    def test_existing_future_off_slot_rebroadcast_is_cancelled_during_sync(self):
+        self.enable_dvr()
+        epg_path = self.root / "epg.xml"
+        epg_path.write_text("<tv></tv>", encoding="utf-8")
+        rule = dvr.create_series_rule(
+            self.db_path,
+            title="Nightly News",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            start_at="2035-08-30T20:00:00-04:00",
+        )
+        dvr.schedule_recording(
+            self.db_path,
+            rule_id=rule["id"],
+            play_url="/guide/play/manual/channel-key",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            title="Nightly News",
+            start_at="2035-08-30T20:00:00-04:00",
+            stop_at="2035-08-30T21:00:00-04:00",
+        )
+        repeat = dvr.schedule_recording(
+            self.db_path,
+            rule_id=rule["id"],
+            play_url="/guide/play/manual/channel-key",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            title="Nightly News",
+            start_at="2035-08-30T22:37:00-04:00",
+            stop_at="2035-08-30T23:09:00-04:00",
+        )
+
+        dvr.sync_series_rules(
+            self.db_path,
+            channels=[{"name": "Station 1", "tvg_id": "station-1", "play_url": "/guide/play/manual/channel-key"}],
+            epg_path=epg_path,
+            timezone_name="America/New_York",
+        )
+
+        stored = {item["id"]: item for item in dvr.list_recordings(self.db_path)}
+        self.assertEqual(stored[repeat["id"]]["status"], "cancelled")
+        self.assertIn("rebroadcast", stored[repeat["id"]]["error"])
+
     def test_nightly_maintenance_checks_and_converts_idle_ts_file(self):
         self.enable_dvr()
         dvr.save_settings({"remove_commercials": False})
