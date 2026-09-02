@@ -2867,6 +2867,16 @@ def _date_from_iso(value: str | None) -> str:
 
 
 def _run_dvr_maintenance() -> dict:
+    if dvr.settings().get("processing_policy") != "scheduled":
+        return {
+            "checked": 0,
+            "converted": 0,
+            "moved": 0,
+            "commercials_removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "skipped_policy": True,
+        }
     try:
         maintenance = dvr.nightly_maintenance(DB_PATH)
         if maintenance.get("checked") or maintenance.get("error"):

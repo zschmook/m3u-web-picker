@@ -58,7 +58,10 @@ class DvrTests(unittest.TestCase):
 
     def test_transcode_prefers_nvenc_and_keeps_cpu_fallback(self):
         current = dvr.settings()
-        with patch.object(dvr, "_preferred_hevc_encoder", return_value="hevc_nvenc"):
+        with (
+            patch.object(dvr, "ffmpeg_executable", return_value="ffmpeg"),
+            patch.object(dvr, "_preferred_hevc_encoder", return_value="hevc_nvenc"),
+        ):
             gpu = dvr._transcode_command(Path("input.ts"), Path("output.mkv"), current)
             cpu = dvr._transcode_command(
                 Path("input.ts"), Path("output.mkv"), current, force_cpu=True
@@ -73,8 +76,92 @@ class DvrTests(unittest.TestCase):
 
     def test_dvr_is_disabled_by_default_and_requires_enablement(self):
         self.assertFalse(dvr.settings()["enabled"])
+        self.assertEqual(dvr.settings()["processing_policy"], "scheduled")
         with self.assertRaisesRegex(ValueError, "Enable DVR"):
             dvr.require_ready()
+
+    def test_processing_policy_is_saved_and_invalid_values_are_rejected(self):
+        saved = dvr.save_settings({"processing_policy": "immediate"})
+
+        self.assertEqual(saved["processing_policy"], "immediate")
+        self.assertEqual(dvr.settings()["processing_policy"], "immediate")
+        with self.assertRaisesRegex(ValueError, "processing schedule"):
+            dvr.save_settings({"processing_policy": "whenever"})
+
+    def test_immediate_processing_only_starts_for_immediate_policy(self):
+        with patch.object(dvr, "_start_maintenance", return_value=True) as start:
+            self.assertFalse(dvr.start_immediate_maintenance(self.db_path))
+            start.assert_not_called()
+
+            dvr.save_settings({"processing_policy": "immediate"})
+            self.assertTrue(dvr.start_immediate_maintenance(self.db_path))
+            start.assert_called_once_with(
+                self.db_path,
+                rerun_if_running=True,
+                thread_name="dvr-immediate-maintenance",
+            )
+
+    def test_completed_capture_queues_immediate_processing(self):
+        self.enable_dvr()
+        dvr.save_settings({"processing_policy": "immediate"})
+        item = dvr.schedule_recording(
+            self.db_path,
+            play_url="/guide/play/manual/channel-key",
+            tvg_id="station-1",
+            channel_name="Station 1",
+            title="Nightly News",
+            start_at="2035-08-30T20:00:00-04:00",
+            stop_at="2035-08-30T21:00:00-04:00",
+        )
+        capture = self.recordings_path / ".Nightly News.capture.ts"
+        final = self.recordings_path / "Nightly News.mkv"
+        log = self.recordings_path / ".Nightly News.ffmpeg.log"
+        self.recordings_path.mkdir(parents=True, exist_ok=True)
+        capture.write_bytes(b"x" * 2048)
+        log_handle = log.open("ab")
+        dvr._update_recording(self.db_path, item["id"], status="recording")
+
+        with (
+            patch.object(dvr, "_valid_media", return_value=True),
+            patch.object(dvr, "start_immediate_maintenance", return_value=True) as start,
+        ):
+            dvr._finish_capture(
+                self.db_path,
+                item["id"],
+                SimpleNamespace(wait=lambda: 0),
+                capture,
+                final,
+                log,
+                log_handle,
+            )
+
+        start.assert_called_once_with(self.db_path)
+        refreshed = dvr.list_recordings(self.db_path)[0]
+        self.assertEqual(refreshed["status"], "completed")
+        self.assertEqual(refreshed["conversion_status"], "pending")
+        self.assertTrue((self.recordings_path / "Nightly News.ts").is_file())
+
+    def test_immediate_worker_rechecks_queue_when_another_capture_finishes(self):
+        calls = []
+
+        def maintenance(_db_path):
+            calls.append(True)
+            if len(calls) == 1:
+                with dvr._MAINTENANCE_LOCK:
+                    dvr._MAINTENANCE["rerun"] = True
+            return {"checked": 1, "converted": 1, "failed": 0}
+
+        with dvr._MAINTENANCE_LOCK:
+            dvr._MAINTENANCE.update({"running": True, "rerun": False})
+        try:
+            with patch.object(dvr, "nightly_maintenance", side_effect=maintenance):
+                dvr._maintenance_worker(self.db_path)
+            self.assertEqual(len(calls), 2)
+            self.assertFalse(dvr.maintenance_state()["running"])
+            self.assertEqual(dvr.maintenance_state()["result"]["converted"], 2)
+        finally:
+            with dvr._MAINTENANCE_LOCK:
+                dvr._MAINTENANCE.update({"running": False, "rerun": False})
 
     def test_enabling_requires_the_exact_mounted_host_path(self):
         with self.assertRaisesRegex(ValueError, "does not match M3U_DVR_DIR"):
@@ -488,6 +575,10 @@ class DvrContractTests(unittest.TestCase):
         self.assertIn('id="uiDvrPath"', sidebar)
         self.assertIn('id="uiDvrPlexPath"', sidebar)
         self.assertIn('id="uiDvrRemoveCommercials"', sidebar)
+        self.assertIn('id="uiDvrProcessingPolicy"', sidebar)
+        self.assertIn('value="immediate"', sidebar)
+        self.assertIn('value="scheduled"', sidebar)
+        self.assertIn('value="manual"', sidebar)
         self.assertIn('id="guideRecordOnce"', guide)
         self.assertIn('id="guideRecordSeries"', guide)
         self.assertIn('id="guideDvrQueue"', guide)

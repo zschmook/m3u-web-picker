@@ -34,11 +34,13 @@ DEFAULTS = {
     "max_concurrent_recordings": 2,
     "transcode_hevc": True,
     "remove_commercials": True,
+    "processing_policy": "scheduled",
     "hevc_crf": 27,
     "hevc_bitrate_kbps": 3000,
     "hevc_preset": "fast",
 }
 _PRESETS = {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"}
+_PROCESSING_POLICIES = {"immediate", "scheduled", "manual"}
 _ACTIVE_LOCK = threading.RLock()
 _ACTIVE: dict[int, dict[str, Any]] = {}
 _PLAYING: set[int] = set()
@@ -51,6 +53,7 @@ _ENCODER = "libx265"
 _MAINTENANCE_LOCK = threading.Lock()
 _MAINTENANCE: dict[str, Any] = {
     "running": False,
+    "rerun": False,
     "started_at": "",
     "finished_at": "",
     "result": {},
@@ -166,6 +169,8 @@ def settings() -> dict[str, Any]:
     )
     preset = str(result.get("hevc_preset", "fast") or "fast").strip().lower()
     result["hevc_preset"] = preset if preset in _PRESETS else "fast"
+    policy = str(result.get("processing_policy", "scheduled") or "scheduled").strip().lower()
+    result["processing_policy"] = policy if policy in _PROCESSING_POLICIES else "scheduled"
     return result
 
 
@@ -191,6 +196,10 @@ def save_settings(values: dict[str, Any]) -> dict[str, Any]:
     if preset not in _PRESETS:
         raise ValueError("Choose a supported H.265 preset.")
     normalized["hevc_preset"] = preset
+    policy = str(normalized["processing_policy"] or "scheduled").strip().lower()
+    if policy not in _PROCESSING_POLICIES:
+        raise ValueError("Choose a supported DVR processing schedule.")
+    normalized["processing_policy"] = policy
     if normalized["enabled"]:
         validation = validate_host_path(normalized["host_path"])
         if not validation.get("ok"):
@@ -412,40 +421,76 @@ def maintenance_state() -> dict[str, Any]:
         }
 
 
-def _manual_maintenance_worker(db_path: Path | str) -> None:
-    try:
-        result = nightly_maintenance(db_path)
-        error = str(result.get("error") or "")
-    except Exception as exc:
-        result = {}
-        error = f"DVR processing failed ({type(exc).__name__})."
-    with _MAINTENANCE_LOCK:
-        _MAINTENANCE.update({
-            "running": False,
-            "finished_at": _iso(_now()),
-            "result": result,
-            "error": error,
-        })
+def _maintenance_worker(db_path: Path | str) -> None:
+    result: dict[str, Any] = {}
+    combined: dict[str, Any] = {}
+    error = ""
+    while True:
+        try:
+            result = nightly_maintenance(db_path)
+            error = str(result.get("error") or "")
+            for key, value in result.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    combined[key] = combined.get(key, 0) + value
+                else:
+                    combined[key] = value
+        except Exception as exc:
+            result = {}
+            error = f"DVR processing failed ({type(exc).__name__})."
+        with _MAINTENANCE_LOCK:
+            if _MAINTENANCE["rerun"] and not error:
+                _MAINTENANCE["rerun"] = False
+                continue
+            _MAINTENANCE.update({
+                "running": False,
+                "rerun": False,
+                "finished_at": _iso(_now()),
+                "result": combined or result,
+                "error": error,
+            })
+            return
 
 
-def start_manual_maintenance(db_path: Path | str) -> bool:
+def _start_maintenance(db_path: Path | str, *, rerun_if_running: bool, thread_name: str) -> bool:
     with _MAINTENANCE_LOCK:
         if _MAINTENANCE["running"]:
+            if rerun_if_running:
+                _MAINTENANCE["rerun"] = True
             return False
         _MAINTENANCE.update({
             "running": True,
+            "rerun": False,
             "started_at": _iso(_now()),
             "finished_at": "",
             "result": {},
             "error": "",
         })
     threading.Thread(
-        target=_manual_maintenance_worker,
+        target=_maintenance_worker,
         args=(db_path,),
         daemon=True,
-        name="dvr-manual-maintenance",
+        name=thread_name,
     ).start()
     return True
+
+
+def start_manual_maintenance(db_path: Path | str) -> bool:
+    return _start_maintenance(
+        db_path,
+        rerun_if_running=False,
+        thread_name="dvr-manual-maintenance",
+    )
+
+
+def start_immediate_maintenance(db_path: Path | str) -> bool:
+    current = settings()
+    if not current["transcode_hevc"] or current["processing_policy"] != "immediate":
+        return False
+    return _start_maintenance(
+        db_path,
+        rerun_if_running=True,
+        thread_name="dvr-immediate-maintenance",
+    )
 
 
 def schedule_recording(
@@ -641,6 +686,18 @@ def _recording_status(db_path: Path | str, recording_id: int) -> str:
     try:
         row = conn.execute("SELECT status FROM dvr_recordings WHERE id = ?", (int(recording_id),)).fetchone()
         return str(row[0]) if row else ""
+    finally:
+        conn.close()
+
+
+def _is_commercial_lab_recording(db_path: Path | str, recording_id: int) -> bool:
+    conn = connect_database(db_path)
+    try:
+        row = conn.execute(
+            "SELECT title FROM dvr_recordings WHERE id = ?",
+            (int(recording_id),),
+        ).fetchone()
+        return bool(row and str(row[0] or "").startswith(COMMERCIAL_LAB_TITLE_PREFIX))
     finally:
         conn.close()
 
@@ -960,6 +1017,8 @@ def _finish_capture(
         log_path.unlink(missing_ok=True)
     except OSError:
         pass
+    if conversion_status and not _is_commercial_lab_recording(db_path, recording_id):
+        start_immediate_maintenance(db_path)
 
 
 def _idle_recording_file(path: Path) -> bool:

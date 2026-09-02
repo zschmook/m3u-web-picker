@@ -249,7 +249,16 @@
             </label>
             <label class="ui-settings-toggle" for="uiDvrHevc">
               <input id="uiDvrHevc" type="checkbox" role="switch" autocomplete="off">
-              <span><strong>Convert completed recordings to H.265/MKV</strong><small>Nightly and manual updates check that each file is idle before conversion. The original capture is kept if conversion fails.</small></span>
+              <span><strong>Convert completed recordings to H.265/MKV</strong><small>Each file is checked to confirm recording has finished before conversion. The original capture is kept if conversion fails.</small></span>
+            </label>
+            <label class="ui-settings-field" for="uiDvrProcessingPolicy">
+              <span>Process completed recordings</span>
+              <select id="uiDvrProcessingPolicy" class="form-select">
+                <option value="immediate">Immediately</option>
+                <option value="scheduled">During scheduled or manual app updates</option>
+                <option value="manual">Manual only</option>
+              </select>
+              <small>Immediate processing uses one conversion at a time and queues recordings in completion order.</small>
             </label>
             <label class="ui-settings-toggle" for="uiDvrRemoveCommercials">
               <input id="uiDvrRemoveCommercials" type="checkbox" role="switch" autocomplete="off">

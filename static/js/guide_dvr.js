@@ -177,7 +177,7 @@
       ${item.channel_name ? `<div class="guide-dvr-item-meta">${escape(item.channel_name)}</div>` : ""}
       ${item.subtitle ? `<div class="guide-dvr-item-meta">${escape(item.subtitle)}</div>` : ""}
       ${item.error ? `<div class="guide-dvr-item-error">${escape(item.error)}</div>` : ""}
-      ${item.conversion_status === "pending" ? '<div class="guide-dvr-item-meta">H.265 conversion queued for the next nightly or manual update.</div>' : ""}
+      ${item.conversion_status === "pending" ? `<div class="guide-dvr-item-meta">${escape(pendingConversionMessage())}</div>` : ""}
       ${item.commercial_status === "processing" ? '<div class="guide-dvr-item-meta">Detecting and removing commercials…</div>' : ""}
       ${item.commercial_status === "removed" ? `<div class="guide-dvr-item-meta">Removed ${Number(item.commercial_count || 0)} commercial break${Number(item.commercial_count || 0) === 1 ? "" : "s"} (${durationText(item.commercial_seconds)}).</div>` : ""}
       ${item.commercial_status === "none" ? '<div class="guide-dvr-item-meta">No commercial breaks were detected.</div>' : ""}
@@ -189,6 +189,13 @@
         ${canDelete ? `<button class="btn btn-outline-danger btn-sm" type="button" data-dvr-delete="${item.id}">Delete</button>` : ""}
       </div>
     </article>`;
+  }
+
+  function pendingConversionMessage() {
+    const policy = state.data?.settings?.processing_policy || "scheduled";
+    if (policy === "immediate") return "H.265 conversion queued to begin as soon as the current conversion finishes.";
+    if (policy === "manual") return "H.265 conversion is waiting for a manual processing request.";
+    return "H.265 conversion queued for the next scheduled or manual app update.";
   }
 
   function seriesMarkup(rule, items) {
@@ -271,7 +278,7 @@
       setMessage("The configured DVR host folder is not mounted and writable. Check Settings → DVR.", "error");
     } else if (!state.busy) {
       setMessage(settings.transcode_hevc
-        ? `Completed captures are queued for H.265/MKV conversion${settings.remove_commercials ? " with commercial removal" : ""} during the next nightly or manual update.`
+        ? `${pendingConversionMessage()}${settings.remove_commercials ? " Commercial removal runs before conversion." : ""}`
         : "Recordings are kept as transport streams.");
     }
     if (typeof renderGuide === "function") renderGuide();

@@ -37,6 +37,8 @@
     el("uiDvrPath").value = current.host_path || storage.configured_host_path || "";
     el("uiDvrPlexPath").value = current.plex_path || "";
     el("uiDvrHevc").checked = Boolean(current.transcode_hevc);
+    el("uiDvrProcessingPolicy").value = current.processing_policy || "scheduled";
+    el("uiDvrProcessingPolicy").disabled = !current.transcode_hevc;
     el("uiDvrRemoveCommercials").checked = Boolean(current.remove_commercials);
     el("uiDvrRemoveCommercials").disabled = !current.transcode_hevc;
     el("uiDvrPaddingBefore").value = Math.round(Number(current.padding_before_seconds || 0) / 60);
@@ -93,6 +95,7 @@
       host_path: el("uiDvrPath").value.trim(),
       plex_path: el("uiDvrPlexPath").value.trim(),
       transcode_hevc: el("uiDvrHevc").checked,
+      processing_policy: el("uiDvrProcessingPolicy").value,
       remove_commercials: el("uiDvrRemoveCommercials").checked,
       padding_before_seconds: Math.max(0, Number(el("uiDvrPaddingBefore").value || 0)) * 60,
       padding_after_seconds: Math.max(0, Number(el("uiDvrPaddingAfter").value || 0)) * 60,
@@ -119,6 +122,7 @@
   el("uiDvrSave")?.addEventListener("click", save);
   el("uiDvrHevc")?.addEventListener("change", () => {
     el("uiDvrRemoveCommercials").disabled = !el("uiDvrHevc").checked;
+    el("uiDvrProcessingPolicy").disabled = !el("uiDvrHevc").checked;
   });
   document.querySelector('[data-settings-panel="dvr"]')?.addEventListener("click", load);
   window.addEventListener("pageshow", load);
