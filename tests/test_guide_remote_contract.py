@@ -42,6 +42,8 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         self.assertIn('id="guidePopoutBtn"', template)
         self.assertIn('leavepictureinpicture', pip)
         self.assertIn('scrollIntoView', pip)
+        self.assertIn('const playback = player.play()', pip)
+        self.assertIn('playback.catch', pip)
         self.assertIn("player.requestPictureInPicture()", pip)
         self.assertIn("document.exitPictureInPicture()", pip)
         self.assertIn('"enterpictureinpicture"', pip)

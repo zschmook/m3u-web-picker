@@ -1,0 +1,49 @@
+# Isolated end-to-end setup test. It has its own application/storage volumes,
+# exposes only port 9998, and never receives the Docker socket or live data.
+name: m3u-picker-setup
+
+services:
+  setup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: m3u-picker-setup
+    command: ["waitress-serve", "--threads=8", "--channel-request-lookahead=1", "--outbuf-high-watermark=1048576", "--host=0.0.0.0", "--port=9998", "src.setup_runtime:application"]
+    ports:
+      - "9998:9998"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      M3U_DATA_DIR: /app/setup-data
+      M3U_SETUP_OUTPUT_DIR: /app/setup-output
+      M3U_SETUP_TEST_MODE: "true"
+      M3U_DISABLE_SCHEDULER: "true"
+      M3U_ONBOARDING_ENABLED: "false"
+      M3U_PORT: "9998"
+      M3U_EXTERNAL_PORT: "9998"
+      M3U_DVR_CONTAINER_DIR: /recordings
+      M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
+      M3U_BACKUP_CONTAINER_DIR: /backups
+    volumes:
+      - type: volume
+        source: m3u-picker-setup-data
+        target: /app/setup-data
+      - type: volume
+        source: m3u-picker-setup-output
+        target: /app/setup-output
+      - type: volume
+        source: m3u-picker-setup-recordings
+        target: /recordings
+      - type: volume
+        source: m3u-picker-setup-jellyfin-cache
+        target: /jellyfin-cache
+      - type: volume
+        source: m3u-picker-setup-backups
+        target: /backups
+    restart: unless-stopped
+
+volumes:
+  m3u-picker-setup-data:
+  m3u-picker-setup-output:
+  m3u-picker-setup-recordings:
+  m3u-picker-setup-jellyfin-cache:
+  m3u-picker-setup-backups:

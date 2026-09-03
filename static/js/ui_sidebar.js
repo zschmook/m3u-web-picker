@@ -206,24 +206,31 @@
       <div class="ui-settings-grid">
         <section class="ui-modern-card ui-settings-panel is-active" data-settings-panel-content="encoding" aria-labelledby="uiEncodingTitle">
           <div class="ui-card-heading">
-            <div><span id="uiEncodingTitle">FFmpeg Encoding</span><small>Normalize every curated channel for browser, M3U, HDHomeRun, Roku, and Cast clients.</small></div>
+            <div><span id="uiEncodingTitle">Live Stream Encoding</span><small>Optional compatibility encoding for browser, M3U, HDHomeRun, Roku, and Cast playback.</small></div>
             <span class="ui-count-badge" id="uiEncodingBadge">Loading</span>
           </div>
           <div class="ui-settings-form">
             <label class="ui-settings-toggle" for="uiEncodingEnabled">
               <input id="uiEncodingEnabled" type="checkbox" role="switch">
-              <span><strong>Enable FFmpeg for all channels</strong><small>The normal M3U uses Picker encoding; the direct fallback M3U remains available.</small></span>
+              <span><strong>Enable live-stream encoding</strong><small>When off, channels play directly from the provider. When on, M3U Web Picker normalizes live video for compatible playback.</small></span>
             </label>
+            <div class="ui-settings-runtime-note"><strong>Live playback only.</strong> DVR H.265 conversion is configured separately on the DVR tab.</div>
             <div class="ui-settings-warning" id="uiEncodingWarning">Run the hardware check before enabling encoding.</div>
-            <label class="ui-settings-toggle" for="uiEncodingAcknowledge">
-              <input id="uiEncodingAcknowledge" type="checkbox" role="switch">
-              <span><strong>I understand the performance risk</strong><small>CPU fallback may buffer or fail, especially with multiple clients. Hardware acceleration can still be overloaded.</small></span>
-            </label>
-            <label class="ui-settings-field" for="uiEncodingEncoder"><span>Encoder</span><select id="uiEncodingEncoder" class="form-select"><option value="auto">Auto (recommended)</option><option value="h264_nvenc">NVIDIA NVENC</option><option value="h264_qsv">Intel Quick Sync</option><option value="h264_vaapi">VA-API</option><option value="libx264">CPU (libx264)</option></select></label>
-            <label class="ui-settings-field" for="uiEncodingMaxSessions"><span>Maximum simultaneous streams</span><input id="uiEncodingMaxSessions" class="form-control" type="number" min="1" max="16" value="2"></label>
             <div class="ui-settings-runtime" id="uiEncodingRuntime">FFmpeg has not been checked yet.</div>
-            <div class="ui-output-summary"><div><span>Normal M3U</span><code>/playlist/channels.m3u</code></div><div><span>Always-direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
-            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiEncodingTest" type="button">Run Hardware Check</button><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
+            <button class="btn ui-btn-secondary ui-inline-action" id="uiEncodingTest" type="button">Check Encoding Hardware</button>
+            <details class="ui-settings-details" id="uiEncodingAdvanced">
+              <summary>Advanced encoding controls</summary>
+              <div class="ui-settings-details-body">
+                <label class="ui-settings-toggle" for="uiEncodingAcknowledge">
+                  <input id="uiEncodingAcknowledge" type="checkbox" role="switch">
+                  <span><strong>I understand the performance risk</strong><small>Required when encoding is enabled. CPU fallback may buffer or fail, and hardware acceleration can still be overloaded.</small></span>
+                </label>
+                <label class="ui-settings-field" for="uiEncodingEncoder"><span>Encoder</span><select id="uiEncodingEncoder" class="form-select"><option value="auto">Automatic (recommended)</option><option value="h264_nvenc">NVIDIA NVENC</option><option value="h264_qsv">Intel Quick Sync</option><option value="h264_vaapi">VA-API</option><option value="libx264">CPU (libx264)</option></select></label>
+                <label class="ui-settings-field" for="uiEncodingMaxSessions"><span>Maximum simultaneous encoded streams</span><input id="uiEncodingMaxSessions" class="form-control" type="number" min="1" max="16" value="2"></label>
+                <div class="ui-output-summary"><div><span>Encoded playlist</span><code>/playlist/channels.m3u</code></div><div><span>Direct fallback</span><code>/playlist/channels.direct.m3u</code></div></div>
+              </div>
+            </details>
+            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiEncodingSave" type="button">Save Encoding Settings</button></div>
             <div class="ui-settings-status" id="uiEncodingStatus" role="status" aria-live="polite"></div>
           </div>
         </section>

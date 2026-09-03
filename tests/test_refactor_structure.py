@@ -34,6 +34,13 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertIn('$composeArgs += @("-f", "docker-compose.gpu.yml")', script)
         self.assertIn("docker compose @composeArgs up -d --build", script)
 
+    def test_windows_docker_setup_validates_docker_and_writes_env_without_bom(self):
+        script = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("docker info", script)
+        self.assertIn("docker compose version", script)
+        self.assertIn("[System.Text.UTF8Encoding]::new($false)", script)
+        self.assertIn("[System.IO.File]::WriteAllLines", script)
+
     def test_windows_docker_setup_defaults_dvr_to_c_drive_folder(self):
         shell_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")
         powershell_setup = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")

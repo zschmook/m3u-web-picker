@@ -12,6 +12,9 @@ class MediaPipelineContractTests(unittest.TestCase):
         onboarding = (ROOT / "static/js/onboarding.js").read_text(encoding="utf-8")
         self.assertIn("Settings → Encoding", onboarding)
         self.assertIn("uiEncodingEnabled", sidebar)
+        self.assertIn("Live Stream Encoding", sidebar)
+        self.assertIn("DVR H.265 conversion is configured separately", sidebar)
+        self.assertIn("Advanced encoding controls", sidebar)
         self.assertIn("/api/media-pipeline/test", settings)
         self.assertIn("/playlist/channels.direct.m3u", sidebar)
 

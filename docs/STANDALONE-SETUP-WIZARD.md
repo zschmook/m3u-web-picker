@@ -1,9 +1,9 @@
 # Standalone Setup Wizard
 
-This document describes a future first-run setup flow based on the current
-Docker installation, onboarding wizard, DVR, Jellyfin cache integration, and
-provider configuration. It is a design document only; the current runtime is
-unchanged.
+This document describes the standalone first-run setup flow. A working,
+isolated implementation runs on port `9998` through
+`docker-compose.setup.yml`; the production installer and normal port `9999`
+runtime remain unchanged while the flow is tested.
 
 ## Goal
 
@@ -16,7 +16,48 @@ The setup application must not receive the Docker socket and must not mount an
 entire host drive. A small host-side launcher owns Docker lifecycle operations,
 folder creation, and host-path validation.
 
-## Proposed first-run flow
+## Current isolated flow
+
+```mermaid
+flowchart TD
+    A[Start] --> B{Choose source}
+    B -- Just Testing --> C[Load free public provider]
+    B -- Use My Provider --> D[Validate M3U or Xtream provider]
+    D --> E[Choose channels]
+    C --> E
+    E -- Just Testing --> K[Build configuration]
+    E -- Provider --> F[Choose Sports Automation rules]
+    F --> G[Optionally configure API-SPORTS]
+    G --> H[Optionally configure DVR]
+    H --> I{Choose media server}
+    I -- None --> K
+    I -- Jellyfin --> J[Configure Jellyfin cache]
+    I -- Plex with DVR --> L[Configure recording library folder]
+    J --> K
+    L --> K
+    K --> M[Run first Master Update]
+    M -- Success --> N[Open configured application]
+    M -- Failure --> O[Show error and remain in Setup]
+    O --> K
+```
+
+Just Testing deliberately skips Sports Automation, API-SPORTS, DVR, and media
+server configuration. Paid and free sources continue through the same channel,
+guide, and playback pipeline after setup.
+
+For a clean Windows PowerShell test:
+
+```powershell
+Set-Location C:\m3u-web-picker
+docker compose -f docker-compose.setup.yml down -v
+docker compose -f docker-compose.setup.yml up -d --build setup
+```
+
+The `-v` option is destructive only to the named volumes belonging to the
+isolated `m3u-picker-setup` project. Never add `-v` to a normal production
+update command.
+
+## Earlier production-installer design sketch
 
 [Download the large PNG](standalone-setup-wizard-flow-large.png) ·
 [Download the scalable SVG](standalone-setup-wizard-flow.svg)

@@ -116,7 +116,7 @@ def guide():
         '})();\n'
         '</script>\n'
         '<script src="/static/js/guide_cast_ui.js?v=cast-flow-3"></script>\n'
-        '<script src="/static/js/guide_pip.js?v=pip-3"></script>\n'
+        '<script src="/static/js/guide_pip.js?v=pip-4"></script>\n'
         '<script src="/static/js/guide_stream_menu.js?v=stream-menu-1"></script>\n'
         '<script src="/static/js/guide_programmes.js?v=guide-search-highlight-5"></script>\n'
         '<script src="/static/js/guide_dvr.js?v=dvr-library-7"></script>\n'

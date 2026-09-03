@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M3U Web Picker Setup</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/setup_wizard.css?v=setup-flow-1">
+</head>
+<body>
+  <main class="setup-page">
+    <header class="setup-brand">
+      <div class="setup-mark">M3U</div>
+      <div>
+        <div class="setup-kicker">Standalone setup</div>
+        <h1>M3U Web Picker</h1>
+      </div>
+      <div class="setup-brand-actions">
+        <span class="setup-port">Isolated test · :9998</span>
+        <button id="setupReset" class="setup-reset" type="button">Start over</button>
+      </div>
+    </header>
+    <section class="setup-shell">
+      <nav id="setupProgress" class="setup-progress" aria-label="Setup progress"></nav>
+      <div id="setupBody" class="setup-body" aria-live="polite">
+        <div class="setup-loading">Loading setup…</div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/js/setup_wizard.js?v=setup-flow-1"></script>
+</body>
+</html>

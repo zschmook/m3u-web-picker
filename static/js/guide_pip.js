@@ -46,6 +46,14 @@
       panel.scrollIntoView({behavior: "smooth", block: "start"});
       button.focus({preventScroll: true});
       window.dispatchEvent(new Event("resize"));
+      const playback = player.play();
+      if (playback && typeof playback.catch === "function") {
+        playback.catch(error => {
+          if (message) {
+            message.textContent = `Video returned to the guide, but playback could not resume${error?.message ? `: ${error.message}` : "."}`;
+          }
+        });
+      }
     });
   }
 

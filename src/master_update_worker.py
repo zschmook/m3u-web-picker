@@ -12,6 +12,9 @@ _thread: threading.Thread | None = None
 _trigger: str | None = None
 _started_at: str | None = None
 _started_monotonic: float | None = None
+_last_completed_trigger: str | None = None
+_last_completed_at: str | None = None
+_last_error: str = ""
 
 
 def _thread_alive_unlocked() -> bool:
@@ -33,6 +36,13 @@ def payload() -> dict:
         trigger = _trigger
         started_at = _started_at
         started_monotonic = _started_monotonic
+        last_completed_trigger = _last_completed_trigger
+        last_completed_at = _last_completed_at
+        last_error = _last_error
+
+    result["last_completed_trigger"] = last_completed_trigger
+    result["last_completed_at"] = last_completed_at
+    result["last_error"] = last_error
 
     if worker_alive and not result.get("running"):
         result["running"] = True
@@ -119,7 +129,9 @@ def _onboarding_guide_ready() -> tuple[bool, str]:
 
 def _run(trigger: str) -> None:
     global _thread, _trigger, _started_at, _started_monotonic
+    global _last_completed_trigger, _last_completed_at, _last_error
     onboarding_trigger = trigger == "onboarding"
+    error_message = ""
     try:
         # Resolve the function through the core module at execution time.  The
         # dev runtime wraps core.run_master_update with Jellyfin cleanup and
@@ -134,11 +146,15 @@ def _run(trigger: str) -> None:
             message = core.redact_url_credentials(str(exc))
         except Exception:
             message = str(exc)
+        error_message = message
         print(f"Background Master Update failed: {message}")
         if onboarding_trigger:
             _finish_onboarding_refresh(success=False, error=message)
     finally:
         with _lock:
+            _last_completed_trigger = trigger
+            _last_completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            _last_error = error_message
             if _thread is threading.current_thread():
                 _thread = None
                 _trigger = None
@@ -148,7 +164,7 @@ def _run(trigger: str) -> None:
 
 def start(*, trigger: str = "manual") -> tuple[bool, dict]:
     """Start exactly one background Master Update and return immediately."""
-    global _thread, _trigger, _started_at, _started_monotonic
+    global _thread, _trigger, _started_at, _started_monotonic, _last_error
 
     clean_trigger = str(trigger or "manual").strip() or "manual"
     with _lock:
@@ -158,6 +174,7 @@ def start(*, trigger: str = "manual") -> tuple[bool, dict]:
         _trigger = clean_trigger
         _started_at = datetime.now().astimezone().isoformat(timespec="seconds")
         _started_monotonic = time.monotonic()
+        _last_error = ""
         worker = threading.Thread(
             target=_run,
             args=(clean_trigger,),

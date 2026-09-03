@@ -20,6 +20,8 @@ Open `http://localhost:9999`.
 
 A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
 
+The standalone setup flow is currently available as an isolated test stack on port `9998`. It walks through provider validation, channel selection, Sports Automation, optional API schedules, DVR, and media-server choices, then performs the first Master Update before opening the configured application. The production installer still uses the normal port `9999` workflow above.
+
 ## Running the application
 
 The quick-start script above is the recommended installation path. It creates or updates the checkout, prepares `.env`, detects the LAN address used by Roku/Cast/HDHomeRun, selects the NVIDIA Compose override when available, and starts the app.
@@ -256,9 +258,22 @@ DVR conversion automatically prefers NVIDIA NVENC when the GPU Compose override 
 
 ## Clean first-run testing
 
-An isolated development Compose file is kept specifically for testing the setup wizard without touching the normal instance:
+Two isolated Compose projects are available for setup testing. Run all commands from the repository directory.
 
-```bash
+To test the standalone setup flow on port `9998` from Windows PowerShell:
+
+```powershell
+Set-Location C:\m3u-web-picker
+docker compose -f docker-compose.setup.yml down -v
+docker compose -f docker-compose.setup.yml up -d --build setup
+```
+
+The standalone stack uses its own application, output, recording, Jellyfin-cache, and backup volumes. It never receives the Docker socket or mounts live application data. Using `-v` here intentionally erases only that isolated test state.
+
+The older in-app onboarding flow also has a separate development stack:
+
+```powershell
+Set-Location C:\m3u-web-picker
 docker compose -f docker-compose.dev.yml down -v
 docker compose -f docker-compose.dev.yml up -d --build
 ```
@@ -267,18 +282,23 @@ That stack uses host port `9998` and a separate `m3u-picker-dev-data` volume. Us
 
 ## Updating
 
-For a normal Docker/source checkout:
+For a normal Docker/source checkout on Windows:
 
-```bash
+```powershell
+Set-Location C:\m3u-web-picker
 git pull --ff-only origin main
 docker compose up -d --build
 ```
 
-For a host configured for NVIDIA GPU passthrough, keep the GPU override active during the rebuild:
+For a Windows host configured for NVIDIA GPU passthrough, keep the GPU override active during the rebuild:
 
-```bash
+```powershell
+Set-Location C:\m3u-web-picker
+git pull --ff-only origin main
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
+
+On macOS or Linux, run the equivalent commands from the checkout directory using `cd` instead of `Set-Location`.
 
 Do not remove the data volume during a normal update.
 

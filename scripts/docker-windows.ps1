@@ -10,6 +10,20 @@ $envPath = Join-Path $repoRoot ".env"
 $envExamplePath = Join-Path $repoRoot ".env.example"
 $envPreexisting = Test-Path -LiteralPath $envPath
 
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker was not found. Install and start Docker Desktop, then try again."
+}
+
+docker info --format '{{.ServerVersion}}' | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker Desktop is installed but its engine is not running."
+}
+
+docker compose version | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker Compose is unavailable. Update Docker Desktop, then try again."
+}
+
 function Get-LanIPv4 {
     $configuration = try {
         Get-NetIPConfiguration -ErrorAction Stop |
@@ -65,7 +79,12 @@ function Set-DotEnvValue([string]$Path, [string]$Name, [string]$Value) {
     if (-not $found) {
         $updated += $replacement
     }
-    Set-Content -LiteralPath $Path -Value $updated -Encoding utf8
+    $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllLines(
+        [System.IO.Path]::GetFullPath($Path),
+        [string[]]$updated,
+        $utf8WithoutBom
+    )
 }
 
 function Get-DotEnvValue([string]$Path, [string]$Name) {

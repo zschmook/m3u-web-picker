@@ -345,6 +345,33 @@ body {
   font-weight: 500;
 }
 
+.ui-settings-runtime-note {
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.ui-settings-details {
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ui-settings-details summary {
+  padding: 12px 14px;
+  color: #dfe6ef;
+  font-size: 0.82rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.ui-settings-details-body {
+  display: grid;
+  gap: 16px;
+  padding: 4px 14px 14px;
+}
+
 .ui-settings-warning,
 .ui-settings-runtime {
   padding: 12px 14px;
