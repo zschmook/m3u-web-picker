@@ -8,6 +8,7 @@
     selected: null,
     selectedSeriesId: null,
     selectedDvrWeekday: new Date().getDay(),
+    selectedDvrView: "upcoming",
     panelOpen: false,
     busy: false,
   };
@@ -95,6 +96,9 @@
     if (!target) return;
     target.textContent = message || "";
     target.className = `guide-dvr-message small-muted${kind ? ` is-${kind}` : ""}`;
+    const hidden = !message || state.selectedDvrView === "library";
+    target.classList.toggle("d-none", hidden);
+    target.setAttribute("aria-hidden", String(hidden));
   }
 
   function empty(message) {
@@ -191,6 +195,43 @@
     </article>`;
   }
 
+  function recordingTimestamp(item) {
+    return new Date(item.completed_at || item.stop_at || item.start_at || 0).getTime() || 0;
+  }
+
+  function libraryEpisodeLabel(item) {
+    const episodeCode = String(item.output_name || "").match(/\bS\d{2}E\d{2,3}\b/i)?.[0]?.toUpperCase() || "";
+    return [episodeCode, item.subtitle].filter(Boolean).join(" • ") || "Recorded episode";
+  }
+
+  function libraryMarkup(items) {
+    const groups = new Map();
+    for (const item of items) {
+      const title = String(item.title || "Recording").trim() || "Recording";
+      const key = title.toLocaleLowerCase();
+      if (!groups.has(key)) groups.set(key, {title, items: []});
+      groups.get(key).items.push(item);
+    }
+    return [...groups.values()]
+      .map(group => ({
+        ...group,
+        items: group.items.sort((left, right) => recordingTimestamp(right) - recordingTimestamp(left)),
+      }))
+      .sort((left, right) => recordingTimestamp(right.items[0]) - recordingTimestamp(left.items[0]))
+      .map(group => `<details class="guide-dvr-library-group">
+        <summary>${escape(group.title)} <span class="guide-dvr-library-count">${group.items.length}</span></summary>
+        <div class="guide-dvr-library-episodes">
+          ${group.items.map(item => `<div class="guide-dvr-library-episode">
+            <div>
+              <div class="guide-dvr-library-episode-label">${escape(libraryEpisodeLabel(item))}</div>
+              <div class="guide-dvr-library-episode-time">${escape(dateText(item.start_at))}</div>
+            </div>
+            <button class="btn btn-success btn-sm" type="button" data-dvr-play="${item.id}">Play</button>
+          </div>`).join("")}
+        </div>
+      </details>`).join("");
+  }
+
   function pendingConversionMessage() {
     const policy = state.data?.settings?.processing_policy || "scheduled";
     if (policy === "immediate") return "H.265 conversion queued to begin as soon as the current conversion finishes.";
@@ -202,19 +243,22 @@
     const next = items
       .filter(item => Number(item.rule_id) === Number(rule.id) && ["scheduled", "recording"].includes(item.status))
       .sort((left, right) => new Date(left.start_at || 0) - new Date(right.start_at || 0))[0];
-    const nextText = next ? `Next showing: ${rangeText(next)}` : "No upcoming showing found.";
+    const nextText = next ? `Next episode: ${rangeText(next)}` : "No upcoming episode found.";
     const selected = Number(state.selectedSeriesId) === Number(rule.id);
-    return `<article class="guide-dvr-item guide-dvr-series-item${selected ? " is-selected" : ""}">
-      <button class="guide-dvr-series-select" type="button" data-dvr-select-series="${rule.id}">
-        <span class="guide-dvr-item-header">
+    return `<details class="guide-dvr-item guide-dvr-series-item${selected ? " is-selected" : ""}"${selected ? " open" : ""}>
+      <summary class="guide-dvr-series-select" data-dvr-select-series="${rule.id}">
+        <span class="guide-dvr-item-title">${escape(rule.title)}</span>
+        <span class="guide-dvr-item-time">${escape(nextText)}</span>
+      </summary>
+      <div class="guide-dvr-series-expanded">
+        <div class="guide-dvr-item-header">
           <span class="guide-dvr-item-title">${escape(rule.title)}</span>
           <span class="guide-dvr-status is-enabled">Enabled</span>
-        </span>
-        <span class="guide-dvr-item-time">${escape(nextText)}</span>
-        <span class="guide-dvr-item-meta">${escape(rule.channel_name || rule.tvg_id)}</span>
-      </button>
-      <div class="guide-dvr-item-actions"><button class="btn btn-outline-danger btn-sm" type="button" data-dvr-remove-series="${rule.id}">Cancel series</button></div>
-    </article>`;
+        </div>
+        <div class="guide-dvr-item-time">${escape(nextText)}</div>
+        <div class="guide-dvr-item-actions"><button class="btn btn-outline-danger btn-sm" type="button" data-dvr-remove-series="${rule.id}">Cancel series</button></div>
+      </div>
+    </details>`;
   }
 
   function render() {
@@ -225,6 +269,7 @@
     const items = Array.isArray(data.recordings) ? data.recordings : [];
     const active = items.filter(item => ["recording", "processing"].includes(item.status));
     const rules = Array.isArray(data.series_rules) ? data.series_rules : [];
+    const libraryView = state.selectedDvrView === "library";
     if (state.selectedSeriesId && !rules.some(rule => Number(rule.id) === Number(state.selectedSeriesId))) {
       state.selectedSeriesId = null;
     }
@@ -234,6 +279,7 @@
       const status = statusDescriptor(item);
       if (status.key === "cancelled") return false;
       if (selectedRule && Number(item.rule_id) !== Number(selectedRule.id)) return false;
+      if (libraryView) return status.key === "ready" && Boolean(item.playback_url);
       if (["recording", "processing"].includes(status.key)) return true;
       return itemIsInGuideWindow(item, bounds);
     });
@@ -243,11 +289,23 @@
     el("guideDvrBadge").textContent = String(badgeCount);
     el("guideDvrBadge").classList.toggle("d-none", badgeCount === 0);
     syncDvrDayNav();
-    el("guideDvrQueueTitle").textContent = selectedRule ? selectedRule.title : "Recordings";
-    el("guideDvrShowAll").classList.toggle("d-none", !selectedRule);
+    el("guideDvrUpcomingTab").setAttribute("aria-selected", String(!libraryView));
+    el("guideDvrLibraryTab").setAttribute("aria-selected", String(libraryView));
+    el("guideDvrUpcomingTab").tabIndex = libraryView ? -1 : 0;
+    el("guideDvrLibraryTab").tabIndex = libraryView ? 0 : -1;
+    el("guideDvrProcessBtn").classList.toggle("d-none", libraryView);
+    el("guideDvrDayNav").classList.toggle("d-none", libraryView);
+    el("guideDvrContent").classList.toggle("is-library-view", libraryView);
+    el("guideDvrSeriesDetails").classList.toggle("d-none", libraryView);
+    el("guideDvrQueueTitle").textContent = selectedRule
+      ? selectedRule.title
+      : libraryView ? "Recorded shows" : "Recordings";
+    el("guideDvrShowAll").classList.toggle("d-none", !selectedRule || libraryView);
     el("guideDvrQueue").innerHTML = visibleItems.length
-      ? visibleItems.slice().sort(queueSort).map(itemMarkup).join("")
-      : empty(selectedRule ? `No ${selectedRule.title} recordings in this guide window.` : "No recordings in this guide window.");
+      ? libraryView ? libraryMarkup(visibleItems) : visibleItems.slice().sort(queueSort).map(itemMarkup).join("")
+      : empty(libraryView
+        ? selectedRule ? `No ${selectedRule.title} episodes in the library.` : "No recordings in the library yet."
+        : selectedRule ? `No ${selectedRule.title} recordings in this guide window.` : "No recordings in this guide window.");
     el("guideDvrSeriesCount").textContent = String(rules.length);
     el("guideDvrSeries").innerHTML = rules.length
       ? rules.map(rule => seriesMarkup(rule, items)).join("")
@@ -279,9 +337,7 @@
     } else if (!dvrReady()) {
       setMessage("The configured DVR host folder is not mounted and writable. Check Settings → DVR.", "error");
     } else if (!state.busy) {
-      setMessage(settings.transcode_hevc
-        ? `${pendingConversionMessage()}${settings.remove_commercials ? " Commercial removal runs before conversion." : ""}`
-        : "Recordings are kept as transport streams.");
+      setMessage("");
     }
     if (typeof renderGuide === "function") renderGuide();
   }
@@ -344,8 +400,7 @@
       });
       state.data = result.dvr || state.data;
       el("guideProgrammeDialog").close();
-      state.panelOpen = true;
-      el("guideDvrPanel").classList.remove("d-none");
+      setPanelOpen(true);
       setMessage(kind === "series" ? "Series scheduled." : "Recording scheduled.", "success");
       render();
     } catch (error) {
@@ -407,14 +462,22 @@
     guideEls.playerPanel.scrollIntoView({behavior: "smooth", block: "start"});
   }
 
+  function setPanelOpen(open) {
+    state.panelOpen = Boolean(open);
+    el("guideDvrBtn")?.classList.toggle("btn-primary", state.panelOpen);
+    el("guideDvrBtn")?.classList.toggle("btn-outline-light", !state.panelOpen);
+    el("guideDvrBtn")?.setAttribute("aria-pressed", String(state.panelOpen));
+    el("guideDvrPanel")?.classList.toggle("d-none", !state.panelOpen);
+    el("guideBrowseControls")?.classList.toggle("d-none", state.panelOpen);
+    el("guideBrowseList")?.classList.toggle("d-none", state.panelOpen);
+  }
+
   el("guideDvrBtn")?.addEventListener("click", () => {
-    state.panelOpen = !state.panelOpen;
-    el("guideDvrPanel").classList.toggle("d-none", !state.panelOpen);
+    setPanelOpen(!state.panelOpen);
     if (state.panelOpen) load();
   });
   el("guideDvrCloseBtn")?.addEventListener("click", () => {
-    state.panelOpen = false;
-    el("guideDvrPanel").classList.add("d-none");
+    setPanelOpen(false);
   });
   el("guideProgrammeClose")?.addEventListener("click", () => el("guideProgrammeDialog").close());
   el("guideRecordOnce")?.addEventListener("click", () => schedule("once"));
@@ -433,9 +496,17 @@
       render();
       return;
     }
+    const view = event.target.closest("[data-dvr-view]");
+    if (view) {
+      state.selectedDvrView = view.dataset.dvrView === "library" ? "library" : "upcoming";
+      state.selectedSeriesId = null;
+      render();
+      return;
+    }
     const selectSeries = event.target.closest("[data-dvr-select-series]");
     if (selectSeries) {
-      state.selectedSeriesId = Number(selectSeries.dataset.dvrSelectSeries);
+      const ruleId = Number(selectSeries.dataset.dvrSelectSeries);
+      state.selectedSeriesId = Number(state.selectedSeriesId) === ruleId ? null : ruleId;
       render();
       return;
     }
@@ -471,8 +542,7 @@
   window.addEventListener("m3u-guide-programme", event => showProgramme(event.detail));
   window.setInterval(() => load({silent: true}), 15_000);
   if (new URLSearchParams(window.location.search).get("dvr") === "1") {
-    state.panelOpen = true;
-    el("guideDvrPanel")?.classList.remove("d-none");
+    setPanelOpen(true);
   }
   load({silent: true});
 })();
