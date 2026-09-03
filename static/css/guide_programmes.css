@@ -304,7 +304,24 @@
 
 @media (max-width: 620px) {
   .guide-timeline {
-    --guide-station-width: 250px;
+    --guide-station-width: 72px;
+  }
+
+  .guide-station-head {
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .guide-station-cell {
+    justify-content: center;
+    gap: 0;
+    padding: .5rem .35rem;
+  }
+
+  .guide-station-number,
+  .guide-station-copy {
+    display: none;
   }
 
   .guide-logo {

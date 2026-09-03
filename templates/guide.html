@@ -17,7 +17,7 @@
         <div id="guideStatus" class="small-muted" aria-live="polite">Loading curated lineup…</div>
       </div>
       <div class="d-flex gap-2 align-items-center guide-header-actions">
-        <button id="guideDvrBtn" class="btn btn-outline-light btn-sm" type="button">
+        <button id="guideDvrBtn" class="btn btn-outline-light btn-sm" type="button" aria-pressed="false">
           DVR <span id="guideDvrBadge" class="badge rounded-pill text-bg-danger d-none">0</span>
         </button>
         <button id="guideMultiviewBtn" class="btn btn-outline-light btn-sm" type="button" disabled title="Multiview is coming soon">Multiview</button>
@@ -84,16 +84,19 @@
     <section id="guideDvrPanel" class="guide-dvr-panel d-none mb-3" aria-live="polite">
       <div class="guide-dvr-heading">
         <div>
-          <div class="guide-dvr-eyebrow">In-app recorder</div>
-          <h2 class="h5 mb-1">DVR</h2>
-          <div id="guideDvrStorage" class="small-muted">Checking recording storage…</div>
+          <div class="guide-dvr-view-tabs" role="tablist" aria-label="DVR view">
+            <button id="guideDvrUpcomingTab" class="guide-dvr-view-tab" type="button" role="tab" aria-selected="true" aria-controls="guideDvrContent" tabindex="0" data-dvr-view="upcoming">Upcoming &amp; Status</button>
+            <button id="guideDvrLibraryTab" class="guide-dvr-view-tab" type="button" role="tab" aria-selected="false" aria-controls="guideDvrContent" tabindex="-1" data-dvr-view="library">Library</button>
+          </div>
+          <div id="guideDvrStorage" class="small-muted d-none" aria-hidden="true"></div>
         </div>
         <div class="guide-dvr-heading-actions">
+          <button id="guideDvrProcessBtn" class="btn btn-primary btn-sm" type="button">Process Recordings Now</button>
           <button id="guideDvrCloseBtn" class="btn btn-outline-light btn-sm" type="button">Close</button>
         </div>
       </div>
-      <div id="guideDvrMessage" class="guide-dvr-message small-muted"></div>
-      <div class="guide-dvr-content">
+      <div id="guideDvrMessage" class="guide-dvr-message small-muted d-none" aria-hidden="true"></div>
+      <div id="guideDvrContent" class="guide-dvr-content">
         <div class="guide-dvr-recordings">
           <div class="guide-dvr-queue-heading">
             <div class="guide-dvr-queue-title">
@@ -114,7 +117,7 @@
       </div>
     </section>
 
-    <section class="guide-controls mb-3">
+    <section id="guideBrowseControls" class="guide-controls mb-3">
       <div class="guide-filter-heading">
         <label class="form-label mb-1" for="guideSearch">Search Guide <span id="guideVisibleCount" class="small-muted guide-count">(0 Channels)</span></label>
         <div id="guideDayNav" class="guide-day-nav" role="group" aria-label="Guide day"></div>
@@ -122,7 +125,7 @@
       <input id="guideSearch" class="form-control" type="search" placeholder="Channel, group, sports event…" autocomplete="off">
     </section>
 
-    <section class="guide-list-wrap">
+    <section id="guideBrowseList" class="guide-list-wrap">
       <table class="table table-hover align-middle mb-0 guide-table">
         <thead>
           <tr>

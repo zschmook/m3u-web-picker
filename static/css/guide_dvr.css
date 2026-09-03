@@ -29,6 +29,44 @@
   text-transform: uppercase;
 }
 
+.guide-dvr-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #475569;
+  border-radius: .4rem;
+}
+
+.guide-dvr-view-tab {
+  padding: .38rem .65rem;
+  border: 0;
+  border-right: 1px solid #475569;
+  border-radius: 0;
+  background: transparent;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.guide-dvr-view-tab:last-child {
+  border-right: 0;
+}
+
+.guide-dvr-view-tab:hover,
+.guide-dvr-view-tab:focus-visible {
+  color: #f8fafc;
+  background: #1e293b;
+}
+
+.guide-dvr-view-tab[aria-selected="true"] {
+  background: #2563eb;
+  color: #fff;
+}
+
 .guide-dvr-message {
   min-height: 1.4rem;
   margin-top: .5rem;
@@ -39,6 +77,10 @@
   grid-template-columns: minmax(0, 3fr) minmax(250px, 1fr);
   align-items: start;
   gap: .8rem;
+}
+
+.guide-dvr-content.is-library-view {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .guide-dvr-queue-heading {
@@ -74,6 +116,75 @@
 .guide-dvr-list {
   display: grid;
   gap: .45rem;
+}
+
+.guide-dvr-library-group {
+  border: 1px solid #334155;
+  border-radius: .5rem;
+  background: #0f172a;
+}
+
+.guide-dvr-library-group > summary {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .75rem .8rem;
+  color: #f8fafc;
+  font-size: .84rem;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+}
+
+.guide-dvr-library-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.guide-dvr-library-group > summary::after {
+  content: "▾";
+  margin-left: auto;
+  color: #94a3b8;
+}
+
+.guide-dvr-library-group[open] > summary::after {
+  content: "▴";
+}
+
+.guide-dvr-library-count {
+  padding: .08rem .38rem;
+  border-radius: 999px;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: .68rem;
+}
+
+.guide-dvr-library-episodes {
+  display: grid;
+  border-top: 1px solid #334155;
+}
+
+.guide-dvr-library-episode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  padding: .65rem .8rem;
+}
+
+.guide-dvr-library-episode + .guide-dvr-library-episode {
+  border-top: 1px solid #1e293b;
+}
+
+.guide-dvr-library-episode-label {
+  color: #e2e8f0;
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.guide-dvr-library-episode-time {
+  margin-top: .12rem;
+  color: #94a3b8;
+  font-size: .7rem;
 }
 
 .guide-dvr-item {
@@ -167,17 +278,44 @@
 .guide-dvr-series-select {
   display: block;
   width: 100%;
-  padding: 0;
+  padding: .65rem;
   border: 0;
   background: transparent;
   color: inherit;
+  cursor: pointer;
+  list-style: none;
   text-align: left;
 }
 
-.guide-dvr-series-select .guide-dvr-item-header,
-.guide-dvr-series-select .guide-dvr-item-time,
-.guide-dvr-series-select .guide-dvr-item-meta {
-  display: flex;
+.guide-dvr-series-select::-webkit-details-marker {
+  display: none;
+}
+
+.guide-dvr-series-select::after {
+  content: "▾";
+  float: right;
+  margin-top: -.95rem;
+  color: #94a3b8;
+}
+
+.guide-dvr-series-item[open] > .guide-dvr-series-select::after {
+  content: "▴";
+}
+
+.guide-dvr-series-select .guide-dvr-item-title,
+.guide-dvr-series-select .guide-dvr-item-time {
+  display: block;
+  padding-right: 1.2rem;
+}
+
+.guide-dvr-series-item {
+  padding: 0;
+  overflow: hidden;
+}
+
+.guide-dvr-series-expanded {
+  padding: .65rem;
+  border-top: 1px solid #334155;
 }
 
 .guide-dvr-series-item.is-selected {

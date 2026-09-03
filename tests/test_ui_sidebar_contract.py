@@ -11,11 +11,11 @@ class ModernUiContractTests(unittest.TestCase):
     def test_app_loads_sidebar_assets_after_existing_ui_layers(self):
         app_text = (ROOT / "templates/index.html").read_text(encoding="utf-8")
         self.assertIn('/static/css/ui_sidebar.css?v=sidebar-6', app_text)
-        self.assertIn('/static/js/ui_sidebar.js?v=sidebar-brand-1', app_text)
+        self.assertIn('/static/js/ui_sidebar.js?v=dvr-processing-policy-2', app_text)
         self.assertIn('/static/js/ui_jellyfin_settings.js?v=jellyfin-settings-1', app_text)
         self.assertIn('/static/js/ui_network_settings.js?v=network-settings-1', app_text)
         self.assertGreater(
-            app_text.index('/static/js/ui_sidebar.js?v=sidebar-brand-1'),
+            app_text.index('/static/js/ui_sidebar.js?v=dvr-processing-policy-2'),
             app_text.index('/static/js/ui_schedule_cleanup.js?v=schedule-cleanup-1'),
         )
 

@@ -99,6 +99,7 @@ def register_dvr_routes(app):
                 title=str(data.get("title", "") or ""),
                 tvg_id=str(channel.get("tvg_id") or ""),
                 channel_name=str(channel.get("name") or ""),
+                start_at=data.get("start"),
             )
             item = _schedule_payload(data, channel, rule_id=int(rule["id"]))
             _sync_series()

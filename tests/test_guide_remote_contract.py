@@ -27,6 +27,14 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         self.assertIn(".guide-controls {\n  width: 100%;\n}", guide_css)
         self.assertIn(".guide-controls {\n  width: 100%;\n}", programme_css)
 
+    def test_mobile_guide_collapses_channel_column_to_station_logos(self):
+        programme_css = (ROOT / "static/css/guide_programmes.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (max-width: 620px)", programme_css)
+        self.assertIn("--guide-station-width: 72px;", programme_css)
+        self.assertIn(".guide-station-number,\n  .guide-station-copy {\n    display: none;", programme_css)
+        self.assertIn(".guide-station-cell {\n    justify-content: center;", programme_css)
+
     def test_local_player_exposes_picture_in_picture_popout(self):
         template = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
         pip = (ROOT / "static/js/guide_pip.js").read_text(encoding="utf-8")
@@ -38,6 +46,10 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         self.assertIn("document.exitPictureInPicture()", pip)
         self.assertIn('"enterpictureinpicture"', pip)
         self.assertIn('"leavepictureinpicture"', pip)
+        self.assertIn('webkitSupportsPresentationMode("picture-in-picture")', pip)
+        self.assertIn('webkitSetPresentationMode("picture-in-picture")', pip)
+        self.assertIn('"webkitpresentationmodechanged"', pip)
+        self.assertIn('"canplay"', pip)
 
     def test_external_cast_disconnect_resumes_local_without_interrupting_roku(self):
         template = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
@@ -52,6 +64,39 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         )
         self.assertIn("if (guideState.roku.active)", guide)
         self.assertIn("playback continues", guide)
+
+    def test_dvr_library_groups_saved_recordings_for_browser_playback(self):
+        template = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
+        dvr_ui = (ROOT / "static/js/guide_dvr.js").read_text(encoding="utf-8")
+        dvr_api = (ROOT / "api/dvr.py").read_text(encoding="utf-8")
+        app = (ROOT / "src/app.py").read_text(encoding="utf-8")
+
+        self.assertIn('data-dvr-view="upcoming">Upcoming &amp; Status</button>', template)
+        self.assertIn('data-dvr-view="library">Library</button>', template)
+        self.assertNotIn('class="guide-dvr-eyebrow">In-app recorder', template)
+        self.assertIn('id="guideDvrStorage" class="small-muted d-none"', template)
+        self.assertIn('id="guideDvrMessage" class="guide-dvr-message small-muted d-none"', template)
+        self.assertIn('id="guideBrowseControls"', template)
+        self.assertIn('id="guideBrowseList"', template)
+        self.assertIn('id="guideDvrBtn" class="btn btn-outline-light btn-sm" type="button" aria-pressed="false"', template)
+        self.assertIn('selectedDvrView: "upcoming"', dvr_ui)
+        self.assertIn('const hidden = !message || state.selectedDvrView === "library"', dvr_ui)
+        self.assertIn('setMessage("")', dvr_ui)
+        self.assertIn('el("guideBrowseControls")?.classList.toggle("d-none", state.panelOpen)', dvr_ui)
+        self.assertIn('el("guideBrowseList")?.classList.toggle("d-none", state.panelOpen)', dvr_ui)
+        self.assertIn('el("guideDvrBtn")?.classList.toggle("btn-primary", state.panelOpen)', dvr_ui)
+        self.assertIn('el("guideDvrBtn")?.setAttribute("aria-pressed", String(state.panelOpen))', dvr_ui)
+        self.assertIn('status.key === "ready" && Boolean(item.playback_url)', dvr_ui)
+        self.assertIn('class="guide-dvr-library-group"', dvr_ui)
+        self.assertIn("recordingTimestamp(right) - recordingTimestamp(left)", dvr_ui)
+        self.assertIn('class="guide-dvr-item guide-dvr-series-item', dvr_ui)
+        self.assertIn('summary class="guide-dvr-series-select"', dvr_ui)
+        self.assertIn('`Next episode: ${rangeText(next)}`', dvr_ui)
+        self.assertNotIn('escape(rule.channel_name || rule.tvg_id)', dvr_ui)
+        self.assertIn('data-dvr-play="${item.id}"', dvr_ui)
+        self.assertIn("browser.response_for(", dvr_api)
+        self.assertIn('guide_dvr.css?v=dvr-library-7', app)
+        self.assertIn('guide_dvr.js?v=dvr-library-7', app)
 
 if __name__ == "__main__":
     unittest.main()
