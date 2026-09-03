@@ -98,7 +98,7 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=guide-search-highlight-3">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=guide-mobile-logos-1">\n'
         '<link rel="stylesheet" href="/static/css/guide_dvr.css?v=dvr-library-7">\n'
         '<link rel="stylesheet" href="/static/css/event_logo_normalization.css?v=event-logo-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'

@@ -27,6 +27,14 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         self.assertIn(".guide-controls {\n  width: 100%;\n}", guide_css)
         self.assertIn(".guide-controls {\n  width: 100%;\n}", programme_css)
 
+    def test_mobile_guide_collapses_channel_column_to_station_logos(self):
+        programme_css = (ROOT / "static/css/guide_programmes.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (max-width: 620px)", programme_css)
+        self.assertIn("--guide-station-width: 72px;", programme_css)
+        self.assertIn(".guide-station-number,\n  .guide-station-copy {\n    display: none;", programme_css)
+        self.assertIn(".guide-station-cell {\n    justify-content: center;", programme_css)
+
     def test_local_player_exposes_picture_in_picture_popout(self):
         template = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
         pip = (ROOT / "static/js/guide_pip.js").read_text(encoding="utf-8")
