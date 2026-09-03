@@ -20,7 +20,7 @@ Open `http://localhost:9999`.
 
 A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
 
-The standalone setup flow is currently available as an isolated test stack on port `9998`. It walks through provider validation, channel selection, Sports Automation, optional API schedules, DVR, and media-server choices, then performs the first Master Update before opening the configured application. The production installer still uses the normal port `9999` workflow above.
+The standalone setup flow is currently available as an isolated test stack on port `9998`. It walks through provider validation, channel selection, Sports Automation, optional API schedules, DVR, and media-server choices, then performs the first Master Update before opening the configured application in the same isolated container. It does not modify or restart the normal port `9999` installation; production installer handoff and host-folder creation are still future work.
 
 ## Running the application
 

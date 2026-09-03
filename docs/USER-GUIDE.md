@@ -26,7 +26,9 @@ On Linux and Windows, the installer requests NVIDIA GPU passthrough when `nvidia
 
 ## 2. First-run setup
 
-A blank install opens the setup wizard automatically.
+A blank normal installation on port 9999 opens the existing in-app setup wizard
+automatically. The newer standalone wizard is an isolated port-9998 test and is
+documented separately in `docs/STANDALONE-SETUP-WIZARD.md`.
 
 ### Primary provider
 
@@ -250,16 +252,29 @@ docker compose up -d --build
 
 Do not remove the data volume during a normal update.
 
-## 11. Clean setup-wizard test
+## 11. Clean setup-wizard tests
 
-For an isolated blank install on port 9998:
+To test the newer standalone wizard on port 9998 from Windows PowerShell:
 
-```bash
+```powershell
+Set-Location C:\m3u-web-picker
+docker compose -f docker-compose.setup.yml down -v
+docker compose -f docker-compose.setup.yml up -d --build setup
+```
+
+To test the older in-app onboarding flow in a separate development stack:
+
+```powershell
+Set-Location C:\m3u-web-picker
 docker compose -f docker-compose.dev.yml down -v
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-This is the one workflow where `-v` is expected: the dev stack has a separate disposable data volume and the test is specifically intended to exercise first-run behavior.
+Both Compose files use isolated named volumes and host port 9998. Do not run
+them simultaneously. These are the only documented workflows where `-v` is
+expected: it deletes the chosen test stack's disposable data so setup starts
+from a genuinely blank database. Never use `-v` for the normal port-9999
+installation unless deleting its application data is intentional.
 
 ## 12. Troubleshooting
 
