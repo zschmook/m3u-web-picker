@@ -37,7 +37,7 @@ notepad .env
 docker compose up -d --build
 ```
 
-Before starting, set `M3U_LAN_HOST` in `.env` to the Windows computer's private IPv4 address if Roku, Cast, or HDHomeRun clients will be used. A new Windows installation can also set `M3U_DVR_DIR=C:/DVR` before the first start. Create that folder first if the setup script was not used.
+Before starting, set `M3U_LAN_HOST` in `.env` to the Windows computer's private IPv4 address if Roku, Cast, or HDHomeRun clients will be used. A new Windows installation can also set `M3U_DVR_DIR` to a dedicated recording folder before the first start. The Windows setup script defaults to `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` and creates it automatically.
 
 For an NVIDIA-equipped Windows or Linux host with Docker GPU support, start with both Compose files:
 
@@ -248,11 +248,11 @@ The normal Compose project is `m3u-picker` and stores application state in the `
 
 Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
 
-In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `C:/DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default.
+In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default.
 
 **Settings → DVR** controls whether completed recordings are processed immediately, during scheduled or manual application updates, or only through the **Process Recordings Now** action in **Upcoming & Status**. Immediate processing is serialized so only one conversion runs at a time. Comskip commercial detection runs before conversion when enabled. Implausible cut lists are rejected, and a detection or cutting failure produces an uncut MKV rather than discarding the recording. A failed conversion preserves the original transport stream.
 
-The optional media-server library folder (currently labeled **Plex folder** in Settings) moves successful conversions into show and season folders with episode names such as `The Wall.S06E10.mkv`. The files are ordinary MKVs and are not tied to a particular media server. For the current Docker setup, the destination must be inside the mounted DVR folder—for example, `C:/DVR/PLEX`—because Docker cannot write to an arbitrary host path that was not mounted when the container started.
+The optional media-server library folder (currently labeled **Plex folder** in Settings) moves successful conversions into show and season folders with episode names such as `The Wall.S06E10.mkv`. The files are ordinary MKVs and are not tied to a particular media server. For the current Docker setup, the destination must be inside the mounted DVR folder—for example, `%USERPROFILE%/Videos/M3U-Web-Picker-DVR/PLEX`—because Docker cannot write to an arbitrary host path that was not mounted when the container started.
 
 DVR conversion automatically prefers NVIDIA NVENC when the GPU Compose override is active, targets 3 Mbps with 4.5 Mbps peak headroom for 1080p recordings, and safely retries with CPU `libx265` if hardware encoding is unavailable. Comskip, temporary conversion files, final recordings, and media-server library files all remain on host-mounted storage; recording data is never written into the container layer. Database rows retain the relative path to each completed file so Library playback can resolve it without accepting arbitrary filesystem paths from the browser.
 
