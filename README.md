@@ -2,11 +2,21 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide and DVR, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v31**. Docker is the supported runtime while the packaged installation workflows are being revised.
+The current main line is **v31**. Docker is the supported runtime.
 
-## Docker quick start
+## Packaged installers
 
-Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git.
+Install and start Docker Desktop (Windows/macOS) or Docker Engine with Compose v2 (Linux), then use the installer for the host:
+
+- [Windows EXE](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe)
+- [macOS DMG](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — unsigned
+- [Linux archive](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz)
+
+The three packages use one installer implementation. They download the application without Git, install production on port `9999`, preserve saved setup during `UPGRADE (UP)`, and require a separate `CLEAN` confirmation before deleting Docker application data. DVR recordings remain in their separately mounted host folder.
+
+## Docker quick start from source
+
+The existing source-based setup remains available. On Windows, install Git for Windows and run this in Git Bash. On macOS or Linux, run it in Terminal after installing Git:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
@@ -20,11 +30,11 @@ Open `http://localhost:9999`.
 
 A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
 
-The standalone setup flow is currently available as an isolated test stack on port `9998`. It walks through provider validation, channel selection, Sports Automation, optional API schedules, DVR, and media-server choices, then performs the first Master Update before opening the configured application in the same isolated container. It does not modify or restart the normal port `9999` installation; production installer handoff and host-folder creation are still future work.
+The standalone setup flow is also available as an isolated test stack on port `9998`. It does not modify or restart the normal port `9999` installation.
 
 ## Running the application
 
-The quick-start script above is the recommended installation path. It creates or updates the checkout, prepares `.env`, detects the LAN address used by Roku/Cast/HDHomeRun, selects the NVIDIA Compose override when available, and starts the app.
+The packaged installer is the recommended path. The source script remains useful for development checkouts and manual installations.
 
 To install manually from a fresh Windows PowerShell session after Docker Desktop is installed and running:
 

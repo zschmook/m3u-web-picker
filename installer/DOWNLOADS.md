@@ -1,26 +1,20 @@
 # M3U Web Picker installer downloads
 
-Packaged downloads are produced by `.github/workflows/package-installers.yml`.
-
-The workflow is intentionally **manual/release-triggered only**. It does not run on normal pushes.
+Packaged Docker installers are produced by `.github/workflows/package-installers.yml` from the shared implementation in `installer/docker/install.py`.
 
 ## Latest public installers
 
 - Windows: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe
 - macOS: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg
+- Linux: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz
 
-These URLs always point at the installer assets on the current latest GitHub Release.
+These URLs point at installer assets on the current latest GitHub Release.
 
-## Manual packaging
+## Build or publish
 
 Open **Actions → Package installers → Run workflow**.
 
-- Leave `release_tag` blank to build Windows and macOS Actions artifacts only. Those artifacts are retained for 30 days.
-- Enter a tag such as `v30.0` to create that GitHub Release if it does not already exist, then upload/replace the packaged installers as permanent release assets.
+- Leave the release tag blank to create temporary Actions artifacts retained for 30 days.
+- Enter a tag to create or update that GitHub Release and attach all three installers.
 
-Publishing a GitHub Release normally also triggers the workflow automatically and attaches:
-
-- `M3U-Web-Picker-Windows-Setup.exe`
-- `M3U-Web-Picker-macOS.dmg`
-
-The Windows EXE packages the tested host-Python installer. The macOS DMG contains user-scoped install/uninstall command files.
+The target machine must already have a running Docker-compatible Linux container engine and Docker Compose v2. The installers do not install Docker, alter virtualization settings, or replace the container engine.

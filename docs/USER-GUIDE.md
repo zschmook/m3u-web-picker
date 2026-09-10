@@ -1,16 +1,24 @@
 # M3U Web Picker — User Guide
 
-This guide describes the current v31 application. Docker is the supported runtime while packaged installation workflows are being revised.
+This guide describes the current v31 application. Docker is the supported runtime.
 
 ## 1. Start the application
 
-Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git:
+Install and start Docker Desktop on Windows/macOS, or Docker Engine with Compose v2 on Linux. Download the matching packaged installer:
+
+- `M3U-Web-Picker-Windows-Setup.exe`
+- `M3U-Web-Picker-macOS.dmg` (unsigned)
+- `M3U-Web-Picker-Linux.tar.gz`
+
+All three packages use the same installer logic and run production on port `9999`. An upgrade preserves saved setup; a clean reinstall explicitly warns before deleting the Docker application-data volume and retains the separate DVR folder.
+
+For a source-based installation, install Git and run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
 ```
 
-The setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. On Windows, a new PowerShell setup also creates `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` and uses it as the persistent DVR mount. Existing custom DVR paths are preserved. Set `M3U_PICKER_DIR` first to choose another checkout location.
+The source setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. Existing custom DVR paths are preserved. Set `M3U_PICKER_DIR` first to choose another checkout location.
 
 To start manually from an existing checkout:
 

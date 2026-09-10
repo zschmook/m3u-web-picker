@@ -21,28 +21,32 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build Windows installer
-        run: python installer/windows-python/build.py
+      - name: Build Windows Docker installer
+        run: python installer/docker/build.py
       - uses: actions/upload-artifact@v4
         with:
           name: M3U-Web-Picker-Windows-Setup
-          path: installer/windows-python/dist/M3U-Web-Picker-Windows-Setup.exe
+          path: installer/docker/dist/M3U-Web-Picker-Windows-Setup.exe
           retention-days: 30
 
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build universal macOS Docker installer
+        run: python installer/docker/build.py
       - name: Package macOS installer DMG
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist
           mkdir -p dist/dmg-root
-          cp installer/macos/install.command dist/dmg-root/Install\ M3U\ Web\ Picker.command
-          cp installer/macos/uninstall.command dist/dmg-root/Uninstall\ M3U\ Web\ Picker.command
-          cp installer/macos/README.md dist/dmg-root/README.md
-          chmod +x dist/dmg-root/*.command
+          cp installer/docker/dist/M3U-Web-Picker-macOS-Setup dist/dmg-root/Install\ M3U\ Web\ Picker
+          cp installer/docker/README.md dist/dmg-root/README.md
+          chmod +x dist/dmg-root/Install\ M3U\ Web\ Picker
           hdiutil create \
             -volname "M3U Web Picker" \
             -srcfolder dist/dmg-root \
@@ -55,9 +59,30 @@ jobs:
           path: dist/M3U-Web-Picker-macOS.dmg
           retention-days: 30
 
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build Linux Docker installer
+        run: python installer/docker/build.py
+      - name: Include readable Python fallback
+        run: cp installer/docker/install.py installer/docker/dist/M3U-Web-Picker-Linux-Setup.py
+      - name: Package Linux installer
+        run: |
+          tar -C installer/docker/dist -czf installer/docker/M3U-Web-Picker-Linux.tar.gz \
+            M3U-Web-Picker-Linux-Setup M3U-Web-Picker-Linux-Setup.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M3U-Web-Picker-Linux-Setup
+          path: installer/docker/M3U-Web-Picker-Linux.tar.gz
+          retention-days: 30
+
   attach-to-release:
     if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '') }}
-    needs: [windows, macos]
+    needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -81,3 +106,4 @@ jobs:
           gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           echo "Windows: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/M3U-Web-Picker-Windows-Setup.exe"
           echo "macOS: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/M3U-Web-Picker-macOS.dmg"
+          echo "Linux: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/M3U-Web-Picker-Linux.tar.gz"
