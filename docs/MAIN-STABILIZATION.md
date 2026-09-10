@@ -44,6 +44,20 @@
 - Roku manual IP entry and multiple-device behavior are deferred until a Roku stick is available for end-to-end testing. When resumed, distinguish a missing LAN relay configuration from a completed scan that found no Roku devices.
 - Native/non-Docker packaging is deferred. Revisit a Nuitka-style host runtime with a platform-specific hardware discovery layer that functionally tests and exposes selectable FFmpeg device/encoder combinations (NVENC, Intel QSV, AMD AMF/VA-API, and macOS VideoToolbox), persists both encoder and device identity, and safely falls back when saved hardware is unavailable.
 
+### TODO — Pure-Python Windows fallback
+
+- Treat this as the supported escape hatch for machines that cannot enable hardware virtualization or cannot use Docker Desktop because of firmware, Windows edition, WSL 2, Hyper-V, TPM, security-policy, or administrative-access constraints. None of those may become indirect prerequisites.
+- Provide one ordinary Python bootstrap script; do not require Docker Desktop, Git, WSL, an EXE installer, or an installer framework.
+- Assume Python 3.12 is already installed. Download the `main` ZIP, safely extract it under `%LOCALAPPDATA%\m3u-web-picker`, create a private virtual environment, and install `requirements.txt`.
+- Download and checksum a Windows FFmpeg bundle containing both `ffmpeg.exe` and `ffprobe.exe`. Either provide and verify a Windows Comskip build or clearly mark commercial removal unavailable.
+- Store application data, backups, logs, and transient HLS output below the install root. Default recordings to `%USERPROFILE%\Videos\M3U-Web-Picker-DVR`.
+- Write the host environment, run Waitress on port 9999, leave port 9998 untouched, open the setup guide, and create a desktop shortcut that launches the host through `pythonw.exe` and a checked-in `run.py` launcher.
+- Support restart-safe PID handling and useful logs. Add current-user startup integration only as an explicit option.
+- Preserve settings, provider configuration, sports selections, and recordings during upgrades. Require explicit confirmation before a clean reset, and never delete the external DVR directory during that reset.
+- Explain the Windows private-network firewall prompt required for phone, Roku, and LAN discovery access.
+- Validate direct playback, CPU and NVENC processing, phone remote, Roku, DVR recording/playback, reboot startup, upgrades, clean resets, occupied ports, corrupt downloads, failed dependency installs, locked files, and interrupted-update rollback on a clean non-admin Windows machine without Docker.
+- Treat Jellyfin/HDHomeRun port-80 compatibility as a separately tested optional path; it must not block the basic host runtime.
+
 ## Global FFmpeg foundation
 
 ### Scope boundary

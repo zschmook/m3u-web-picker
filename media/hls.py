@@ -157,6 +157,7 @@ def start_session(target: str, *, startup_timeout: float = 12.0) -> HlsSession:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             bufsize=0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except OSError as exc:
         media_pipeline.release_session(pipeline_token)
