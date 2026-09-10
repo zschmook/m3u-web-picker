@@ -18,6 +18,23 @@ SPEC.loader.exec_module(fallback)
 
 
 class WindowsPythonFallbackTests(unittest.TestCase):
+    def test_fresh_directory_goes_directly_to_clean_install(self):
+        with tempfile.TemporaryDirectory() as temporaryH:
+            missing = Path(temporaryH) / "not-installed"
+            with patch("builtins.input", side_effect=AssertionError("fresh install must not prompt")):
+                self.assertEqual(fallback.choose_install_mode(missing), fallback.CLEAN)
+
+    def test_existing_install_accepts_upgrade_short_code(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertEqual(fallback.choose_install_mode(Path(temporary), "up"), fallback.UPGRADE)
+
+    def test_clean_requires_full_confirmation(self):
+        with patch("builtins.input", return_value="no"):
+            with self.assertRaises(SystemExit):
+                fallback.confirm_clean()
+        with patch("builtins.input", return_value="clean"):
+            fallback.confirm_clean()
+
     def test_defaults_do_not_use_program_files_or_docker_port(self):
         with patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"}):
             self.assertEqual(
