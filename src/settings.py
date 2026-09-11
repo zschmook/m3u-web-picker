@@ -49,6 +49,7 @@ class AppSettings:
     dvr_dir: Path
     lan_host: str
     external_port: int
+    remote_url: str
 
 
 def load_settings() -> AppSettings:
@@ -80,6 +81,7 @@ def load_settings() -> AppSettings:
         dvr_dir=dvr_dir,
         lan_host=str(os.environ.get("M3U_LAN_HOST", "") or "").strip(),
         external_port=_saved_external_port(data_dir, environment_external_port),
+        remote_url=str(os.environ.get("M3U_REMOTE_URL", "") or "").strip(),
     )
 
 

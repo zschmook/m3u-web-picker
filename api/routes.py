@@ -23,6 +23,7 @@ from .media_pipeline import register_media_pipeline_routes
 from .network_config import register_network_config_routes
 from .outputs import register_output_routes
 from .providers import register_provider_routes
+from .remote import register_remote_routes
 from .sports_routes import register_sports_routes
 # Import onboarding before ui_status so its Jellyfin post-update wrapper sits
 # inside the existing master-update reporting wrapper.
@@ -35,6 +36,7 @@ def register_routes(app):
     register_epg_routes(app)
     register_group_routes(app)
     register_sports_routes(app)
+    register_remote_routes(app)
     register_guide_routes(app)
     register_dvr_routes(app)
     register_guide_debug_routes(app)

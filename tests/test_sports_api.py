@@ -84,8 +84,13 @@ class SportsApiTests(unittest.TestCase):
         response = self.client.get("/api/guide/channels")
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
-        self.assertEqual(payload["count"], 1)
-        item = payload["channels"][0]
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["channels"][0]["play_url"], "/guide/play/director/0.2")
+        item = next(
+            channel
+            for channel in payload["channels"]
+            if str(channel.get("play_url") or "").startswith("/guide/play/manual/")
+        )
         self.assertTrue(item["play_url"].startswith("/guide/play/manual/"))
         self.assertNotIn("direct_url", item)
         self.assertNotIn(source_url, response.get_data(as_text=True))

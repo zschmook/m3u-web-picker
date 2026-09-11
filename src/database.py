@@ -88,6 +88,18 @@ def _ensure_core_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_roku_devices_host ON roku_devices(host)")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+            endpoint TEXT PRIMARY KEY,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            user_agent TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS dvr_series_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,

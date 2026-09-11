@@ -45,7 +45,8 @@ def disable_runtime_document_cache(response):
     """Never let navigation/status pages resurrect stale update state."""
     path = request.path
     if (
-        path in {"/", "/guide", "/user-guide", "/api/ui/status", "/api/master-update"}
+        path in {"/", "/guide", "/remote", "/user-guide", "/api/ui/status", "/api/master-update"}
+        or path.startswith("/api/remote")
         or path.startswith("/api/master-update/")
     ):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

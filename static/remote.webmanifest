@@ -1,0 +1,18 @@
+{
+  "name": "Channel 0.2 Remote",
+  "short_name": "0.2 Remote",
+  "description": "Control the software-defined television channel from your phone.",
+  "start_url": "/remote",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#070b12",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

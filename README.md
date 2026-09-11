@@ -175,6 +175,8 @@ Selecting a current program offers **Play now**. Selecting a future program offe
 
 The **Stream** menu keeps Roku and Google Cast controls together. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 
+The guide also includes **Remote**, a phone-sized controller for virtual channel **0.2**. Open channel 0.2 once on the browser or Roku, then use `/remote` to switch that single output among enabled TV channels or currently playable generated sports feeds. The selector uses an on-demand FFmpeg stream copy to remux the chosen provider feed into one stable HLS channel, even when the optional global media pipeline is disabled; selected video and audio are not re-encoded. It does not expose the experimental LAN inventory, ACR, or microphone tools.
+
 Opening **DVR** switches the page from guide browsing to a dedicated recorder view; the search controls and channel grid return when DVR is closed. The top DVR button shows an active state while this mode is open. DVR contains two tabs:
 
 - **Upcoming & Status** shows the selected day's scheduled, active, queued, failed, and ready recordings. Series rules appear as compact accordions with their next episode; expanding a rule reveals its state and cancellation control and filters the recording list to that series.

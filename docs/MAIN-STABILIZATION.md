@@ -32,6 +32,11 @@
 
 1.2. [x] Windows LAN relay configuration — resolved by writing `M3U_LAN_HOST` to `.env` and recreating the container. Roku and Google Cast were verified working afterward, and the cross-platform Docker bootstrap now automates that path.
 
+### Completed — Channel 0.2 phone remote
+
+- [x] Promote the stable phone-controlled channel selector, direct Roku handoff, live sports cards, and optional web-push subscription storage without bringing LAN inventory, ACR, location inference, or microphone experiments onto `main`.
+- [x] Keep channel 0.2's selected-source path to an on-demand FFmpeg stream copy rather than enabling the global transcoding pipeline.
+
 ### Remaining hardening
 
 1. Investigate the channel-picker issue discovered during FFmpeg/Jellyfin testing; capture exact reproduction steps after the current playback test.

@@ -162,6 +162,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sports_remote_score_history (
+            event_key TEXT PRIMARY KEY,
+            sport TEXT NOT NULL DEFAULT '',
+            finished_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            card_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS sports_remote_score_history_expiry
+        ON sports_remote_score_history (expires_at)
+        """
+    )
 
 
 def migrate_generated_columns(conn: sqlite3.Connection) -> None:

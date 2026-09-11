@@ -1,4 +1,6 @@
 import re
+import threading
+import time
 
 from flask import Response, jsonify, redirect, request, send_file
 
@@ -6,16 +8,60 @@ import core
 import roku_devices
 import sports
 from guide_epg import enrich_guide_channels
-from media import browser, hls
+from media import browser, director, hls
 from settings import load_settings
 from playback import roku
 from sports.generated import generated_publish_lock
 from .http import json_error, no_cache
 
 
+_ROKU_DIRECTOR_LOCK = threading.RLock()
+_ROKU_DIRECTOR_RECEIVERS: dict[str, str] = {}
+_ROKU_DIRECTOR_RELAUNCHING: set[int] = set()
+
+
+def schedule_director_roku_relaunch(revision: int) -> None:
+    """Reload Guide-launched Roku receivers after channel 0.2 changes source."""
+    expected_revision = int(revision)
+    with _ROKU_DIRECTOR_LOCK:
+        if not _ROKU_DIRECTOR_RECEIVERS or expected_revision in _ROKU_DIRECTOR_RELAUNCHING:
+            return
+        _ROKU_DIRECTOR_RELAUNCHING.add(expected_revision)
+
+    def relaunch_when_ready() -> None:
+        try:
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline:
+                state = director.state_payload()
+                if int(state.get("revision") or 0) != expected_revision:
+                    return
+                if state.get("ready") and not state.get("switching"):
+                    with _ROKU_DIRECTOR_LOCK:
+                        receivers = list(_ROKU_DIRECTOR_RECEIVERS.items())
+                    for host, media_url in receivers:
+                        try:
+                            roku.launch_dev(host, media_url)
+                        except (ValueError, RuntimeError):
+                            pass
+                    return
+                time.sleep(0.25)
+        finally:
+            with _ROKU_DIRECTOR_LOCK:
+                _ROKU_DIRECTOR_RELAUNCHING.discard(expected_revision)
+
+    threading.Thread(
+        target=relaunch_when_ready,
+        name=f"remote-channel-roku-relaunch-{expected_revision}",
+        daemon=True,
+    ).start()
+
+
 def _resolve_guide_play_target(play_url: str) -> str:
     """Resolve a guide-owned opaque play path without trusting arbitrary URLs."""
     value = str(play_url or "").split("?", 1)[0].strip()
+    if value == director.PLAY_URL:
+        settings = load_settings()
+        return f"http://127.0.0.1:{settings.port}{director.STREAM_PATH}"
     manual = re.fullmatch(r"/guide/play/manual/([^/]+)", value)
     if manual:
         return core.manual_stream_target(manual.group(1))
@@ -88,6 +134,7 @@ def register_guide_routes(app):
                 core.COMBINED_EPG_PATH,
                 timezone_name=str(sports_settings.get("timezone", "America/New_York")),
             )
+        items = [director.guide_item(), *items]
         response = jsonify(count=len(items), channels=items, epg=epg_status)
         return no_cache(response)
 
@@ -188,6 +235,7 @@ def register_guide_routes(app):
     def api_guide_roku_start():
         data = request.get_json(force=True, silent=True) or {}
         play_url = str(data.get("play_url", "") or "")
+        direct_director = play_url.split("?", 1)[0].strip() == director.PLAY_URL
         target = _resolve_guide_play_target(play_url)
         if not target:
             return json_error("Curated stream not found.", 404)
@@ -196,9 +244,23 @@ def register_guide_routes(app):
             return json_error("LAN media relay is not configured.", 409)
         try:
             host, requested_key = _resolve_roku_host(data)
-            session = hls.start_session(target)
-            playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
-            media_url = media_origin.rstrip("/") + playlist_path
+            session = None
+            if direct_director:
+                from .remote import _manual_channel_payload
+
+                _manual_channel_payload()
+                if director.safe_media_file("stream.m3u8") is None:
+                    raise RuntimeError("Channel 0.2 did not become ready for Roku playback.")
+                playlist_path = director.STREAM_PATH
+                media_url = media_origin.rstrip("/") + playlist_path
+                with _ROKU_DIRECTOR_LOCK:
+                    _ROKU_DIRECTOR_RECEIVERS[host] = media_url
+            else:
+                session = hls.start_session(target)
+                playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
+                media_url = media_origin.rstrip("/") + playlist_path
+                with _ROKU_DIRECTOR_LOCK:
+                    _ROKU_DIRECTOR_RECEIVERS.pop(host, None)
             roku.launch_dev(host, media_url)
             try:
                 info = roku.device_info(host)
@@ -209,7 +271,9 @@ def register_guide_routes(app):
             if saved and info.get("device_id") or saved and info.get("serial_number"):
                 saved = roku_devices.save_device(core.DB_PATH, host, info)
         except (ValueError, RuntimeError) as exc:
-            if "session" in locals():
+            with _ROKU_DIRECTOR_LOCK:
+                _ROKU_DIRECTOR_RECEIVERS.pop(locals().get("host", ""), None)
+            if "session" in locals() and session is not None:
                 hls.stop_session(session.token)
             return json_error(exc, 502)
         response = jsonify(
@@ -218,7 +282,7 @@ def register_guide_routes(app):
             roku_device_key=key,
             saved=bool(saved),
             device={**info, "device_key": key, "saved": bool(saved)},
-            token=session.token,
+            token=session.token if session is not None else "",
             playlist_path=playlist_path,
             media_url=media_url,
         )
@@ -237,6 +301,8 @@ def register_guide_routes(app):
             host = ""
         home_sent = False
         if host:
+            with _ROKU_DIRECTOR_LOCK:
+                _ROKU_DIRECTOR_RECEIVERS.pop(host, None)
             try:
                 roku.send_home(host)
                 home_sent = True

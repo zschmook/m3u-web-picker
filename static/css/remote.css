@@ -1,0 +1,472 @@
+.remote-body {
+  min-height: 100vh;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.remote-shell {
+  width: min(760px, 100%);
+  max-width: 760px;
+}
+
+.remote-header {
+  z-index: 50;
+}
+
+.remote-header-actions {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+#remoteAlertsButton.is-enabled {
+  color: #052e16;
+  background: #4ade80;
+  border-color: #4ade80;
+}
+
+#remoteDisableAlertsButton {
+  min-width: auto;
+  padding-right: .2rem;
+  padding-left: .2rem;
+  color: var(--ui-muted, #9ca3af);
+  font-size: .72rem;
+}
+
+.remote-controls {
+  width: 100%;
+}
+
+.remote-mode-switch .btn {
+  min-height: 2.75rem;
+  font-weight: 800;
+}
+
+.remote-mode-switch .btn.active {
+  color: #07111f;
+  background: #93c5fd;
+  border-color: #93c5fd;
+}
+
+.remote-status {
+  min-height: 1.35rem;
+}
+
+.remote-status.is-error {
+  color: #fb7185 !important;
+}
+
+.remote-current {
+  position: sticky;
+  top: 4.7rem;
+  z-index: 35;
+  padding: .35rem;
+  border: 2px solid #facc15;
+  border-radius: .7rem;
+  background: var(--ui-page, #111827);
+  box-shadow: 0 .65rem 1.2rem rgba(0, 0, 0, .28);
+}
+
+.remote-current.is-idle {
+  border-color: var(--ui-border-strong, #4b5563);
+}
+
+.remote-current-label {
+  margin: 0 .25rem .3rem;
+  color: #facc15;
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.remote-current.is-idle .remote-current-label {
+  color: var(--ui-muted, #9ca3af);
+}
+
+.remote-list-heading {
+  margin: 0 0 .45rem .15rem;
+  color: var(--ui-heading, #f8fafc);
+}
+
+.remote-channel-list {
+  display: grid;
+  gap: .55rem;
+}
+
+.remote-channel-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "station station action"
+    "programme programme action";
+  gap: .45rem .65rem;
+  align-items: center;
+  min-width: 0;
+  padding: .65rem;
+  border: 1px solid var(--ui-border, #374151);
+  border-radius: .6rem;
+  background: var(--ui-panel, #1f2937);
+}
+
+.remote-channel-card[data-channel-id] {
+  cursor: pointer;
+  transition: border-color .12s ease, transform .06s ease;
+}
+
+.remote-channel-card[data-channel-id]:hover {
+  border-color: var(--ui-border-strong, #64748b);
+}
+
+.remote-channel-card[data-channel-id]:active {
+  transform: scale(.995);
+}
+
+.remote-current .remote-channel-card {
+  border: 0;
+}
+
+.remote-station {
+  grid-area: station;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-width: 0;
+}
+
+.remote-number {
+  width: 3.4rem;
+  flex: 0 0 3.4rem;
+  overflow: hidden;
+  color: var(--ui-text, #e5e7eb);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.remote-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  object-fit: contain;
+  border-radius: .35rem;
+  background: var(--ui-panel-soft, #172033);
+}
+
+.remote-logo-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--ui-muted, #9ca3af);
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.remote-station-copy,
+.remote-programme {
+  min-width: 0;
+}
+
+.remote-station-name,
+.remote-programme-title,
+.remote-programme-meta,
+.remote-next {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-station-name {
+  color: var(--ui-heading, #f8fafc);
+  font-size: .92rem;
+  font-weight: 750;
+}
+
+.remote-station-group {
+  color: var(--ui-muted, #9ca3af);
+  font-size: .72rem;
+}
+
+.remote-programme {
+  grid-area: programme;
+  padding: .45rem .55rem;
+  border: 1px solid var(--ui-success, #22c55e);
+  border-radius: .42rem;
+  background: color-mix(in srgb, var(--ui-success, #22c55e) 14%, var(--ui-panel, #1f2937));
+}
+
+.remote-programme-title {
+  color: var(--ui-heading, #f8fafc);
+  font-size: .82rem;
+  font-weight: 750;
+}
+
+.remote-programme-meta,
+.remote-next {
+  margin-top: .08rem;
+  color: var(--ui-muted, #9ca3af);
+  font-size: .68rem;
+}
+
+.remote-action {
+  grid-area: action;
+  min-width: 4.6rem;
+  align-self: stretch;
+  font-weight: 750;
+}
+
+.remote-action:disabled {
+  cursor: wait;
+}
+
+.remote-sports-card {
+  grid-template-areas:
+    "sports-heading sports-heading action"
+    "matchup matchup action"
+    "game-state game-state action";
+  border-width: 2px;
+}
+
+.remote-sports-card.is-upcoming {
+  border-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 8%, var(--ui-panel, #1f2937));
+}
+
+.remote-sports-card.is-upcoming .remote-action:disabled {
+  cursor: not-allowed;
+  opacity: .9;
+}
+
+.remote-sports-card.is-final {
+  opacity: .72;
+}
+
+.remote-sports-card.has-top-25:not(.is-upcoming) {
+  border-color: #facc15;
+}
+
+.remote-sports-heading {
+  grid-area: sports-heading;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  min-width: 0;
+}
+
+.remote-event-logo {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  object-fit: contain;
+}
+
+.remote-sport-label,
+.remote-live-badge,
+.remote-top-25-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: .15rem .45rem;
+  font-size: .65rem;
+  font-weight: 850;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.remote-sport-label {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, .2);
+}
+
+.remote-top-25-badge {
+  color: #422006;
+  background: #facc15;
+}
+
+.remote-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  color: #dcfce7;
+  background: rgba(22, 163, 74, .4);
+}
+
+.remote-live-badge > span {
+  width: .42rem;
+  height: .42rem;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 .4rem rgba(74, 222, 128, .8);
+}
+
+.remote-sports-network {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--ui-muted, #9ca3af);
+  font-size: .68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-matchup {
+  grid-area: matchup;
+  display: grid;
+  gap: .25rem;
+}
+
+.remote-sports-team {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+}
+
+.remote-team-logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.remote-sports-team-copy {
+  min-width: 0;
+}
+
+.remote-sports-team-name {
+  overflow: hidden;
+  color: var(--ui-heading, #f8fafc);
+  font-size: .86rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-ap-rank {
+  display: inline-block;
+  margin-right: .35rem;
+  color: #fde047;
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-sports-record,
+.remote-game-feed {
+  color: var(--ui-muted, #9ca3af);
+  font-size: .65rem;
+}
+
+.remote-sports-score {
+  min-width: 2.15rem;
+  color: var(--ui-heading, #f8fafc);
+  font-size: 1.25rem;
+  font-weight: 900;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-game-state {
+  grid-area: game-state;
+  min-width: 0;
+  padding-top: .25rem;
+  border-top: 1px solid var(--ui-border, #374151);
+}
+
+.remote-game-status {
+  color: var(--ui-heading, #f8fafc);
+  font-size: .74rem;
+  font-weight: 800;
+}
+
+.remote-last-play {
+  margin-top: .1rem;
+  overflow: hidden;
+  color: var(--ui-text, #e5e7eb);
+  font-size: .69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-sports-filters {
+  position: sticky;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  gap: .4rem;
+  margin: 1rem -.25rem 0;
+  padding: .6rem .25rem max(.6rem, env(safe-area-inset-bottom));
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--ui-page, #111827) 94%, transparent);
+  box-shadow: 0 -.65rem 1rem rgba(0, 0, 0, .22);
+  scrollbar-width: none;
+}
+
+.remote-sports-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.remote-sports-filters .btn {
+  flex: 0 0 auto;
+  min-height: 2.45rem;
+  font-weight: 750;
+}
+
+.remote-idle-card {
+  padding: .9rem;
+  border-radius: .5rem;
+  background: var(--ui-panel, #1f2937);
+  color: var(--ui-muted, #9ca3af);
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .remote-shell {
+    padding-left: .6rem;
+    padding-right: .6rem;
+  }
+
+  .remote-current {
+    top: 4.45rem;
+  }
+
+  .remote-header-actions {
+    gap: .3rem;
+  }
+
+  #remoteDisableAlertsButton {
+    display: none !important;
+  }
+
+  .remote-channel-card {
+    grid-template-columns: minmax(0, 1fr) 4.25rem;
+    grid-template-areas:
+      "station action"
+      "programme programme";
+    gap: .45rem;
+    padding: .55rem;
+  }
+
+  .remote-sports-card {
+    grid-template-columns: minmax(0, 1fr) 4.25rem;
+    grid-template-areas:
+      "sports-heading action"
+      "matchup matchup"
+      "game-state game-state";
+  }
+
+  .remote-number {
+    width: 2.25rem;
+    flex-basis: 2.25rem;
+    font-size: .78rem;
+  }
+
+  .remote-logo {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .remote-action {
+    min-width: 4.25rem;
+    min-height: 2.65rem;
+  }
+}

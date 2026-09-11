@@ -4,7 +4,7 @@ import core
 import media_pipeline
 import public_epg_logos
 import sports
-from media import mpegts
+from media import director, mpegts
 
 
 def register_output_routes(app):
@@ -144,6 +144,7 @@ def register_output_routes(app):
         lines = text.splitlines()
         lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
         text = "\n".join(lines) + "\n"
+        text = director.inject_channel(text, request.url_root.rstrip("/"))
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -160,8 +161,10 @@ def register_output_routes(app):
 
     @app.get("/playlist/all.m3u")
     def playlist_all():
+        text = core.m3u_from_channels(core.all_grouped_channels())
+        text = director.inject_channel(text, request.url_root.rstrip("/"))
         return Response(
-            with_manual_epg_logos(core.m3u_from_channels(core.all_grouped_channels())),
+            with_manual_epg_logos(text),
             mimetype="audio/x-mpegurl",
         )
 
