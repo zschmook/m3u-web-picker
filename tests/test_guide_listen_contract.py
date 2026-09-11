@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import unittest
 
 
@@ -47,6 +48,23 @@ class GuideListenContractTests(unittest.TestCase):
 
         self.assertIn("Listen mode requires FFmpeg", readme)
         self.assertIn("Listen** requires FFmpeg", user_guide)
+
+    def test_tailscale_https_app_focuses_the_existing_listen_client(self):
+        manifest = json.loads(
+            (ROOT / "static/remote.webmanifest").read_text(encoding="utf-8")
+        )
+        guide = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
+        remote = (ROOT / "templates/remote.html").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertEqual(manifest["id"], "/remote")
+        self.assertEqual(manifest["scope"], "/")
+        self.assertEqual(manifest["launch_handler"]["client_mode"], "focus-existing")
+        self.assertIn("remote.webmanifest", guide)
+        self.assertIn("focus-existing-1", guide)
+        self.assertIn("focus-existing-1", remote)
+        self.assertIn("Do not expose M3U Web Picker directly", readme)
+        self.assertIn("Remote phone access currently requires Tailscale", readme)
 
 
 if __name__ == "__main__":

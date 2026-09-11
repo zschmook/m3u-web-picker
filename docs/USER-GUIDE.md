@@ -170,6 +170,8 @@ Rebuild/restart after changing `.env`.
 
 With application-wide encoding enabled, the browser player uses server-side FFmpeg and fragmented MP4. With encoding disabled, clients retain the direct-provider path. Selecting a current program and choosing **Listen** requires FFmpeg even when application-wide video encoding is disabled; FFmpeg discards the video and delivers a 128 kbps MP3 stream for headphones or mobile listening. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
 
+M3U Web Picker is not designed for direct public-internet exposure. Use Tailscale for access outside the home. For uninterrupted home-screen relaunch while Listen mode is active, install the phone app from its Tailscale HTTPS address; the app then focuses its existing window instead of navigating away from the playing Guide. A home-screen shortcut created from a plain LAN HTTP address cannot guarantee that behavior.
+
 ### Roku
 
 Roku devices are discovered over the local network and saved by stable device identity, with serial-number fallback, so a saved target can be reconciled after a DHCP address change. Multiple saved Roku targets are supported.
