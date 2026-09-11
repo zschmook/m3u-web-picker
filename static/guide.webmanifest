@@ -1,0 +1,22 @@
+{
+  "name": "M3U Web Picker TV Guide",
+  "short_name": "TV Guide",
+  "description": "Browse the TV guide and keep audio-only playback running on your phone.",
+  "id": "/guide",
+  "start_url": "/guide",
+  "scope": "/guide",
+  "display": "standalone",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "background_color": "#070b12",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

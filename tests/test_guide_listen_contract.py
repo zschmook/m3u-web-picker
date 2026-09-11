@@ -49,19 +49,29 @@ class GuideListenContractTests(unittest.TestCase):
         self.assertIn("Listen mode requires FFmpeg", readme)
         self.assertIn("Listen** requires FFmpeg", user_guide)
 
-    def test_tailscale_https_app_focuses_the_existing_listen_client(self):
-        manifest = json.loads(
+    def test_guide_is_a_distinct_pwa_that_focuses_the_existing_listen_client(self):
+        guide_manifest = json.loads(
+            (ROOT / "static/guide.webmanifest").read_text(encoding="utf-8")
+        )
+        remote_manifest = json.loads(
             (ROOT / "static/remote.webmanifest").read_text(encoding="utf-8")
         )
         guide = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
         remote = (ROOT / "templates/remote.html").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertEqual(manifest["id"], "/remote")
-        self.assertEqual(manifest["scope"], "/")
-        self.assertEqual(manifest["launch_handler"]["client_mode"], "focus-existing")
-        self.assertIn("remote.webmanifest", guide)
-        self.assertIn("focus-existing-1", guide)
+        self.assertEqual(guide_manifest["id"], "/guide")
+        self.assertEqual(guide_manifest["start_url"], "/guide")
+        self.assertEqual(guide_manifest["scope"], "/guide")
+        self.assertEqual(
+            guide_manifest["launch_handler"]["client_mode"], "focus-existing"
+        )
+        self.assertEqual(remote_manifest["id"], "/remote")
+        self.assertNotEqual(guide_manifest["id"], remote_manifest["id"])
+        self.assertIn("guide.webmanifest", guide)
+        self.assertNotIn("remote.webmanifest", guide)
+        self.assertIn("guide-focus-existing-1", guide)
+        self.assertIn("remote.webmanifest", remote)
         self.assertIn("focus-existing-1", remote)
         self.assertIn("Do not expose M3U Web Picker directly", readme)
         self.assertIn("Remote phone access currently requires Tailscale", readme)

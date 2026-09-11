@@ -173,7 +173,7 @@ Guide search matches channel metadata and individual program titles. Matching pr
 
 Selecting a current program offers **Play now** or **Listen**. Listen mode requires FFmpeg: it removes video server-side and sends a compact 128 kbps MP3 stream to the browser, which is useful for headphones or mobile playback. Selecting a future program offers DVR scheduling when the recorder is enabled. The local browser player normalizes provider video to H.264/AAC fragmented MP4, and **Pop out** uses the standard Picture-in-Picture API with a WebKit presentation-mode fallback. Closing Picture-in-Picture returns playback cleanly to the guide when the browser supports that transition.
 
-Do not expose M3U Web Picker directly to the public internet. Remote phone access currently requires Tailscale. Installing the phone app from its Tailscale HTTPS address enables proper PWA launch handling, so reopening the app focuses the existing Guide instead of replacing an active Listen session. A plain LAN HTTP home-screen shortcut may reload the page and interrupt audio because it is only a browser shortcut.
+Do not expose M3U Web Picker directly to the public internet. Remote phone access currently requires Tailscale. The TV Guide and Channel 0.2 Remote are separate PWAs. Install the Guide from `/guide` at its Tailscale HTTPS address; reopening that Guide app then focuses the existing Guide window instead of replacing an active Listen session. A plain LAN HTTP home-screen shortcut may reload the page and interrupt audio because it is only a browser shortcut.
 
 The **Stream** menu keeps Roku and Google Cast controls together. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 
