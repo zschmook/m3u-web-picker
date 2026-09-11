@@ -126,6 +126,16 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertEqual(args[args.index("-bf") + 1], "0")
         self.assertIn("http://provider.test/live.ts", args)
 
+    def test_audio_only_stream_drops_video_and_emits_mp3(self):
+        with patch("media.ffmpeg.shutil.which", return_value="/usr/bin/ffmpeg"):
+            args = ffmpeg.audio_only_mp3_args("http://provider.test/live.ts")
+        self.assertEqual(args[0], "/usr/bin/ffmpeg")
+        self.assertIn("-vn", args)
+        self.assertEqual(args[args.index("-map") + 1], "0:a:0?")
+        self.assertEqual(args[args.index("-c:a") + 1], "libmp3lame")
+        self.assertEqual(args[args.index("-f") + 1], "mp3")
+        self.assertNotIn("-c:v", args)
+
     def test_roku_adapter_rejects_public_ip(self):
         with self.assertRaises(ValueError):
             roku.normalize_host("8.8.8.8")

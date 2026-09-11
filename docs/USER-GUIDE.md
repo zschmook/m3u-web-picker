@@ -168,7 +168,7 @@ Rebuild/restart after changing `.env`.
 
 ### Browser and Google Cast
 
-With application-wide encoding enabled, the browser player uses server-side FFmpeg and fragmented MP4. With encoding disabled, clients retain the direct-provider path. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
+With application-wide encoding enabled, the browser player uses server-side FFmpeg and fragmented MP4. With encoding disabled, clients retain the direct-provider path. Selecting a current program and choosing **Listen** requires FFmpeg even when application-wide video encoding is disabled; FFmpeg discards the video and delivers a 128 kbps MP3 stream for headphones or mobile listening. Google Cast uses an HLS relay reachable from the TV over the LAN. The browser remains the controller and Google's normal Cast receiver picker chooses the target device.
 
 ### Roku
 

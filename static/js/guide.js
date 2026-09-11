@@ -16,6 +16,10 @@ const guideState = {
     deviceName: "Roku TV",
     active: false,
   },
+  listen: {
+    active: false,
+    diagnosticTimer: null,
+  },
 };
 
 const guideEls = {
@@ -26,6 +30,9 @@ const guideEls = {
   visibleCount: document.getElementById("guideVisibleCount"),
   playerPanel: document.getElementById("guidePlayerPanel"),
   player: document.getElementById("guidePlayer"),
+  listenPanel: document.getElementById("guideListenPanel"),
+  audioPlayer: document.getElementById("guideAudioPlayer"),
+  popoutBtn: document.getElementById("guidePopoutBtn"),
   playerTitle: document.getElementById("guidePlayerTitle"),
   playerMeta: document.getElementById("guidePlayerMeta"),
   playbackBadge: document.getElementById("guidePlaybackBadge"),
@@ -291,8 +298,11 @@ async function stopRokuPlayback({sendHome = true} = {}) {
 
 function showRokuPlayer() {
   guideState.mode = "roku";
+  guideState.listen.active = false;
   guideEls.player.classList.add("d-none");
+  guideEls.listenPanel.classList.add("d-none");
   guideEls.castScreen.classList.remove("d-none");
+  guideEls.popoutBtn.classList.add("d-none");
   guideEls.nowPlayingLabel.textContent = "Now playing remotely";
   guideEls.playbackBadge.textContent = "Roku";
   guideEls.playbackBadge.className = "badge rounded-pill text-bg-primary";
@@ -312,6 +322,7 @@ async function startRokuChannel(channel) {
   }
 
   const previousToken = guideState.roku.relayToken;
+  stopListenStream();
   setCurrentChannel(channel);
   stopLocalStream({hidePanel: false});
   guideState.roku.host = host;
@@ -415,8 +426,11 @@ function updateCastStatus(message = "") {
 
 function showLocalPlayer() {
   guideState.mode = "local";
+  guideState.listen.active = false;
   guideEls.player.classList.remove("d-none");
+  guideEls.listenPanel.classList.add("d-none");
   guideEls.castScreen.classList.add("d-none");
+  guideEls.popoutBtn.classList.remove("d-none");
   guideEls.nowPlayingLabel.textContent = "Now playing";
   guideEls.playbackBadge.textContent = "Local";
   guideEls.playbackBadge.className = "badge rounded-pill text-bg-secondary";
@@ -424,9 +438,12 @@ function showLocalPlayer() {
 
 function showCastPlayer() {
   guideState.mode = "cast";
+  guideState.listen.active = false;
   const device = currentCastDeviceName();
   guideEls.player.classList.add("d-none");
+  guideEls.listenPanel.classList.add("d-none");
   guideEls.castScreen.classList.remove("d-none");
+  guideEls.popoutBtn.classList.add("d-none");
   guideEls.nowPlayingLabel.textContent = "Now casting";
   guideEls.playbackBadge.textContent = "Cast";
   guideEls.playbackBadge.className = "badge rounded-pill text-bg-primary";
@@ -442,6 +459,19 @@ function stopLocalStream({hidePanel = false} = {}) {
   if (hidePanel) guideEls.playerPanel.classList.add("d-none");
 }
 
+function stopListenStream() {
+  guideState.listen.active = false;
+  if (guideState.listen.diagnosticTimer !== null) {
+    window.clearTimeout(guideState.listen.diagnosticTimer);
+    guideState.listen.diagnosticTimer = null;
+  }
+  guideEls.audioPlayer.pause();
+  guideEls.audioPlayer.removeAttribute("src");
+  guideEls.audioPlayer.load();
+  guideEls.listenPanel.classList.add("d-none");
+  clearListenMediaSession();
+}
+
 async function stopRemoteMedia() {
   const session = currentCastSession();
   const media = session?.getMediaSession?.();
@@ -455,6 +485,7 @@ async function stopRemoteMedia() {
 
 async function stopPlayback() {
   stopLocalStream({hidePanel: false});
+  stopListenStream();
   await stopRemoteMedia();
   await stopCastRelay();
   await stopRokuPlayback({sendHome: true});
@@ -476,13 +507,125 @@ function setCurrentChannel(channel) {
   guideEls.playerPanel.scrollIntoView({behavior: "smooth", block: "start"});
 }
 
+function localChannelUrl(channel) {
+  const url = channel?.play_url || "";
+  return `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+}
+
+function localListenUrl(channel) {
+  const playUrl = String(channel?.play_url || "");
+  return `/guide/listen?play_url=${encodeURIComponent(playUrl)}&_=${Date.now()}`;
+}
+
+function showListenPlayer() {
+  guideState.mode = "listen";
+  guideState.listen.active = true;
+  guideEls.player.classList.add("d-none");
+  guideEls.castScreen.classList.add("d-none");
+  guideEls.listenPanel.classList.remove("d-none");
+  guideEls.popoutBtn.classList.add("d-none");
+  guideEls.nowPlayingLabel.textContent = "Listen mode";
+  guideEls.playbackBadge.textContent = "Audio";
+  guideEls.playbackBadge.className = "badge rounded-pill text-bg-info";
+}
+
+function setListenMediaAction(action, handler) {
+  if (!("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.setActionHandler(action, handler);
+  } catch (_) {
+    // Older browsers expose Media Session without every action.
+  }
+}
+
+function updateListenMediaSession(channel) {
+  if (!("mediaSession" in navigator) || !("MediaMetadata" in window)) return;
+  const programme = channel?.now || {};
+  const programmeTitle = String(programme.title || "").trim();
+  const channelName = String(channel?.name || "Live TV").trim();
+  const artwork = [];
+  if (channel?.logo) {
+    try {
+      artwork.push({src: new URL(String(channel.logo), window.location.href).href});
+    } catch (_) {
+      // A bad optional logo must not prevent the useful text metadata.
+    }
+  }
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: programmeTitle || channelName,
+    artist: programmeTitle ? channelName : "M3U Web Picker",
+    album: String(channel?.group || "Live TV").trim(),
+    artwork,
+  });
+  setListenMediaAction("play", () => {
+    if (guideState.mode === "listen") void guideEls.audioPlayer.play();
+  });
+  setListenMediaAction("pause", () => {
+    if (guideState.mode === "listen") guideEls.audioPlayer.pause();
+  });
+  setListenMediaAction("stop", () => {
+    if (guideState.mode === "listen") void stopPlayback();
+  });
+}
+
+function clearListenMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  for (const action of ["play", "pause", "stop"]) setListenMediaAction(action, null);
+  navigator.mediaSession.metadata = null;
+  try {
+    navigator.mediaSession.playbackState = "none";
+  } catch (_) {
+    // Optional state hint only.
+  }
+}
+
+async function showListenFailureDetail(fallback = "The channel did not produce a usable audio stream.") {
+  try {
+    const response = await fetch("/api/ui/status", {cache: "no-store"});
+    const data = await response.json();
+    const failure = data?.playback?.runtime?.last_output_error;
+    const message = failure?.output === "browser-audio" ? String(failure.message || "").trim() : "";
+    const summary = message ? message.split("\n").filter(Boolean).at(-1) : "";
+    guideEls.playerMessage.textContent = `Audio unavailable: ${summary || fallback}`;
+  } catch (_) {
+    guideEls.playerMessage.textContent = `Audio unavailable: ${fallback}`;
+  }
+}
+
+function startListenMode(channel) {
+  // Keep play() in the original click call stack. Some browsers revoke media
+  // autoplay permission as soon as an awaited cleanup yields control.
+  stopLocalStream({hidePanel: false});
+  stopListenStream();
+  void stopRemoteMedia();
+  void stopCastRelay();
+  void stopRokuPlayback({sendHome: true});
+  setCurrentChannel(channel);
+  showListenPlayer();
+  updateListenMediaSession(guideState.currentChannel || channel);
+  guideEls.playerMessage.textContent = "Starting audio-only stream…";
+  guideEls.audioPlayer.src = localListenUrl(channel);
+  guideState.listen.diagnosticTimer = window.setTimeout(() => {
+    guideState.listen.diagnosticTimer = null;
+    if (guideState.mode === "listen" && guideEls.audioPlayer.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      void showListenFailureDetail("No audio data arrived within 12 seconds.");
+    }
+  }, 12500);
+  const attempt = guideEls.audioPlayer.play();
+  if (attempt?.catch) {
+    attempt.catch(() => {
+      guideEls.playerMessage.textContent = "Press Play to start listening.";
+    });
+  }
+}
+
 function playLocalChannel(channel) {
+  stopListenStream();
   stopLocalStream({hidePanel: false});
   setCurrentChannel(channel);
   showLocalPlayer();
   guideEls.playerMessage.textContent = "Starting stream…";
-  const url = channel.play_url || "";
-  guideEls.player.src = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+  guideEls.player.src = localChannelUrl(channel);
   const attempt = guideEls.player.play();
   if (attempt?.catch) {
     attempt.catch(() => {
@@ -497,6 +640,7 @@ async function castChannel(channel) {
   if (guideState.cast.loadInFlight) return;
 
   const device = currentCastDeviceName();
+  stopListenStream();
   setCurrentChannel(channel);
   stopLocalStream({hidePanel: false});
   showCastPlayer();
@@ -712,6 +856,29 @@ guideEls.player.addEventListener("waiting", () => {
 
 guideEls.player.addEventListener("error", () => {
   guideEls.playerMessage.textContent = "Playback failed. ffmpeg may have rejected the provider stream, or the browser may have rejected the converted MP4.";
+});
+
+guideEls.audioPlayer.addEventListener("playing", () => {
+  if (guideState.listen.diagnosticTimer !== null) {
+    window.clearTimeout(guideState.listen.diagnosticTimer);
+    guideState.listen.diagnosticTimer = null;
+  }
+  showListenPlayer();
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  guideEls.playerMessage.textContent = "Audio only · video removed by FFmpeg";
+});
+
+guideEls.audioPlayer.addEventListener("pause", () => {
+  if (guideState.mode !== "listen" || !("mediaSession" in navigator)) return;
+  navigator.mediaSession.playbackState = "paused";
+});
+
+guideEls.audioPlayer.addEventListener("waiting", () => {
+  guideEls.playerMessage.textContent = "Buffering audio…";
+});
+
+guideEls.audioPlayer.addEventListener("error", () => {
+  void showListenFailureDetail("The channel may not expose an audio track.");
 });
 
 guideEls.rows.addEventListener("click", event => {

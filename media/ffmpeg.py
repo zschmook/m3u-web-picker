@@ -83,6 +83,37 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
     ]
 
 
+def audio_only_mp3_args(target: str) -> list[str]:
+    """Transcode one live input to a browser-friendly audio-only stream."""
+    return [
+        executable(),
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-i",
+        target,
+        "-map",
+        "0:a:0?",
+        "-vn",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-f",
+        "mp3",
+        "-write_xing",
+        "0",
+        "pipe:1",
+    ]
+
+
 def terminate(process: subprocess.Popen, *, timeout: float = 2.0) -> None:
     if process.poll() is not None:
         return

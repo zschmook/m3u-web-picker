@@ -168,6 +168,46 @@
   border-radius: .45rem;
 }
 
+.guide-listen-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(260px, 420px);
+  align-items: center;
+  gap: .8rem;
+  margin-top: .7rem;
+  padding: .8rem;
+  border: 1px solid #475569;
+  border-radius: .55rem;
+  background: linear-gradient(135deg, rgba(14, 116, 144, .18), rgba(15, 23, 42, .88));
+}
+
+.guide-listen-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #0891b2;
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.guide-listen-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.guide-listen-copy span {
+  color: #9ca3af;
+  font-size: .82rem;
+}
+
+.guide-audio-player {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+}
+
 .guide-cast-screen {
   width: 100%;
   min-height: 180px;
@@ -346,6 +386,14 @@
 
   .guide-player-actions .btn {
     flex: 1 1 auto;
+  }
+
+  .guide-listen-panel {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .guide-audio-player {
+    grid-column: 1 / -1;
   }
 
   .guide-group-col,

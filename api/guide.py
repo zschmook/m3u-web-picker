@@ -373,3 +373,10 @@ def register_guide_routes(app):
         if not target:
             return Response("Sports stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
         return browser.response_for(target)
+
+    @app.get("/guide/listen")
+    def guide_listen():
+        target = _resolve_guide_play_target(request.args.get("play_url", ""))
+        if not target:
+            return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        return browser.response_for(target, audio_only=True)

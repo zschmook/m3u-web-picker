@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import re
 import threading
 import time
 import uuid
@@ -21,6 +22,7 @@ CPU_ENCODER = "libx264"
 _last_test: dict[str, Any] = {}
 _session_lock = threading.RLock()
 _sessions: dict[str, dict[str, Any]] = {}
+_last_output_error: dict[str, Any] = {}
 
 
 def settings() -> dict[str, Any]:
@@ -115,7 +117,17 @@ def status(*, run_test: bool = False) -> dict[str, Any]:
     test = capability_test() if run_test else dict(_last_test)
     with _session_lock:
         sessions = [dict(item) for item in _sessions.values()]
-    return {"settings": current, "capability": test, "runtime": {"active_sessions": len(sessions), "sessions": sessions}, "direct_playlist": "/playlist/channels.direct.m3u"}
+        last_output_error = dict(_last_output_error)
+    return {
+        "settings": current,
+        "capability": test,
+        "runtime": {
+            "active_sessions": len(sessions),
+            "sessions": sessions,
+            "last_output_error": last_output_error,
+        },
+        "direct_playlist": "/playlist/channels.direct.m3u",
+    }
 
 
 def save(values: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +187,28 @@ def acquire_session(output: str) -> str:
             raise RuntimeError(f"FFmpeg stream limit reached ({limit} active). Stop another stream or raise the limit in Settings → Encoding.")
         _sessions[token] = {"id": token, "output": str(output), "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     return token
+
+
+def clear_output_error(output: str) -> None:
+    with _session_lock:
+        if _last_output_error.get("output") == str(output or ""):
+            _last_output_error.clear()
+
+
+def record_output_error(output: str, message: str) -> None:
+    cleaned = re.sub(r"https?://\S+", "[source]", str(message or ""), flags=re.IGNORECASE)
+    cleaned = "\n".join(line.strip() for line in cleaned.splitlines() if line.strip())[-2000:]
+    if not cleaned:
+        return
+    with _session_lock:
+        _last_output_error.clear()
+        _last_output_error.update(
+            {
+                "output": str(output or ""),
+                "message": cleaned,
+                "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
 
 
 def release_session(token: str) -> None:

@@ -171,10 +171,16 @@
   vertical-align: .08rem;
 }
 
-.guide-station-play {
+.guide-station-play,
+.guide-station-listen {
   flex: 0 0 auto;
   padding: .22rem .45rem;
   font-size: .72rem;
+}
+
+.guide-station-listen {
+  width: 47px;
+  text-align: center;
 }
 
 .guide-programme-track {
@@ -347,7 +353,8 @@
     font-size: .58rem;
   }
 
-  .guide-station-play {
+  .guide-station-play,
+  .guide-station-listen {
     display: none;
   }
 }

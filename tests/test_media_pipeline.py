@@ -10,6 +10,7 @@ class MediaPipelineTests(unittest.TestCase):
     def setUp(self):
         media_pipeline._last_test = {}
         media_pipeline._sessions.clear()
+        media_pipeline._last_output_error.clear()
 
     def test_defaults_are_disabled(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(
@@ -35,6 +36,22 @@ class MediaPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "stream limit"):
                 media_pipeline.acquire_session("mpegts")
             media_pipeline.release_session(token)
+
+    def test_output_error_is_bounded_and_hides_provider_urls(self):
+        provider_url = "https://user:secret@provider.test/live/channel.ts?token=private"
+        media_pipeline.record_output_error(
+            "browser-audio",
+            f"Could not read {provider_url}\nNo audio stream found",
+        )
+
+        failure = media_pipeline.status()["runtime"]["last_output_error"]
+        self.assertEqual(failure["output"], "browser-audio")
+        self.assertNotIn(provider_url, failure["message"])
+        self.assertNotIn("secret", failure["message"])
+        self.assertIn("[source]", failure["message"])
+
+        media_pipeline.clear_output_error("browser-audio")
+        self.assertEqual(media_pipeline.status()["runtime"]["last_output_error"], {})
 
     def test_stale_hardware_encoder_choice_falls_back_to_cpu_when_no_longer_functional(self):
         """A saved non-auto encoder must not outlive the environment it was validated in."""

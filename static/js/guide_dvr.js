@@ -381,6 +381,7 @@
     const stop = new Date(programme.stop || "").getTime();
     const current = Number.isFinite(start) && Number.isFinite(stop) && start <= now && now < stop;
     el("guideProgrammePlay").classList.toggle("d-none", !current);
+    el("guideProgrammeListen").classList.toggle("d-none", !current);
     const existing = matchingRecording(channel, programme);
     el("guideRecordOnce").disabled = !dvrReady() || Boolean(existing && ["scheduled", "recording", "processing", "completed"].includes(existing.status));
     el("guideRecordSeries").disabled = !dvrReady();
@@ -486,6 +487,11 @@
     const channel = state.selected?.channel;
     el("guideProgrammeDialog").close();
     if (channel) playChannel(channel);
+  });
+  el("guideProgrammeListen")?.addEventListener("click", () => {
+    const channel = state.selected?.channel;
+    el("guideProgrammeDialog").close();
+    if (channel && typeof startListenMode === "function") startListenMode(channel);
   });
   el("guideDvrPanel")?.addEventListener("click", event => {
     const process = event.target.closest("#guideDvrProcessBtn");

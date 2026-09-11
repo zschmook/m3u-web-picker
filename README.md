@@ -171,7 +171,7 @@ The built-in TV Guide uses the curated lineup and Combined XMLTV output. It prov
 
 Guide search matches channel metadata and individual program titles. Matching programs are highlighted in the timeline, which makes searches such as `news hour` useful even when several stations carry the same show at different times. The day buttons retain the compact current-time window for **Now** and provide full-day navigation for future dates.
 
-Selecting a current program offers **Play now**. Selecting a future program offers DVR scheduling when the recorder is enabled. The local browser player normalizes provider video to H.264/AAC fragmented MP4, and **Pop out** uses the standard Picture-in-Picture API with a WebKit presentation-mode fallback. Closing Picture-in-Picture returns playback cleanly to the guide when the browser supports that transition.
+Selecting a current program offers **Play now** or **Listen**. Listen mode requires FFmpeg: it removes video server-side and sends a compact 128 kbps MP3 stream to the browser, which is useful for headphones or mobile playback. Selecting a future program offers DVR scheduling when the recorder is enabled. The local browser player normalizes provider video to H.264/AAC fragmented MP4, and **Pop out** uses the standard Picture-in-Picture API with a WebKit presentation-mode fallback. Closing Picture-in-Picture returns playback cleanly to the guide when the browser supports that transition.
 
 The **Stream** menu keeps Roku and Google Cast controls together. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
 

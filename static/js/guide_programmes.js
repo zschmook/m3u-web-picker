@@ -71,6 +71,9 @@
     if (range) meta.push(range);
     if (channel.group) meta.push(channel.group);
     guideEls.playerMeta.textContent = meta.join(" • ");
+    if (guideState.mode === "listen" && guideState.listen.active) {
+      updateListenMediaSession(channel);
+    }
   }
 
   function remoteProgrammeCopy(channel) {
@@ -320,6 +323,14 @@
       if (!target) return;
       event.preventDefault();
       const channel = actualGuideChannel(target.dataset.guidePlayUrl);
+      if (target.dataset.guideListen === "true") {
+        if (target.dataset.guideListenAction === "stop") {
+          if (typeof stopPlayback === "function") void stopPlayback();
+        } else if (channel && typeof startListenMode === "function") {
+          startListenMode(channel);
+        }
+        return;
+      }
       const programmeKey = String(target.dataset.guideProgrammeKey || "");
       if (programmeKey && programmeChoices.has(programmeKey)) {
         window.dispatchEvent(new CustomEvent("m3u-guide-programme", {
@@ -440,13 +451,15 @@
     const generated = channel.generated
       ? '<span class="badge text-bg-primary guide-generated-badge">Auto</span>'
       : "";
-    const isPlaying = guideState.currentChannel?.play_url === channel.play_url;
+    const isCurrent = guideState.currentChannel?.play_url === channel.play_url;
+    const isListening = isCurrent && guideState.mode === "listen";
+    const isPlaying = isCurrent && !isListening;
     const nowLeft = (bounds.now.getTime() - bounds.start.getTime()) / 60000 * GUIDE_PX_PER_MINUTE;
     const nowMarker = nowLeft >= 0 && nowLeft <= bounds.width
       ? `<div class="guide-now-marker" style="left:${nowLeft}px" aria-hidden="true"></div>`
       : "";
 
-    return `<div class="guide-grid-row${isPlaying ? " guide-current-row" : ""}">
+    return `<div class="guide-grid-row${isCurrent ? " guide-current-row" : ""}">
       <div class="guide-station-cell">
         <div class="guide-station-number">${escapeHtml(channel.number)}</div>
         ${logo}
@@ -456,6 +469,9 @@
         </div>
         <button type="button" class="btn ${isPlaying ? "btn-outline-light" : "btn-success"} btn-sm guide-station-play"
           data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
+        <button type="button" class="btn ${isListening ? "btn-danger" : "btn-outline-info"} btn-sm guide-station-listen"
+          data-guide-play-url="${escapeHtml(channel.play_url)}" data-guide-listen="true"
+          data-guide-listen-action="${isListening ? "stop" : "start"}">${isListening ? "Stop" : "Listen"}</button>
       </div>
       <div class="guide-programme-track" style="width:${bounds.width}px;--guide-slot-width:${bounds.slotWidth}px">
         ${renderProgrammeBlocks(channel, bounds, query)}
