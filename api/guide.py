@@ -102,6 +102,14 @@ def _resolve_roku_host(data: dict) -> tuple[str, str]:
 
 
 def register_guide_routes(app):
+    @app.get("/guide-sw.js")
+    def guide_service_worker():
+        response = app.send_static_file("js/guide-sw.js")
+        response.mimetype = "application/javascript"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Service-Worker-Allowed"] = "/guide"
+        return response
+
     @app.get("/api/guide/config")
     def api_guide_config():
         settings = load_settings()

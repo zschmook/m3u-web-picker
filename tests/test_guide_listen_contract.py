@@ -57,6 +57,9 @@ class GuideListenContractTests(unittest.TestCase):
             (ROOT / "static/remote.webmanifest").read_text(encoding="utf-8")
         )
         guide = (ROOT / "templates/guide.html").read_text(encoding="utf-8")
+        guide_script = (ROOT / "static/js/guide.js").read_text(encoding="utf-8")
+        guide_worker = (ROOT / "static/js/guide-sw.js").read_text(encoding="utf-8")
+        guide_api = (ROOT / "api/guide.py").read_text(encoding="utf-8")
         remote = (ROOT / "templates/remote.html").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -71,6 +74,17 @@ class GuideListenContractTests(unittest.TestCase):
         self.assertIn("guide.webmanifest", guide)
         self.assertNotIn("remote.webmanifest", guide)
         self.assertIn("guide-focus-existing-1", guide)
+        self.assertIn('navigator.serviceWorker.register("/guide-sw.js"', guide_script)
+        self.assertIn('scope: "/guide"', guide_script)
+        self.assertIn('event.request.mode === "navigate"', guide_worker)
+        self.assertIn('@app.get("/guide-sw.js")', guide_api)
+        self.assertIn('response.headers["Service-Worker-Allowed"] = "/guide"', guide_api)
+        self.assertEqual(
+            {icon["sizes"] for icon in guide_manifest["icons"]},
+            {"192x192", "512x512"},
+        )
+        for icon in guide_manifest["icons"]:
+            self.assertTrue((ROOT / icon["src"].lstrip("/")).is_file())
         self.assertIn("remote.webmanifest", remote)
         self.assertIn("focus-existing-1", remote)
         self.assertIn("Do not expose M3U Web Picker directly", readme)

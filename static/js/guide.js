@@ -52,6 +52,16 @@ const guideEls = {
   castScreenChannel: document.getElementById("guideCastScreenChannel"),
 };
 
+function registerGuideServiceWorker() {
+  if (!window.isSecureContext || !("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/guide-sw.js", {
+    scope: "/guide",
+    updateViaCache: "none",
+  }).catch(error => {
+    console.warn("Could not register the TV Guide app worker", error);
+  });
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -908,6 +918,7 @@ guideEls.lanTestBtn.addEventListener("click", testLanRelay);
 
 const savedRokuHost = localStorage.getItem("m3u-guide-roku-host") || "";
 if (savedRokuHost) guideEls.rokuHost.value = savedRokuHost;
+registerGuideServiceWorker();
 updateRokuControls();
 updateCastStatus();
 loadGuideConfig();
