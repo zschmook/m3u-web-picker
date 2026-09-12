@@ -554,6 +554,7 @@
       }
       renderGuide();
       renderGuideStatus(data);
+      restoreListenSession();
     } catch (error) {
       if (!silent) {
         guideState.channels = [];

@@ -16,7 +16,7 @@ class GuideListenContractTests(unittest.TestCase):
 
         self.assertIn('id="guideProgrammeListen"', template)
         self.assertIn('id="guideAudioPlayer"', template)
-        self.assertIn("function startListenMode(channel)", guide)
+        self.assertIn("function startListenMode(channel, {handoff = false} = {})", guide)
         self.assertNotIn("async function startListenMode(channel)", guide)
         self.assertIn("/guide/listen?play_url=", guide)
         self.assertIn('data-guide-listen="true"', programmes)
@@ -24,6 +24,11 @@ class GuideListenContractTests(unittest.TestCase):
         self.assertIn('${isListening ? "Stop" : "Listen"}', programmes)
         self.assertIn('el("guideProgrammeListen").classList.toggle("d-none", !current)', dvr)
         self.assertIn("browser.response_for(target, audio_only=True)", guide_api)
+        self.assertIn('const GUIDE_LISTEN_SESSION_KEY = "m3u-guide-active-listen"', guide)
+        self.assertIn("function restoreListenSession()", guide)
+        self.assertIn("startListenMode(channel, {handoff: true})", guide)
+        self.assertIn('window.addEventListener("storage"', guide)
+        self.assertIn("restoreListenSession();", programmes)
 
     def test_mobile_media_card_uses_show_and_channel_metadata(self):
         guide = (ROOT / "static/js/guide.js").read_text(encoding="utf-8")

@@ -1,3 +1,8 @@
+const GUIDE_LISTEN_SESSION_KEY = "m3u-guide-active-listen";
+const GUIDE_LISTEN_SESSION_MAX_AGE_MS = 2 * 60 * 1000;
+const guideListenClientId = globalThis.crypto?.randomUUID?.()
+  || `guide-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 const guideState = {
   channels: [],
   currentChannel: null,
@@ -19,6 +24,8 @@ const guideState = {
   listen: {
     active: false,
     diagnosticTimer: null,
+    heartbeatTimer: null,
+    restoreAttempted: false,
   },
 };
 
@@ -129,6 +136,7 @@ async function loadGuide() {
     guideState.channels = Array.isArray(data.channels) ? data.channels : [];
     renderGuide();
     guideEls.status.textContent = `${guideState.channels.length.toLocaleString()} currently served channel${guideState.channels.length === 1 ? "" : "s"}`;
+    restoreListenSession();
   } catch (error) {
     guideState.channels = [];
     renderGuide();
@@ -469,8 +477,54 @@ function stopLocalStream({hidePanel = false} = {}) {
   if (hidePanel) guideEls.playerPanel.classList.add("d-none");
 }
 
-function stopListenStream() {
+function storedListenSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem(GUIDE_LISTEN_SESSION_KEY) || "null");
+    if (!session?.channel?.play_url || !Number.isFinite(Number(session.updated_at))) return null;
+    return session;
+  } catch (_) {
+    return null;
+  }
+}
+
+function stopListenHeartbeat() {
+  if (guideState.listen.heartbeatTimer !== null) {
+    window.clearInterval(guideState.listen.heartbeatTimer);
+    guideState.listen.heartbeatTimer = null;
+  }
+}
+
+function rememberListenSession(channel = guideState.currentChannel, {startHeartbeat = true} = {}) {
+  if (!guideState.listen.active || !channel?.play_url) return;
+  const existing = storedListenSession();
+  if (existing?.owner && existing.owner !== guideListenClientId) return;
+  localStorage.setItem(GUIDE_LISTEN_SESSION_KEY, JSON.stringify({
+    owner: guideListenClientId,
+    updated_at: Date.now(),
+    channel: {
+      play_url: String(channel.play_url || ""),
+      name: String(channel.name || "Channel"),
+      group: String(channel.group || ""),
+      logo: String(channel.logo || ""),
+    },
+  }));
+  if (startHeartbeat && guideState.listen.heartbeatTimer === null) {
+    guideState.listen.heartbeatTimer = window.setInterval(() => {
+      rememberListenSession();
+    }, 10_000);
+  }
+}
+
+function forgetOwnedListenSession() {
+  const existing = storedListenSession();
+  if (!existing || existing.owner === guideListenClientId) {
+    localStorage.removeItem(GUIDE_LISTEN_SESSION_KEY);
+  }
+}
+
+function stopListenStream({preserveSession = false} = {}) {
   guideState.listen.active = false;
+  stopListenHeartbeat();
   if (guideState.listen.diagnosticTimer !== null) {
     window.clearTimeout(guideState.listen.diagnosticTimer);
     guideState.listen.diagnosticTimer = null;
@@ -480,6 +534,7 @@ function stopListenStream() {
   guideEls.audioPlayer.load();
   guideEls.listenPanel.classList.add("d-none");
   clearListenMediaSession();
+  if (!preserveSession) forgetOwnedListenSession();
 }
 
 async function stopRemoteMedia() {
@@ -602,17 +657,18 @@ async function showListenFailureDetail(fallback = "The channel did not produce a
   }
 }
 
-function startListenMode(channel) {
+function startListenMode(channel, {handoff = false} = {}) {
   // Keep play() in the original click call stack. Some browsers revoke media
   // autoplay permission as soon as an awaited cleanup yields control.
   stopLocalStream({hidePanel: false});
-  stopListenStream();
+  stopListenStream({preserveSession: handoff});
   void stopRemoteMedia();
   void stopCastRelay();
   void stopRokuPlayback({sendHome: true});
   setCurrentChannel(channel);
   showListenPlayer();
   updateListenMediaSession(guideState.currentChannel || channel);
+  rememberListenSession(guideState.currentChannel || channel, {startHeartbeat: false});
   guideEls.playerMessage.textContent = "Starting audio-only stream…";
   guideEls.audioPlayer.src = localListenUrl(channel);
   guideState.listen.diagnosticTimer = window.setTimeout(() => {
@@ -627,6 +683,28 @@ function startListenMode(channel) {
       guideEls.playerMessage.textContent = "Press Play to start listening.";
     });
   }
+}
+
+function restoreListenSession() {
+  if (guideState.listen.restoreAttempted || guideState.listen.active || !guideState.channels.length) return;
+  guideState.listen.restoreAttempted = true;
+  const session = storedListenSession();
+  if (!session) return;
+  if ((Date.now() - Number(session.updated_at)) > GUIDE_LISTEN_SESSION_MAX_AGE_MS) {
+    localStorage.removeItem(GUIDE_LISTEN_SESSION_KEY);
+    return;
+  }
+
+  const channel = guideState.channels.find(item => (
+    String(item.play_url || "") === String(session.channel.play_url || "")
+  )) || session.channel;
+  localStorage.setItem(GUIDE_LISTEN_SESSION_KEY, JSON.stringify({
+    ...session,
+    owner: guideListenClientId,
+    updated_at: Date.now(),
+    channel: session.channel,
+  }));
+  startListenMode(channel, {handoff: true});
 }
 
 function playLocalChannel(channel) {
@@ -874,6 +952,7 @@ guideEls.audioPlayer.addEventListener("playing", () => {
     guideState.listen.diagnosticTimer = null;
   }
   showListenPlayer();
+  rememberListenSession();
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   guideEls.playerMessage.textContent = "Audio only · video removed by FFmpeg";
 });
@@ -889,6 +968,17 @@ guideEls.audioPlayer.addEventListener("waiting", () => {
 
 guideEls.audioPlayer.addEventListener("error", () => {
   void showListenFailureDetail("The channel may not expose an audio track.");
+});
+
+window.addEventListener("storage", event => {
+  if (event.key !== GUIDE_LISTEN_SESSION_KEY || !guideState.listen.active) return;
+  const session = storedListenSession();
+  if (!session || session.owner === guideListenClientId) return;
+  stopListenStream({preserveSession: true});
+  guideState.mode = "stopped";
+  guideState.currentChannel = null;
+  guideEls.playerPanel.classList.add("d-none");
+  renderGuide();
 });
 
 guideEls.rows.addEventListener("click", event => {
