@@ -130,19 +130,21 @@ def response_for(
                 return
             cleaned_up = True
         watcher_stop.set()
-        terminate(process)
-        if process.stdout is not None:
-            try:
-                process.stdout.close()
-            except Exception:
-                pass
-        if audio_only and process.stderr is not None:
-            try:
-                process.stderr.close()
-            except Exception:
-                pass
-        media_pipeline.release_session(session_token)
-        notify_stop()
+        try:
+            terminate(process)
+        finally:
+            if process.stdout is not None:
+                try:
+                    process.stdout.close()
+                except Exception:
+                    pass
+            if audio_only and process.stderr is not None:
+                try:
+                    process.stderr.close()
+                except Exception:
+                    pass
+            media_pipeline.release_session(session_token)
+            notify_stop()
 
     def generate():
         try:
