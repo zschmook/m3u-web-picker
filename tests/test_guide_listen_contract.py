@@ -28,6 +28,8 @@ class GuideListenContractTests(unittest.TestCase):
         self.assertIn("function restoreListenSession()", guide)
         self.assertIn("startListenMode(channel, {handoff: true})", guide)
         self.assertIn('window.addEventListener("storage"', guide)
+        self.assertIn("{forceTakeover: true}", guide)
+        self.assertNotIn("owner: guideListenClientId,\n    updated_at: Date.now(),\n    channel: session.channel", guide)
         self.assertIn("restoreListenSession();", programmes)
 
     def test_mobile_media_card_uses_show_and_channel_metadata(self):

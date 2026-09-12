@@ -494,10 +494,13 @@ function stopListenHeartbeat() {
   }
 }
 
-function rememberListenSession(channel = guideState.currentChannel, {startHeartbeat = true} = {}) {
+function rememberListenSession(channel = guideState.currentChannel, {
+  startHeartbeat = true,
+  forceTakeover = false,
+} = {}) {
   if (!guideState.listen.active || !channel?.play_url) return;
   const existing = storedListenSession();
-  if (existing?.owner && existing.owner !== guideListenClientId) return;
+  if (!forceTakeover && existing?.owner && existing.owner !== guideListenClientId) return;
   localStorage.setItem(GUIDE_LISTEN_SESSION_KEY, JSON.stringify({
     owner: guideListenClientId,
     updated_at: Date.now(),
@@ -698,12 +701,6 @@ function restoreListenSession() {
   const channel = guideState.channels.find(item => (
     String(item.play_url || "") === String(session.channel.play_url || "")
   )) || session.channel;
-  localStorage.setItem(GUIDE_LISTEN_SESSION_KEY, JSON.stringify({
-    ...session,
-    owner: guideListenClientId,
-    updated_at: Date.now(),
-    channel: session.channel,
-  }));
   startListenMode(channel, {handoff: true});
 }
 
@@ -952,7 +949,10 @@ guideEls.audioPlayer.addEventListener("playing", () => {
     guideState.listen.diagnosticTimer = null;
   }
   showListenPlayer();
-  rememberListenSession();
+  // Transfer ownership only after this document is genuinely audible. A fresh
+  // mobile launch may have play() rejected by autoplay policy; in that case the
+  // original document must keep playing instead of being stopped prematurely.
+  rememberListenSession(guideState.currentChannel, {forceTakeover: true});
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   guideEls.playerMessage.textContent = "Audio only · video removed by FFmpeg";
 });

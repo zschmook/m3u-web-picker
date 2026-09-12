@@ -119,7 +119,7 @@ def guide():
         '<script src="/static/js/guide_cast_ui.js?v=cast-flow-3"></script>\n'
         '<script src="/static/js/guide_pip.js?v=pip-4"></script>\n'
         '<script src="/static/js/guide_stream_menu.js?v=stream-menu-1"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=guide-audio-handoff-1"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=guide-audio-handoff-2"></script>\n'
         '<script src="/static/js/guide_dvr.js?v=guide-audio-only-1"></script>\n'
         '<script src="/static/js/guide_event_logo_bridge.js?v=event-logo-2"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
