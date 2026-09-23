@@ -162,7 +162,8 @@
 .guide-player {
   display: block;
   width: 100%;
-  max-height: 62vh;
+  height: auto;
+  max-height: none;
   margin-top: .7rem;
   background: #000;
   border-radius: .45rem;
