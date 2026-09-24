@@ -170,12 +170,46 @@ def generated_stream_target(db_path: Path | str, assigned_number: int) -> str:
     _s.init_db(db_path)
     if not _s.get_settings(db_path).get("enabled"):
         return ""
-    with closing(_s._connect(db_path)) as conn:
-        row = conn.execute(
-            "SELECT url FROM sports_generated WHERE assigned_number = ?",
-            (int(assigned_number),),
-        ).fetchone()
-    return str(row["url"] or "").strip() if row else ""
+    from channel_availability import availability
+    row = next((item for item in generated_rows(db_path)
+                if int(item["assigned_number"]) == int(assigned_number)), None)
+    if not row:
+        return ""
+    import core
+    urls = core.enabled_sports_candidates(row) if Path(db_path) == Path(core.DB_PATH) else stream_candidates(row)
+    return availability.resolve(urls)
+
+
+def stream_candidates(row):
+    values = (row.get("epg_programme") or {}).get("_stream_candidates")
+    return list(dict.fromkeys(values or [row.get("url", "")]))
+
+
+def retain_partial_rows(db_path, generated):
+    """Keep existing slots during incomplete refreshes; avoid number collisions."""
+    previous = generated_rows(db_path, include_cached=True)
+    by_key = {row["channel_key"]: row for row in previous}
+    occupied = {int(row["assigned_number"]) for row in previous}
+    result = dict(by_key)
+    event_candidates = {}
+    for item in generated:
+        event_candidates.setdefault(item["event_key"], []).extend(stream_candidates(item))
+    for old in previous:
+        if old["event_key"] in event_candidates:
+            old.setdefault("epg_programme", {})["_stream_candidates"] = list(dict.fromkeys(
+                event_candidates[old["event_key"]] + stream_candidates(old)))
+    for item in generated:
+        old = by_key.get(item["channel_key"])
+        number = int(old["assigned_number"] if old else item["assigned_number"])
+        if not old:
+            while number in occupied:
+                number += 1
+        occupied.add(number)
+        item["assigned_number"] = number
+        item["playback_url"] = generated_stream_path(number)
+        item["raw"] = _generated_raw(item, item)
+        result[item["channel_key"]] = item
+    return sorted(result.values(), key=lambda item: int(item["assigned_number"]))
 
 
 def generated_channel_payloads(db_path: Path | str) -> list[dict]:

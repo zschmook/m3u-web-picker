@@ -26,6 +26,10 @@
     },
   ];
 
+  // Share the setup playlist choices with the provider quick-add controls.
+  window.publicM3uPlaylists = DEMO_PLAYLISTS;
+  if (typeof renderFreeFallbackProviders === "function") renderFreeFallbackProviders();
+
   const state = {
     manual: null,
   };

@@ -11,7 +11,14 @@ def register_output_routes(app):
     def curated_playlist_text(*, encoded: bool) -> str:
         lines = ["#EXTM3U"]
         base_url = request.url_root.rstrip("/")
-        for number, channel in enumerate(core.selected_channels_from_selected_ids_in_order(), start=1):
+        fallback_sets = core.manual_fallback_channel_sets()
+        primary_channels = core.active_primary_channels()
+        enabled_urls = {item.get("url") for item in core.manual_channel_catalog()}
+        for number, channel in enumerate(core.saved_manual_guide_channels(), start=1):
+            candidates = core.candidate_urls(channel, primary_channels, fallback_sets, core.channel_key)
+            available, target = core.availability.lookup(candidates)
+            if available is False:
+                continue
             raw = core.apply_channel_number(channel, number)
             if not raw:
                 continue
@@ -19,17 +26,21 @@ def register_output_routes(app):
             token = key.split(":", 1)[1] if key.startswith("manual:") else ""
             raw[-1] = (
                 f"{base_url}/stream/channel/manual/{token}/mpegts"
-                if encoded and token else str(channel.get("url", "") or "")
+                if encoded and token else target or str(channel.get("url", "") or "")
             )
             lines.extend(raw)
         for row in sports.generated_rows(core.DB_PATH):
+            candidates = core.enabled_sports_candidates(row, enabled_urls=enabled_urls)
+            available, target = core.availability.lookup(candidates)
+            if available is False:
+                continue
             raw = list(row.get("raw", []))
             if not raw:
                 continue
             number = int(row.get("assigned_number") or 0)
             raw[-1] = (
                 f"{base_url}/stream/channel/sports/{number}/mpegts"
-                if encoded else str(row.get("url", "") or "")
+                if encoded else target or str(row.get("url", "") or "")
             )
             lines.extend(raw)
         return "\n".join(lines) + "\n"

@@ -27,6 +27,7 @@ import sports
 import app_config
 import dvr
 import commercial_lab_rotation
+from channel_availability import availability, candidate_urls
 from backup import create_database_backup
 from database import connect as connect_database
 from settings import SETTINGS
@@ -314,6 +315,8 @@ def _selection_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 def _match_saved_manual_row(row: sqlite3.Row, claimed: set[int]) -> dict | None:
     """Resolve a saved v21.8-or-earlier URL key to one current provider row."""
     exact_key = str(row["key"] or "")
+    if exact_key.startswith("manual:fallback-"):
+        return None
     for channel in channels:
         channel_id = int(channel.get("id", -1))
         if channel_id not in claimed and channel_key(channel) == exact_key:
@@ -463,7 +466,7 @@ def load_selected_keys_from_db() -> set[str]:
         conn.close()
 
 
-def save_selected_channels_to_db(selected_channels: list[dict]) -> None:
+def save_selected_channels_to_db(selected_channels: list[dict], *, preserve_missing: bool = False) -> None:
     conn = db_connect()
     try:
         existing_order = {
@@ -474,7 +477,13 @@ def save_selected_channels_to_db(selected_channels: list[dict]) -> None:
             [order for order in existing_order.values() if order is not None] or [-1]
         ) + 1
 
-        conn.execute("DELETE FROM selections")
+        if preserve_missing:
+            # A refresh must not erase saved rows absent from the new catalog.
+            # Only currently loaded rows can have been explicitly deselected.
+            conn.executemany("DELETE FROM selections WHERE key = ?",
+                             [(channel_key(channel),) for channel in manual_channel_catalog()])
+        else:
+            conn.execute("DELETE FROM selections")
         for channel in selected_channels:
             key = channel_key(channel)
             if not key:
@@ -573,7 +582,7 @@ def apply_saved_selections_to_loaded_channels() -> None:
     saved_keys = load_selected_keys_from_db()
     selected_ids = {
         int(channel["id"])
-        for channel in channels
+        for channel in manual_channel_catalog()
         if channel_key(channel) in saved_keys
     }
 
@@ -1392,7 +1401,7 @@ def detect_provider_source(
 
 def selected_channels_from_selected_ids_in_order() -> list[dict]:
     selected_channels = [
-        channel for channel in channels if int(channel["id"]) in selected_ids
+        channel for channel in manual_channel_catalog() if int(channel["id"]) in selected_ids
     ]
     conn = db_connect()
     try:
@@ -1413,26 +1422,105 @@ def selected_channels_from_selected_ids_in_order() -> list[dict]:
     return sorted(selected_channels, key=sort_key)
 
 
-def write_current_playlist() -> int:
+def write_current_playlist(*, preserve_missing: bool = True) -> int:
     with state_lock:
         manual_channels = selected_channels_from_selected_ids_in_order()
+        save_selected_channels_to_db(manual_channels, preserve_missing=preserve_missing)
+        if preserve_missing:
+            manual_channels = saved_manual_guide_channels()
         generated = sports.generated_rows(DB_PATH)
         # Manual/static and generated sports channels intentionally coexist.
         # Never deduplicate across these namespaces, even when their stream URL
         # or provider tvg-id is identical. Jellyfin distinguishes the generated
         # row by its unique m3u-picker-sports tvg-id and channel number.
         lines = ["#EXTM3U"]
+        enabled_urls = {item.get("url") for item in manual_channel_catalog()}
         for number, channel in enumerate(manual_channels, start=1):
-            lines.extend(apply_channel_number(channel, number))
+            raw = apply_channel_number(channel, number)
+            if raw and channel.get("url") not in enabled_urls:
+                raw[-1] = "/stream/channel/manual/" + channel_key(channel).split(":", 1)[1] + "/mpegts"
+            lines.extend(raw)
         for row in generated:
             lines.extend(row.get("raw", []))
         atomic_write_text(PLAYLIST_PATH, "\n".join(lines) + "\n")
-        save_selected_channels_to_db(manual_channels)
         return len(manual_channels) + len(generated)
 
 
 def channel_by_key_map() -> dict[str, dict]:
-    return {channel_key(channel): channel for channel in channels if channel_key(channel)}
+    return {channel_key(channel): channel for channel in manual_channel_catalog() if channel_key(channel)}
+
+
+def active_primary_channels():
+    primary = primary_provider_source()
+    return channels if primary is None or primary.get("enabled", True) else []
+
+
+def enabled_sports_candidates(row, *, enabled_urls=None):
+    from sports.generated import stream_candidates
+    if enabled_urls is None:
+        enabled_urls = {item.get("url") for item in manual_channel_catalog()}
+    return [url for url in stream_candidates(row) if url in enabled_urls]
+
+
+def update_provider(source_id, data):
+    source = find_provider_source(source_id)
+    if not source:
+        raise ValueError("Provider not found.")
+    updated = dict(source)
+    if "name" in data:
+        name = str(data["name"]).strip()
+        if not name:
+            raise ValueError("Provider name is required.")
+        updated["name"] = name
+    if "enabled" in data:
+        if not isinstance(data["enabled"], bool):
+            raise ValueError("Enabled must be true or false.")
+        updated["enabled"] = data["enabled"]
+    if data.get("url"):
+        url = str(data["url"]).strip()
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Enter a valid HTTP or HTTPS provider URL.")
+        updated["url"] = url
+    for field in ("username", "password"):
+        if data.get(field):
+            updated[field] = str(data[field])
+    if bool(updated.get("username")) != bool(updated.get("password")):
+        raise ValueError("Both username and password are required for Xtream.")
+    if data.get("clear_credentials"):
+        updated.update(username="", password="", kind="m3u", xtream_api=False)
+    elif updated.get("username"):
+        updated["kind"] = "xtream"
+        updated["url"] = normalize_provider_base_url(updated["url"])
+    with state_lock:
+        source.update(updated)
+        apply_saved_selections_to_loaded_channels()
+        save_config()
+        write_current_playlist()
+    return source
+
+
+def manual_channel_catalog() -> list[dict]:
+    """Selectable primary and fallback rows with stable, non-overlapping IDs."""
+    result = list(active_primary_channels())
+    for source in provider_sources:
+        if source.get("role") != "fallback" or not source.get("enabled", True):
+            continue
+        seen = set()
+        for channel in _load_provider_cache(source):
+            item = dict(channel)
+            identity = str(source.get("id", "")) + ":" + channel_key(item)
+            digest = hashlib.sha256(identity.encode()).hexdigest()
+            item["key"] = "manual:fallback-" + digest
+            if item["key"] in seen:
+                continue
+            seen.add(item["key"])
+            # Exactly representable by JavaScript; primary IDs remain unchanged.
+            item["id"] = (1 << 48) + int(digest[:12], 16)
+            item["provider_source_name"] = str(source.get("name") or source.get("id") or "Fallback")
+            item["provider_source_id"] = source.get("id")
+            result.append(item)
+    return result
 
 
 def combined_channels_for_api() -> list[dict]:
@@ -1441,11 +1529,58 @@ def combined_channels_for_api() -> list[dict]:
     # values never suppress either row. Generated rows retain negative IDs so the
     # selection endpoint never treats them as editable manual selections.
     manual_payload = []
-    for channel in channels:
+    for channel in manual_channel_catalog():
         item = dict(channel)
         item["key"] = channel_key(item)
         manual_payload.append(item)
     return [*manual_payload, *sports.generated_channel_payloads(DB_PATH)]
+
+
+def saved_manual_guide_channels() -> list[dict]:
+    """Keep absent saved selections in their original guide positions."""
+    current = {channel_key(item): item for item in selected_channels_from_selected_ids_in_order()}
+    conn = db_connect()
+    try:
+        rows = _selection_rows(conn)
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        item = current.pop(row["key"], None) or {
+            "key": row["key"], "name": row["name"], "group": row["group_title"],
+            "tvg_id": row["tvg_id"], "url": row["url"],
+        }
+        if not item.get("raw"):
+            def attr(value):
+                return str(value or "").replace('"', "'").replace("\n", " ").replace("\r", " ")
+            item["raw"] = [
+                f'#EXTINF:-1 tvg-id="{attr(item.get("tvg_id"))}" group-title="{attr(item.get("group"))}",{attr(item.get("name"))}',
+                str(item.get("url") or ""),
+            ]
+        result.append(item)
+    return [*result, *current.values()]
+
+
+def manual_fallback_channel_sets() -> list[list[dict]]:
+    return [_load_provider_cache(source) for source in sorted(
+        provider_sources, key=lambda item: int(item.get("priority", 999)))
+        if source.get("role") == "fallback" and source.get("enabled", True)]
+
+
+_manual_health_candidates: dict[str, list[str]] = {}
+
+
+def manual_fallback_usage() -> dict:
+    primary_urls = {channel.get("url") for channel in channels}
+    checked = used = 0
+    for channel in saved_manual_guide_channels():
+        urls = _manual_health_candidates.get(channel_key(channel), [])
+        available, target = availability.peek(urls)
+        if available is not None:
+            checked += 1
+        if available is True and target and target not in primary_urls:
+            used += 1
+    return {"checked": checked, "used": used}
 
 
 def manual_stream_target(token: str) -> str:
@@ -1453,22 +1588,29 @@ def manual_stream_target(token: str) -> str:
     expected_key = f"manual:{str(token or '').strip()}"
     if expected_key == "manual:":
         return ""
-    for channel in selected_channels_from_selected_ids_in_order():
+    for channel in saved_manual_guide_channels():
         if channel_key(channel) != expected_key:
             continue
-        return str(channel.get("url", "") or "").strip()
+        urls = candidate_urls(channel, active_primary_channels(), manual_fallback_channel_sets(), channel_key)
+        _manual_health_candidates[expected_key] = urls
+        _available, target = availability.lookup(urls)
+        return target
     return ""
 
 
 def curated_channels_for_guide() -> list[dict]:
     """Return the exact currently served curated lineup without exposing provider URLs."""
     output: list[dict] = []
+    fallback_sets = manual_fallback_channel_sets()
 
-    for number, channel in enumerate(selected_channels_from_selected_ids_in_order(), start=1):
+    for number, channel in enumerate(saved_manual_guide_channels(), start=1):
         key = channel_key(channel)
         token = key.split(":", 1)[1] if key.startswith("manual:") else ""
         if not token:
             continue
+        urls = candidate_urls(channel, active_primary_channels(), fallback_sets, channel_key)
+        _manual_health_candidates[key] = urls
+        available, _target = availability.lookup(urls)
         output.append({
             "number": number,
             "name": str(channel.get("name", "") or ""),
@@ -1477,14 +1619,21 @@ def curated_channels_for_guide() -> list[dict]:
             "tvg_id": str(channel.get("tvg_id", "") or ""),
             "subtitle": "",
             "generated": False,
+            "available": available,
+            "availability_reason": "No working stream found in the primary or fallback providers." if available is False else "",
             "play_url": f"/guide/play/manual/{token}",
         })
 
+    enabled_urls = {item.get("url") for item in manual_channel_catalog()}
     for row in sports.generated_rows(DB_PATH):
         assigned = int(row.get("assigned_number") or 0)
         if assigned <= 0:
             continue
+        from sports.generated import stream_candidates
+        available, _target = availability.lookup(enabled_sports_candidates(row, enabled_urls=enabled_urls))
         output.append({
+            "available": available,
+            "availability_reason": "No working sports feed found." if available is False else "",
             "number": assigned,
             "name": str(row.get("display_name", "") or ""),
             "group": str(row.get("group_title", "") or ""),
@@ -1723,12 +1872,14 @@ def provider_sources_payload() -> list[dict]:
                 "source_label": friendly_source_label(str(source.get("url", ""))),
                 "kind": str(source.get("kind", "m3u") or "m3u"),
                 "xtream_api": bool(source.get("xtream_api")),
+                "enabled": source.get("enabled", True),
                 "credentials_saved": bool(source.get("username") and source.get("password")),
                 "cached": cache.exists(),
                 "channel_count": int(source.get("channel_count", 0) or 0),
                 "deferred": bool(source.get("deferred")),
                 "warning": source.get("warning"),
                 "last_refresh": source.get("last_refresh"),
+                "last_refresh_attempt": source.get("last_refresh_attempt"),
                 "last_error": source.get("last_error"),
                 "account_status": source.get("account_status"),
                 "expires_at": source.get("expires_at"),
@@ -1846,7 +1997,7 @@ def remove_primary_source() -> bool:
 
         MASTER_CACHE_PATH.unlink(missing_ok=True)
         EPG_CACHE_PATH.unlink(missing_ok=True)
-        sports.clear_generated_channels(DB_PATH)
+        apply_saved_selections_to_loaded_channels()
         save_config()
         write_current_playlist()
         try:
@@ -1857,11 +2008,17 @@ def remove_primary_source() -> bool:
 
 
 def refresh_provider_source(source: dict, cancel_check=None) -> tuple[bool, str, list[dict]]:
+    if not source.get("enabled", True):
+        return True, "Provider disabled; refresh skipped.", []
     source_id = normalize_provider_id(source.get("id", ""))
+    source["last_refresh_attempt"] = datetime.now().astimezone().isoformat(timespec="seconds")
     try:
         refresh_xtream_account_metadata(source, cancel_check=cancel_check)
         text, parsed = load_provider_playlist(source, cancel_check=cancel_check)
         atomic_write_text(provider_cache_path(source_id), text)
+        if source.get("role") == "fallback":
+            with state_lock:
+                apply_saved_selections_to_loaded_channels()
         source["last_refresh"] = datetime.now().astimezone().isoformat(timespec="seconds")
         source["last_error"] = None
         source["deferred"] = False
@@ -1885,6 +2042,8 @@ def refresh_provider_source(source: dict, cancel_check=None) -> tuple[bool, str,
 
 
 def refresh_provider_epg(source: dict, cancel_check=None) -> tuple[bool, str]:
+    if not source.get("enabled", True):
+        return True, "Provider disabled; guide refresh skipped."
     url = provider_xmltv_url(source)
     if not url:
         return False, "No Xtream XMLTV URL could be derived."
@@ -1898,12 +2057,21 @@ def refresh_provider_epg(source: dict, cancel_check=None) -> tuple[bool, str]:
         return False, redact_url_credentials(str(exc))
 
 
+_parsed_provider_caches: dict = {}
+
+
 def _load_provider_cache(source: dict) -> list[dict]:
     path = provider_cache_path(str(source.get("id", "")))
     if not path.exists():
         return []
     try:
-        return validate_m3u_text(path.read_text(encoding="utf-8-sig", errors="replace"))
+        stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+        cached = _parsed_provider_caches.get(str(path))
+        if cached and cached[0] == stamp:
+            return cached[1]
+        parsed = validate_m3u_text(path.read_text(encoding="utf-8-sig", errors="replace"))
+        _parsed_provider_caches[str(path)] = (stamp, parsed)
+        return parsed
     except Exception:
         return []
 
@@ -1911,7 +2079,7 @@ def _load_provider_cache(source: dict) -> list[dict]:
 def sports_provider_channel_sets() -> list[tuple[dict, list[dict]]]:
     """Return primary/fallback channel sets annotated for sports precedence."""
     primary = primary_provider_source()
-    if primary is None:
+    if primary is None and not provider_sources:
         if not channels:
             return []
         # File uploads and pre-migration state remain a valid single primary.
@@ -1926,6 +2094,8 @@ def sports_provider_channel_sets() -> list[tuple[dict, list[dict]]]:
 
     sets: list[tuple[dict, list[dict]]] = []
     for source in sorted(provider_sources, key=lambda item: int(item.get("priority", 999))):
+        if not source.get("enabled", True):
+            continue
         source_channels = channels if source.get("role") == "primary" else _load_provider_cache(source)
         if not source_channels:
             continue
@@ -1933,7 +2103,7 @@ def sports_provider_channel_sets() -> list[tuple[dict, list[dict]]]:
         for channel in source_channels:
             item = dict(channel)
             item["_provider_source_id"] = normalize_provider_id(source.get("id", ""))
-            item["_provider_priority"] = int(source.get("priority", 999))
+            item["_provider_priority"] = int(source.get("priority", 999)) + (1000 if source.get("last_error") else 0)
             item["_provider_role"] = str(source.get("role", "fallback"))
             annotated.append(item)
         sets.append((source, annotated))
@@ -2533,6 +2703,8 @@ def refresh_master_from_url(cancel_check=None) -> tuple[bool, str]:
     primary = primary_provider_source()
     if not primary:
         return False, "No source URL configured."
+    if not primary.get("enabled", True):
+        return True, "Primary disabled; using enabled fallbacks."
     ok, message, parsed = refresh_provider_source(primary, cancel_check=cancel_check)
     if not ok:
         return False, message
@@ -2584,7 +2756,7 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
     settings = sports.get_settings(DB_PATH)
     if not settings.get("enabled"):
         raise SportsScanError("Turn on Sports Automation before updating sports channels.")
-    if not channels:
+    if not channels and not provider_sources:
         raise SportsScanError("Load an M3U source before updating sports channels.")
     if not scan_lock.acquire(blocking=False):
         raise SportsScanError("A sports update is already running.")
@@ -2617,22 +2789,13 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         )
         cycle_trace.append("schedule_api")
 
-        if source_mode == "url" and primary_provider_source():
-            if refresh_source:
+        if provider_sources:
+            primary_failed = False
+            if refresh_source and primary_provider_source():
                 sports.update_scan_stage(DB_PATH, "2/6 Refreshing provider channels")
                 refreshed, message = refresh_master_from_url(cancel_check)
                 if not refreshed:
-                    sports.record_scan_failure(
-                        DB_PATH,
-                        "Provider playlist refresh failed.",
-                        trigger,
-                        started_at=scan_started_at,
-                    )
-                    failure_recorded = True
-                    print("Provider refresh failed during sports update.")
-                    raise SportsScanError(
-                        "Could not refresh the primary provider playlist. Existing sports channels were kept."
-                    )
+                    primary_failed = True
 
             # Even when the scheduler already refreshed the primary at the
             # master-playlist boundary, fallback caches still need their own
@@ -2644,6 +2807,9 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
                     provider_warnings.append(
                         f"{source.get('name', 'Fallback provider')}: {fallback_message}"
                     )
+
+            if primary_failed:
+                provider_warnings.append("Primary provider refresh failed; scanning available and cached catalogs.")
 
         cycle_trace.append("provider_refresh")
 
@@ -2686,6 +2852,8 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
 
         provider_sets = sports_provider_channel_sets()
         sports_channels = [channel for _source, source_channels in provider_sets for channel in source_channels]
+        if not sports_channels:
+            raise SportsScanError("No usable provider catalogs. Existing sports channels were kept.")
         provider_epg_sources: list[tuple[Path, list[dict]]] = []
         for source, source_channels in provider_sets:
             candidate = provider_epg_cache_path(str(source.get("id", "")))
@@ -2698,7 +2866,7 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         # also last-resort sports corroboration. Match their XMLTV IDs/names
         # against the primary IPTV catalog, but never let them replace provider
         # guide metadata when both exist.
-        primary_channels = provider_sets[0][1] if provider_sets else list(channels)
+        primary_channels = sports_channels
         existing_paths = {str(path.resolve()) for path, _channels in provider_epg_sources if path.exists()}
         for configured in epg_sources:
             configured_path = epg_cache_path(str(configured.get("id", "")))
@@ -2727,13 +2895,14 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             base_channel_ids=selected_xmltv_ids(),
             fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
             manual_channel_count=len(selected_channels_from_selected_ids_in_order()),
+            preserve_existing=bool(provider_warnings),
             cancel_check=cancel_check,
         )
         cycle_trace.extend(result.get("pipeline_trace") or [])
         result["provider_warnings"] = provider_warnings
         result["schedule_api"] = schedule_api_result
         if provider_warnings:
-            result["message"] += f" {len(provider_warnings)} fallback provider warning{'s' if len(provider_warnings) != 1 else ''}."
+            result["message"] += f" {len(provider_warnings)} provider warning{'s' if len(provider_warnings) != 1 else ''}."
         sports.update_scan_stage(DB_PATH, "5/6 Publishing M3U and XMLTV")
         write_current_playlist()
         cycle_trace.append("m3u_publish")
@@ -2924,6 +3093,10 @@ def run_master_update(*, trigger: str = "manual") -> dict:
             trace = ["schedule_api"]  # Disabled sports/API is an intentional no-op stage.
             if source_mode == "url" and primary_provider_source():
                 ok, message = refresh_master_from_url()
+                for source in [item for item in provider_sources if item.get("role") == "fallback"]:
+                    fallback_ok, fallback_message, _parsed = refresh_provider_source(source)
+                    if not fallback_ok:
+                        warnings.append(f"{source.get('name', 'Fallback provider')}: {fallback_message}")
                 if not ok:
                     raise SportsScanError("Could not refresh the primary provider playlist. Existing outputs were kept.")
             trace.append("provider_refresh")

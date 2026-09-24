@@ -107,17 +107,17 @@ thead th {
 
 .filter-toolbar {
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(260px, 360px) auto;
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 260px) minmax(160px, 220px) auto;
   align-items: end;
   gap: 16px;
 }
 
 .filter-search {
-  min-width: 320px;
+  min-width: 0;
 }
 
 .filter-provider {
-  min-width: 260px;
+  min-width: 0;
 }
 
 .filter-autosave {
@@ -1323,3 +1323,16 @@ thead th {
     white-space: normal;
   }
 }
+
+.provider-source-table { min-width: 1150px; }
+.provider-source-table col.provider-col-action { width: 230px; }
+.provider-source-table td.provider-actions { white-space: nowrap; width: 230px; }
+.provider-edit-dialog { width: min(520px, 94vw); color: #f8fafc; background: #1f2937; border: 1px solid #64748b; border-radius: 12px; padding: 24px; }
+.provider-edit-dialog::backdrop { background: #0009; }
+.provider-edit-dialog label { display: block; margin: 12px 0; }
+
+.provider-source-table { min-width: 0; width: 100%; table-layout: auto; }
+.provider-source-table col { width: auto !important; }
+.provider-source-table tr > th, .provider-source-table tr > td { min-width: 0 !important; width: auto !important; white-space: normal !important; }
+.provider-source-table tr > td.provider-actions { min-width: 90px !important; }
+.provider-actions .btn { display: block; width: 78px; margin: 3px 0 3px auto; }

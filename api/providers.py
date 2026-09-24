@@ -135,7 +135,7 @@ def register_provider_routes(app):
     def api_selection():
         data = request.get_json(force=True, silent=True) or {}
         ids = data.get("ids", [])
-        valid_provider_ids = {int(channel["id"]) for channel in core.channels}
+        valid_provider_ids = {int(channel["id"]) for channel in core.manual_channel_catalog()}
         core.selected_ids = {
             int(value)
             for value in ids
@@ -203,8 +203,22 @@ def register_provider_routes(app):
         )
         return jsonify(source=payload, sources=core.provider_sources_payload()), 201
 
+    @app.patch("/api/providers/<source_id>")
+    def api_edit_provider(source_id):
+        if core.master_update_runtime.get("running"):
+            return jsonify(error="Wait for the current update to finish before editing providers."), 409
+        if not core.find_provider_source(source_id):
+            return jsonify(error="Provider not found."), 404
+        try:
+            core.update_provider(source_id, request.get_json(force=True, silent=True) or {})
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(sources=core.provider_sources_payload())
+
     @app.delete("/api/providers/primary")
     def api_remove_primary_provider():
+        if core.master_update_runtime.get("running"):
+            return jsonify(error="Wait for the current update to finish before deleting providers."), 409
         if not core.remove_primary_source():
             return jsonify(error="Primary source not found."), 404
         return jsonify(
@@ -217,6 +231,8 @@ def register_provider_routes(app):
 
     @app.delete("/api/providers/<source_id>")
     def api_delete_fallback_provider(source_id: str):
+        if core.master_update_runtime.get("running"):
+            return jsonify(error="Wait for the current update to finish before deleting providers."), 409
         if not core.delete_fallback_provider(source_id):
             return jsonify(error="Fallback provider not found."), 404
         return jsonify(deleted=True, sources=core.provider_sources_payload())

@@ -28,6 +28,7 @@ class ScanContext:
     manual_channel_count: int
     cancel_check: _s.CancelCheck
     settings: dict
+    preserve_existing: bool
     target_date: str
     timings: dict[str, float] = field(default_factory=dict)
     pipeline_trace: list[str] = field(default_factory=list)
@@ -351,8 +352,11 @@ def _build_generated_channels(ctx: ScanContext) -> None:
                 "is_replay": bool(event.get("is_replay")),
                 "epg_programme": _s._serialize_epg_programme(event),
             }
+            item["epg_programme"]["_stream_candidates"] = feed.get("stream_candidates", [source_channel_key])
             item["raw"] = _s._generated_raw(channel, item)
             generated.append(item)
+    if ctx.preserve_existing:
+        generated = _generated.retain_partial_rows(ctx.db_path, generated)
     ctx.generated = generated
     ctx.event_positions = dict(positions)
     ctx.timed("feed_selection", started)
@@ -522,6 +526,7 @@ def scan_channels(
     base_channel_ids: set[str] | None = None,
     fallback_epg_paths: Iterable[Path] | None = None,
     manual_channel_count: int = 0,
+    preserve_existing: bool = False,
     cancel_check: _s.CancelCheck = None,
 ) -> dict:
     scan_clock = perf_counter()
@@ -570,6 +575,7 @@ def scan_channels(
         manual_channel_count=manual_channel_count,
         cancel_check=cancel_check,
         settings=settings,
+        preserve_existing=preserve_existing,
         target_date=target_date,
     )
     _prepare_context(ctx)

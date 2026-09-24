@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='provider-crud-1') }}">
   <style>html.onboarding-pending body,html.onboarding-initial-refresh-pending body{visibility:hidden}</style>
   <link rel="stylesheet" href="/static/css/schedule_api_ui.css?v=schedule-api-ui-1">
   <link rel="stylesheet" href="/static/css/ui_refactor.css?v=ui-refactor-9">
@@ -77,7 +77,7 @@
     <div class="card mb-3">
       <div class="card-body">
         <h2 class="h6 mb-1">Provider Sources</h2>
-        <div class="small-muted mb-3">The primary provider is the only catalog shown in Channel Manager. Ordered fallback providers are used only by Sports Automation when a usable primary feed is missing.</div>
+        <div class="small-muted mb-3">Enabled providers appear in Channel Manager and supply manual and sports streams. Disable a provider to pause its use, or edit its connection details. Saved channel rows are kept when a provider is disabled or deleted.</div>
 
         <fieldset id="primaryProviderFieldset" class="m-0 p-0 border-0">
         <div class="provider-entry-panel mb-3">
@@ -157,6 +157,11 @@
               <div class="form-label provider-field-heading" aria-hidden="true">Action</div>
               <button id="addFallbackBtn" class="btn btn-outline-primary btn-sm" type="button">Add Fallback</button>
             </div>
+          </div>
+          <div class="mb-3">
+            <h4 class="h6 mb-2">Add a free M3U</h4>
+            <div id="freeFallbackProviders" class="d-flex flex-wrap gap-2"></div>
+            <div class="small-muted mt-2">Add a public playlist with one click. Channels load during Master Update; availability and sports coverage vary.</div>
           </div>
           <div class="table-responsive">
             <table class="table table-hover table-sm align-middle mb-0 provider-source-table">
@@ -267,6 +272,13 @@
               <label class="form-label mb-1" for="groupFilter">Provider Group</label>
               <select id="groupFilter" class="form-select">
                 <option value="">All provider groups</option>
+              </select>
+            </div>
+
+            <div class="filter-provider">
+              <label class="form-label mb-1" for="sourceFilter">Source</label>
+              <select id="sourceFilter" class="form-select">
+                <option value="">All sources</option>
               </select>
             </div>
 
@@ -628,7 +640,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v='v30-experiments-exp12-schedule-api-state') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='v33-provider-crud') }}"></script>
   <script>
     (() => {
       // Keep unsaved credentials untouched by background sports status renders,
@@ -683,7 +695,7 @@
   <script src="/static/js/onboarding_initial_refresh_gate.js?v=onboarding-guide-gate-1"></script>
   <script src="/static/js/onboarding_enhancements.js?v=onboarding-2"></script>
   <script src="/static/js/onboarding_provider_validation_v2.js?v=onboarding-4"></script>
-  <script src="/static/js/onboarding_demo_provider.js?v=demo-provider-1"></script>
+  <script src="/static/js/onboarding_demo_provider.js?v=demo-provider-2"></script>
   <script src="/static/js/onboarding_manual_channels.js?v=onboarding-5"></script>
 </body>
 </html>

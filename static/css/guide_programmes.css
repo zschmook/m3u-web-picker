@@ -1,3 +1,34 @@
+body.guide-body .guide-grid-row.guide-unavailable-row,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-cell,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-programme-track,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-programme-block,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-programme-block.is-current {
+  background: #571f2a !important;
+  border-color: #a74454 !important;
+  color: #ffe4e6 !important;
+}
+
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-group,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-name,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-number,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-programme-block-time {
+  color: #fecdd3 !important;
+}
+
+.guide-unavailable-row button:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-play,
+body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-listen {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  color: #fecdd3 !important;
+  background: #571f2a !important;
+  border-color: #fb7185 !important;
+}
+
 .guide-controls {
   width: 100%;
 }

@@ -214,6 +214,7 @@ def _build_feeds(
         if rule.get("feed_preference") != "all":
             candidates = [candidate for candidate in candidates if candidate["feed_type"] != "backup"]
 
+    all_candidates = list(candidates)
     if candidates:
         winning_priority = min(candidate["provider_priority"] for candidate in candidates)
         candidates = [
@@ -252,6 +253,12 @@ def _build_feeds(
             str(candidate["channel"].get("name", "")).lower(),
         )
     )
+
+    for candidate in candidates:
+        # Alternatives are corroborated feeds for this same event.
+        candidate["stream_candidates"] = list(dict.fromkeys(
+            [candidate["channel"]["url"]] + [item["channel"]["url"] for item in
+             sorted(all_candidates, key=lambda item: item["provider_priority"])]))
 
     expanded_feeds = event.get("expanded_feeds")
     if expanded_feeds is None:

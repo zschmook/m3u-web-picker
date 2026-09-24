@@ -323,6 +323,7 @@
       if (!target) return;
       event.preventDefault();
       const channel = actualGuideChannel(target.dataset.guidePlayUrl);
+      if (target.disabled || channel?.available === false) return;
       if (target.dataset.guideListen === "true") {
         if (target.dataset.guideListenAction === "stop") {
           if (typeof stopPlayback === "function") void stopPlayback();
@@ -406,7 +407,7 @@
       const searchClass = query && individualProgrammeSearchText(programme).includes(query)
         ? " is-search-match"
         : "";
-      return `<button type="button"
+      return `<button type="button" ${channel.available === false ? 'disabled aria-disabled="true"' : ""}
         class="guide-programme-block${geometry.current ? " is-current" : ""}${dvrClass ? ` ${dvrClass}` : ""}${searchClass}"
         style="left:${geometry.left}px;width:${geometry.width}px"
         data-guide-play-url="${escapeHtml(channel.play_url)}"
@@ -447,11 +448,13 @@
   }
 
   function renderChannelRow(channel, bounds, query) {
+    const unavailable = channel.available === false;
+    const disabled = unavailable ? 'disabled aria-disabled="true" title="Unavailable on all providers"' : "";
     const logo = renderStationLogo(channel);
     const generated = channel.generated
       ? '<span class="badge text-bg-primary guide-generated-badge">Auto</span>'
       : "";
-    const isCurrent = guideState.currentChannel?.play_url === channel.play_url;
+    const isCurrent = !unavailable && guideState.currentChannel?.play_url === channel.play_url;
     const isListening = isCurrent && guideState.mode === "listen";
     const isPlaying = isCurrent && !isListening;
     const nowLeft = (bounds.now.getTime() - bounds.start.getTime()) / 60000 * GUIDE_PX_PER_MINUTE;
@@ -459,7 +462,7 @@
       ? `<div class="guide-now-marker" style="left:${nowLeft}px" aria-hidden="true"></div>`
       : "";
 
-    return `<div class="guide-grid-row${isCurrent ? " guide-current-row" : ""}">
+    return `<div class="guide-grid-row${isCurrent ? " guide-current-row" : ""}${unavailable ? " guide-unavailable-row" : ""}" ${unavailable ? 'aria-disabled="true" title="Unavailable on all providers"' : ""}>
       <div class="guide-station-cell">
         <div class="guide-station-number">${escapeHtml(channel.number)}</div>
         ${logo}
@@ -468,9 +471,9 @@
           <div class="guide-station-group">${escapeHtml(channel.group || "")}</div>
         </div>
         <button type="button" class="btn ${isPlaying ? "btn-outline-light" : "btn-success"} btn-sm guide-station-play"
-          data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
+          ${disabled} data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
         <button type="button" class="btn ${isListening ? "btn-danger" : "btn-outline-info"} btn-sm guide-station-listen"
-          data-guide-play-url="${escapeHtml(channel.play_url)}" data-guide-listen="true"
+          ${disabled} data-guide-play-url="${escapeHtml(channel.play_url)}" data-guide-listen="true"
           data-guide-listen-action="${isListening ? "stop" : "start"}">${isListening ? "Stop" : "Listen"}</button>
       </div>
       <div class="guide-programme-track" style="width:${bounds.width}px;--guide-slot-width:${bounds.slotWidth}px">

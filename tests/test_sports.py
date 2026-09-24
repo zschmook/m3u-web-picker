@@ -266,10 +266,29 @@ class SportsTests(unittest.TestCase):
             generated[0]["raw"][-1],
             sports.generated_stream_path(generated[0]["assigned_number"]),
         )
-        self.assertEqual(
-            sports.generated_stream_target(db_path, generated[0]["assigned_number"]),
-            "http://primary.test/game.ts",
-        )
+        from channel_availability import AvailabilityCache
+        from sports.generated import stream_candidates
+        self.assertEqual(stream_candidates(generated[0]),
+                         ["http://primary.test/game.ts", "http://fallback.test/game.ts"])
+        cache = AvailabilityCache(probe=lambda url: True, ttl=0)
+        self.addCleanup(cache.worker.shutdown)
+        with patch("channel_availability.availability", cache):
+            self.assertEqual(sports.generated_stream_target(db_path, generated[0]["assigned_number"]),
+                             "http://primary.test/game.ts")
+            cache.probe = lambda url: "fallback.test" in url
+            self.assertEqual(sports.generated_stream_target(db_path, generated[0]["assigned_number"]),
+                             "http://fallback.test/game.ts")
+
+    def test_partial_scan_retains_published_rows_and_stream_candidates(self):
+        anchor = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path, self.channels, now=anchor, trigger="test")
+        before = sports.generated_rows(self.db_path)
+        self.assertTrue(before)
+        sports.scan_channels(self.db_path, [], now=anchor, trigger="test", preserve_existing=True)
+        after = sports.generated_rows(self.db_path)
+        self.assertEqual([(r["channel_key"], r["assigned_number"]) for r in before],
+                         [(r["channel_key"], r["assigned_number"]) for r in after])
+        self.assertTrue(all(r["epg_programme"].get("_stream_candidates") for r in after))
 
     def test_fallback_provider_fills_event_missing_from_primary(self):
         primary = core.parse_m3u_text(
@@ -3429,7 +3448,7 @@ http://provider.test/phillies.ts
         self.assertIn("runMasterUpdate", javascript)
         self.assertIn("/playlist/channels.m3u", javascript)
         self.assertIn("/epg/epg.xml", javascript)
-        self.assertIn("v='v30-experiments-exp12-schedule-api-state'", html)
+        self.assertIn("v='v33-provider-crud'", html)
         self.assertIn('id="masterUpdateEnabled"', html)
         self.assertIn('id="masterUpdateTime"', html)
         self.assertIn('id="masterUpdateNowBtn"', html)

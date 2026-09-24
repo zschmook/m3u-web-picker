@@ -23,6 +23,7 @@ const els = {
   table: document.getElementById("channelTable"),
   search: document.getElementById("search"),
   groupFilter: document.getElementById("groupFilter"),
+  sourceFilter: document.getElementById("sourceFilter"),
   selectedOnly: document.getElementById("selectedOnly"),
   excludeSdChannels: document.getElementById("excludeSdChannels"),
   selectedCount: document.getElementById("selectedCount"),
@@ -94,6 +95,7 @@ function titleCaseSource(value) {
 
 function providerSourceLabel(channel) {
   if (isGeneratedSportsChannel(channel)) return "Sports Automation";
+  if (channel.provider_source_name) return channel.provider_source_name;
 
   const raw = String(channel.url || "").trim();
   try {
@@ -198,6 +200,7 @@ function acceptModalUrl() {
 function filteredChannels() {
   const query = els.search.value.trim().toLowerCase();
   const group = els.groupFilter.value;
+  const source = els.sourceFilter?.value || "";
   const selectedOnly = els.selectedOnly.checked;
   const excludeSd = Boolean(els.excludeSdChannels?.checked);
 
@@ -208,6 +211,7 @@ function filteredChannels() {
     // when the normal catalog view hides them.
     if (excludeSd && !(selectedOnly && isSaved) && String(channel.group || "").trim().toUpperCase() === "LOW BANDWIDTH") return false;
     if (group && channel.group !== group) return false;
+    if (source && providerSourceLabel(channel) !== source) return false;
     if (selectedOnly && !isSaved) return false;
     if (showGroupOnly && activeGroupSlug && !activeGroupMembers.has(channelKey(channel))) return false;
     if (query) {
@@ -231,6 +235,13 @@ function rebuildProviderGroupFilter() {
   els.groupFilter.innerHTML = `<option value="">All provider groups</option>` +
     groups.map(group => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`).join("");
   if (groups.includes(current)) els.groupFilter.value = current;
+  if (els.sourceFilter) {
+    const selectedSource = els.sourceFilter.value;
+    const sources = [...new Set(channels.map(providerSourceLabel))].sort((a, b) => a.localeCompare(b));
+    els.sourceFilter.innerHTML = '<option value="">All sources</option>' + sources.map(source =>
+      `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`).join("");
+    if (sources.includes(selectedSource)) els.sourceFilter.value = selectedSource;
+  }
 }
 
 function render() {
@@ -743,7 +754,26 @@ function finishProviderProgress(payload, {hideAfter = 5000} = {}) {
   }
 }
 
+function renderFreeFallbackProviders() {
+  const container = document.getElementById("freeFallbackProviders");
+  if (!container) return;
+  const hasPrimary = providerSources.some(source => source.role === "primary");
+  container.replaceChildren();
+  for (const playlist of window.publicM3uPlaylists || []) {
+    const added = providerSources.some(source => source.name === playlist.label || source.name === playlist.name);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-outline-primary btn-sm";
+    button.textContent = `${added ? "Added" : "Add"} ${playlist.label}`;
+    button.disabled = added || !hasPrimary || providerOperationBusy;
+    button.title = !hasPrimary ? "Load a URL primary provider first." : playlist.detail;
+    button.addEventListener("click", () => addFallbackProvider({name: playlist.label, url: playlist.url}));
+    container.appendChild(button);
+  }
+}
+
 function renderProviderSources() {
+  renderFreeFallbackProviders();
   const list = document.getElementById("providerSources");
   if (!list) return;
   const addButton = document.getElementById("addFallbackBtn");
@@ -763,13 +793,9 @@ function renderProviderSources() {
     const updated = source.last_refresh
       ? escapeHtml(formatEpgTimestamp(source.last_refresh))
       : source.cached ? "Cached" : "—";
-    const operationalStatus = !primary && !hasPrimary
-      ? `<span class="text-warning">Waiting for primary</span>`
-      : source.last_error
-      ? `<span class="text-warning">Refresh failed</span>`
-      : source.deferred
-        ? "Ready — loads during Master Update"
-        : "Ready";
+    const operationalStatus = source.enabled === false ? "Disabled"
+      : source.last_error ? `<span class="text-warning">Refresh failed</span>`
+      : source.deferred ? "Ready — loads during Master Update" : "Ready";
     const accountBits = [];
     if (source.kind === "xtream") {
       if (source.account_status) accountBits.push(escapeHtml(source.account_status));
@@ -789,9 +815,10 @@ function renderProviderSources() {
         <td class="text-end">${Number(source.channel_count || 0).toLocaleString()}</td>
         <td class="small-muted">${updated}</td>
         <td class="small-muted" title="${title}">${accountStatus}</td>
-        <td class="text-end">${primary
-          ? `<button class="btn btn-outline-danger btn-sm provider-remove-primary-btn" type="button">Remove</button>`
-          : `<button class="btn btn-outline-danger btn-sm provider-delete-btn" type="button">Remove</button>`}</td>
+        <td class="text-end provider-actions">
+          <button class="btn btn-outline-light btn-sm provider-edit-btn" type="button">Edit</button>
+          <button class="btn btn-outline-warning btn-sm provider-toggle-btn" type="button">${source.enabled === false ? "Enable" : "Disable"}</button>
+          <button class="btn btn-outline-danger btn-sm ${primary ? "provider-remove-primary-btn" : "provider-delete-btn"}" type="button">Delete</button></td>
       </tr>`;
   }).join("");
 }
@@ -808,13 +835,16 @@ async function loadProviderSources() {
   setSourceMode(currentSourceMode);
 }
 
-async function addFallbackProvider() {
+async function addFallbackProvider(preset = null) {
+  if (providerOperationBusy) return;
+  // Click handlers also pass an Event; only explicit playlist objects are presets.
+  const quickAdd = Boolean(preset && typeof preset.url === "string");
   const nameInput = document.getElementById("fallbackName");
   const urlInput = document.getElementById("fallbackUrl");
   const usernameInput = document.getElementById("fallbackUsername");
   const passwordInput = document.getElementById("fallbackPassword");
-  const name = nameInput.value.trim();
-  const url = urlInput.value.trim();
+  const name = quickAdd ? preset.name : nameInput.value.trim();
+  const url = quickAdd ? preset.url : urlInput.value.trim();
   if (!name) return nameInput.focus();
   if (!url) return urlInput.focus();
   setStatus("Validating fallback provider...");
@@ -828,8 +858,8 @@ async function addFallbackProvider() {
       body: JSON.stringify({
         name,
         url,
-        username: usernameInput.value,
-        password: passwordInput.value
+        username: quickAdd ? "" : usernameInput.value,
+        password: quickAdd ? "" : passwordInput.value
       })
     });
     data = await response.json();
@@ -844,29 +874,71 @@ async function addFallbackProvider() {
     return alert(data.error || "Could not add fallback provider.");
   }
   providerSources = data.sources || [];
-  nameInput.value = "";
-  urlInput.value = "";
-  usernameInput.value = "";
-  passwordInput.value = "";
+  if (!quickAdd) {
+    nameInput.value = "";
+    urlInput.value = "";
+    usernameInput.value = "";
+    passwordInput.value = "";
+  }
   renderProviderSources();
   finishProviderProgress({stage: "Fallback provider saved", detail: "Live channels will load only when Master Update runs.", channel_count: 0, status: "complete"});
   setStatus(`Added sports fallback provider: ${name}`);
 }
 
+async function changeProvider(id, values) {
+  const response = await fetch(`/api/providers/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Could not update provider.");
+  providerSources = data.sources || [];
+  renderProviderSources();
+  await loadInitialChannels({quiet: true});
+}
+
+function editProvider(id) {
+  const source = providerSources.find(item => item.id === id);
+  const dialog = document.createElement("dialog");
+  dialog.className = "provider-edit-dialog";
+  dialog.innerHTML = `<form><h3>Edit provider</h3>
+    <label>Name<input class="form-control" name="name" required value="${escapeHtml(source.name)}"></label>
+    <label>Server or M3U URL<input class="form-control" name="url" type="url" placeholder="Leave blank to keep saved URL"></label>
+    <label>Username<input class="form-control" name="username" autocomplete="off" placeholder="Leave blank to keep saved username"></label>
+    <label>Password<input class="form-control" name="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep saved password"></label>
+    <label><input type="checkbox" name="clear_credentials"> Clear saved login (use direct M3U)</label>
+    <p class="small-muted">Connection changes take effect on the next update. Saved channel rows are kept.</p>
+    <p class="provider-edit-error text-warning" role="alert"></p>
+    <div class="d-flex gap-2 justify-content-end"><button type="button" class="btn btn-secondary">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div></form>`;
+  dialog.querySelector('button[type="button"]').onclick = () => dialog.close();
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.querySelector("form").onsubmit = async event => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const values = Object.fromEntries(form);
+    values.clear_credentials = form.has("clear_credentials");
+    const button = dialog.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try { await changeProvider(id, values); dialog.close(); }
+    catch(error) { dialog.querySelector('.provider-edit-error').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 async function deleteFallbackProvider(sourceId) {
+  if (!window.confirm("Delete this provider? Saved channel rows will be kept.")) return;
   const response = await fetch(`/api/providers/${encodeURIComponent(sourceId)}`, {method: "DELETE"});
   const data = await response.json();
   if (!response.ok) return alert(data.error || "Could not delete fallback provider.");
   providerSources = data.sources || [];
   renderProviderSources();
-  setStatus("Deleted fallback provider.");
+  await loadInitialChannels({quiet: true});
+  setStatus("Deleted provider. Saved channels were kept.");
 }
 
 async function removePrimarySource() {
-  const keepFallbacks = providerSources.some(source => source.role === "fallback");
-  const message = keepFallbacks
-    ? "Remove the primary provider? Fallback settings will be kept but remain inactive until a new primary is added."
-    : "Remove the primary source?";
+  const message = "Delete the primary provider? Saved channel rows and fallback providers will be kept.";
   if (!window.confirm(message)) return;
 
   setStatus("Removing primary source...");
@@ -1096,6 +1168,12 @@ document.getElementById("addFallbackBtn")?.addEventListener("click", addFallback
 document.getElementById("fallbackPassword")?.addEventListener("keydown", event => { if (event.key === "Enter") addFallbackProvider(); });
 document.getElementById("providerSources")?.addEventListener("click", event => {
   const row = event.target.closest(".provider-source-row");
+  if (row && event.target.classList.contains("provider-edit-btn")) { editProvider(row.dataset.id); return; }
+  if (row && event.target.classList.contains("provider-toggle-btn")) {
+    const source = providerSources.find(item => item.id === row.dataset.id);
+    changeProvider(row.dataset.id, {enabled: source.enabled === false}).catch(error => alert(error.message));
+    return;
+  }
   if (row && event.target.classList.contains("provider-remove-primary-btn")) {
     removePrimarySource();
     return;
@@ -1173,6 +1251,7 @@ els.search.addEventListener("input", () => {
   render();
 });
 els.groupFilter.addEventListener("change", render);
+els.sourceFilter?.addEventListener("change", render);
 els.selectedOnly.addEventListener("change", render);
 els.excludeSdChannels?.addEventListener("change", () => {
   render();

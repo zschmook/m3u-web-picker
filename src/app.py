@@ -99,7 +99,7 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=guide-listen-mode-3">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=guide-availability-1">\n'
         '<link rel="stylesheet" href="/static/css/guide_dvr.css?v=dvr-library-7">\n'
         '<link rel="stylesheet" href="/static/css/event_logo_normalization.css?v=event-logo-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
@@ -119,7 +119,7 @@ def guide():
         '<script src="/static/js/guide_cast_ui.js?v=cast-flow-3"></script>\n'
         '<script src="/static/js/guide_pip.js?v=pip-4"></script>\n'
         '<script src="/static/js/guide_stream_menu.js?v=stream-menu-1"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=guide-audio-handoff-2"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=guide-availability-1"></script>\n'
         '<script src="/static/js/guide_dvr.js?v=guide-audio-only-1"></script>\n'
         '<script src="/static/js/guide_event_logo_bridge.js?v=event-logo-2"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'

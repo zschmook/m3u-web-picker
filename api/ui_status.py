@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from datetime import datetime
 
 from flask import jsonify
 
@@ -73,11 +74,14 @@ def _update_health() -> dict:
     stages: list[dict] = []
     providers = core.provider_sources_payload()
     primary = next((item for item in providers if item.get("role") == "primary"), None)
+    report = master_update_reports.latest(core.DB_PATH)
 
     if primary:
         provider_error = str(primary.get("last_error") or "").strip()
         provider_status = str(primary.get("account_status") or "").strip()
-        if provider_error:
+        if not primary.get("enabled", True):
+            stages.append(_stage("Primary Provider", "disabled", "Disabled", kind="provider"))
+        elif provider_error:
             stages.append(_stage("Primary Provider", "error", provider_error, kind="provider"))
         else:
             detail = f"{int(primary.get('channel_count') or 0):,} channels"
@@ -90,6 +94,9 @@ def _update_health() -> dict:
     for source in providers:
         if source.get("role") != "fallback":
             continue
+        if not source.get("enabled", True):
+            stages.append(_stage(source.get("name", "Fallback"), "disabled", "Disabled", kind="provider"))
+            continue
         error = str(source.get("last_error") or "").strip()
         warning = str(source.get("warning") or "").strip()
         name = str(source.get("name") or "Fallback Provider")
@@ -99,6 +106,30 @@ def _update_health() -> dict:
             stages.append(_stage(name, "warning", warning, kind="provider"))
         elif not source.get("deferred"):
             stages.append(_stage(name, "success", f"{int(source.get('channel_count') or 0):,} channels", kind="provider"))
+
+    fallbacks = [item for item in providers if item.get("role") == "fallback" and item.get("enabled", True)]
+    def checked_this_run(source):
+        try:
+            attempted = datetime.fromisoformat(source.get("last_refresh_attempt") or "")
+            started = datetime.fromisoformat((report or {}).get("started_at") or "")
+            finished = datetime.fromisoformat((report or {}).get("finished_at") or "")
+            return started <= attempted <= finished
+        except (ValueError, TypeError):
+            return False
+    checked = [source for source in fallbacks if checked_this_run(source)]
+    refreshed = [source for source in checked if not source.get("last_error")]
+    usage = core.manual_fallback_usage()
+    fallback_status = {
+        "configured": len(fallbacks), "checked": len(checked), "refreshed": len(refreshed),
+        "manual_channels_checked": usage["checked"], "manual_channels_using_fallback": usage["used"],
+    }
+    if fallbacks:
+        detail = f"{len(checked)}/{len(fallbacks)} providers checked in last update · {len(refreshed)} refreshed. "
+        detail += (f"{usage['used']} manual channels using fallback ({usage['checked']} stream checks completed)."
+                   if usage["checked"] else "Manual fallback usage has not been checked yet; open the guide to check streams.")
+        stages.append(_stage("Fallbacks checked / used", "success" if len(refreshed) == len(fallbacks) else "warning", detail, kind="fallback"))
+    else:
+        stages.append(_stage("Fallbacks checked / used", "disabled", "No fallback providers configured.", kind="fallback"))
 
     for source in core.epg_sources_payload():
         error = str(source.get("last_error") or "").strip()
@@ -157,7 +188,6 @@ def _update_health() -> dict:
         else:
             stages.append(_stage("Combined EPG", "error", "Combined XMLTV output is missing.", kind="output"))
 
-    report = master_update_reports.latest(core.DB_PATH)
     report_status = str((report or {}).get("status") or "")
     recorded_warnings = _recorded_warning_stages(report)
     existing_warning_details = {
@@ -175,6 +205,14 @@ def _update_health() -> dict:
     elif report_status == "warning" and not any(item["status"] in {"error", "warning"} for item in stages):
         stages.append(_stage("Master Update", "warning", str(report.get("summary") or "The last master update completed with warnings."), kind="master"))
 
+    # Upstream problems are warnings while both published outputs remain usable.
+    # Missing outputs and unrelated update failures still require a red error.
+    outputs = [item for item in stages if item["kind"] == "output"]
+    if len(outputs) == 2 and all(item["status"] == "success" for item in outputs):
+        for item in stages:
+            if item["status"] == "error" and item["kind"] in {"provider", "sports", "epg"}:
+                item["status"] = "warning"
+                item["detail"] += " Existing published outputs were retained."
     errors = [item for item in stages if item["status"] == "error"]
     warnings = [item for item in stages if item["status"] == "warning"]
     master = master_update_worker.payload()
@@ -187,7 +225,7 @@ def _update_health() -> dict:
         label = "Update completed with errors"
     elif warnings:
         status = "warning"
-        label = "Updated with warnings"
+        label = "Update completed with warnings"
     elif not primary:
         status = "setup"
         label = "Setup needed"
@@ -201,6 +239,7 @@ def _update_health() -> dict:
         "error_count": len(errors),
         "warning_count": len(warnings),
         "stages": stages,
+        "fallbacks": fallback_status,
     }
 
 
