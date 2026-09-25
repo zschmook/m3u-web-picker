@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import media_pipeline
 
@@ -45,6 +46,17 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         ]
     else:
         encoder_options = []
+    reconnect = []
+    if str(target).lower().startswith(("http://", "https://")):
+        # Live providers regularly close a connection for a second while their
+        # origin or edge changes. Let FFmpeg absorb the brief interruption;
+        # the HLS relay supervisor advances to another provider if FFmpeg still
+        # exits after these bounded retries.
+        reconnect = [
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+        ]
     return [
         executable(),
         "-nostdin",
@@ -53,6 +65,7 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         "error",
         "-fflags",
         "+genpts",
+        *reconnect,
         "-i",
         target,
         "-map",
@@ -85,6 +98,31 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
 
 def audio_only_mp3_args(target: str) -> list[str]:
     """Transcode one live input to a browser-friendly audio-only stream."""
+    reconnect = []
+    if str(target).lower().startswith(("http://", "https://")):
+        # Recover transport interruptions here. Clean EOF is handled by the
+        # browser worker supervisor: reconnect_at_eof can loop individual HLS
+        # segments instead of advancing through the live playlist.
+        reconnect = [
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+            "-rw_timeout", "10000000",
+        ]
+    live_playlist = []
+    if str(target).lower().startswith(("http://", "https://")) and urlsplit(target).path.lower().endswith(".m3u8"):
+        # Join the newest available segment, including after worker recovery,
+        # instead of replaying the default three-segment startup window.
+        live_playlist = [
+            "-live_start_index", "-1",
+            # Xtream playlists can use tokenized segment paths without a file
+            # extension. Permit those names while restricting nested resources
+            # to network protocols (never local files).
+            "-allowed_extensions", "ALL",
+            "-allowed_segment_extensions", "ALL",
+            "-extension_picky", "0",
+            "-protocol_whitelist", "http,https,tcp,tls,crypto,httpproxy",
+        ]
     return [
         executable(),
         "-nostdin",
@@ -93,6 +131,12 @@ def audio_only_mp3_args(target: str) -> list[str]:
         "error",
         "-fflags",
         "+genpts",
+        # Providers may send a whole recent window immediately, then close.
+        # Consume that window at playback speed so reopening does not race
+        # ahead of the live clock and append overlapping buffered audio.
+        "-re",
+        *reconnect,
+        *live_playlist,
         "-i",
         target,
         "-map",
@@ -109,6 +153,10 @@ def audio_only_mp3_args(target: str) -> list[str]:
         "-f",
         "mp3",
         "-write_xing",
+        "0",
+        # A replacement worker appends frames to the same HTTP response. Avoid
+        # inserting a fresh ID3 header between those MP3 frame sequences.
+        "-id3v2_version",
         "0",
         "pipe:1",
     ]

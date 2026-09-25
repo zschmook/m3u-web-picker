@@ -71,6 +71,22 @@ def _resolve_guide_play_target(play_url: str) -> str:
     return ""
 
 
+def _resolve_guide_hls_targets(play_url: str):
+    """Resolve ordered relay candidates and a playback-health callback."""
+    value = str(play_url or "").split("?", 1)[0].strip()
+    manual = re.fullmatch(r"/guide/play/manual/([^/]+)", value)
+    if manual:
+        token = manual.group(1)
+        targets = core.manual_stream_candidates(token)
+
+        def remember(target: str | None) -> None:
+            core.remember_manual_stream_target(token, target)
+
+        return targets, remember
+    target = _resolve_guide_play_target(play_url)
+    return ([target] if target else []), None
+
+
 def _guide_media_origin() -> str:
     settings = load_settings()
     if settings.lan_host:
@@ -150,11 +166,11 @@ def register_guide_routes(app):
     def api_guide_cast_start():
         data = request.get_json(force=True, silent=True) or {}
         play_url = str(data.get("play_url", "") or "")
-        target = _resolve_guide_play_target(play_url)
-        if not target:
+        targets, on_target = _resolve_guide_hls_targets(play_url)
+        if not targets:
             return json_error("Curated stream not found.", 404)
         try:
-            session = hls.start_session(target)
+            session = hls.start_session(targets, on_target=on_target)
         except RuntimeError as exc:
             return json_error(exc, 502)
         response = jsonify(
@@ -244,8 +260,8 @@ def register_guide_routes(app):
         data = request.get_json(force=True, silent=True) or {}
         play_url = str(data.get("play_url", "") or "")
         direct_director = play_url.split("?", 1)[0].strip() == director.PLAY_URL
-        target = _resolve_guide_play_target(play_url)
-        if not target:
+        targets, on_target = _resolve_guide_hls_targets(play_url)
+        if not targets:
             return json_error("Curated stream not found.", 404)
         media_origin = _guide_media_origin()
         if not media_origin:
@@ -264,7 +280,7 @@ def register_guide_routes(app):
                 with _ROKU_DIRECTOR_LOCK:
                     _ROKU_DIRECTOR_RECEIVERS[host] = media_url
             else:
-                session = hls.start_session(target)
+                session = hls.start_session(targets, on_target=on_target)
                 playlist_path = f"/guide/roku/{session.token}/stream.m3u8"
                 media_url = media_origin.rstrip("/") + playlist_path
                 with _ROKU_DIRECTOR_LOCK:

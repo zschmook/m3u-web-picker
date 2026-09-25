@@ -1,4 +1,5 @@
 import io
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -52,6 +53,70 @@ class SharedMediaSessionTests(unittest.TestCase):
             self.assertTrue(hls.stop_session(session.token))
             terminate.assert_called_once_with(process)
             release.assert_called_once_with("pipeline")
+
+    def test_hls_command_appends_with_discontinuity_and_new_segment_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "segment_000003.ts").write_bytes(b"old")
+            with patch("media.hls.normalized_live_input_args", return_value=["ffmpeg", "-i", "source"]):
+                command = hls._hls_command("source", root)
+
+        flags = command[command.index("-hls_flags") + 1]
+        self.assertIn("append_list", flags)
+        self.assertIn("discont_start", flags)
+        self.assertEqual(command[command.index("-start_number") + 1], "4")
+
+    def test_dead_hls_session_moves_to_next_candidate_without_changing_token(self):
+        dead = Mock()
+        dead.poll.return_value = 1
+        live = Mock()
+        live.poll.return_value = None
+        session = hls.HlsSession(
+            token="stable", target="primary", directory=Path("unused"),
+            process=dead, created_monotonic=1.0, last_access_monotonic=1.0,
+            pipeline_token="pipeline", targets=("primary", "fallback"),
+        )
+        hls._SESSIONS[session.token] = session
+        hls._TARGETS.update({target: session.token for target in session.targets})
+        hls._REFERENCES[session.token] = 1
+
+        def recover(item, index, _timeout):
+            self.assertIs(item, session)
+            self.assertEqual(index, 1)
+            item.process = live
+            item.target = item.targets[index]
+            item.target_index = index
+            return True
+
+        with patch("media.hls._record_failure"), patch("media.hls._try_target", side_effect=recover):
+            recovered = hls.get_session("stable")
+
+        self.assertIs(recovered, session)
+        self.assertEqual(recovered.token, "stable")
+        self.assertEqual(recovered.target, "fallback")
+        self.assertEqual(recovered.recovery_count, 1)
+
+    def test_hls_candidate_sets_share_one_session(self):
+        live = Mock()
+        live.poll.return_value = None
+
+        def ready(session, index, _timeout):
+            session.process = live
+            session.target = session.targets[index]
+            session.target_index = index
+            return True
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(hls, "HLS_ROOT", Path(directory)), \
+                patch("media.hls._try_target", side_effect=ready) as attempt, \
+                patch("media.hls.media_pipeline.acquire_session", return_value="pipeline") as acquire:
+            first = hls.start_session(["primary", "fallback"])
+            second = hls.start_session(["fallback", "primary"])
+
+        self.assertIs(first, second)
+        self.assertEqual(attempt.call_count, 1)
+        acquire.assert_called_once_with("hls")
+        self.assertEqual(hls._REFERENCES[first.token], 2)
 
     def test_full_inactive_mpegts_subscriber_is_evicted(self):
         process = Mock()

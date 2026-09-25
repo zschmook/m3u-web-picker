@@ -8,7 +8,11 @@ from collections.abc import Callable
 from flask import Response, request, stream_with_context
 
 from .ffmpeg import audio_only_mp3_args, normalized_live_input_args, terminate
+from .audio_source import prefer_live_playlist
 import media_pipeline
+
+AUDIO_RECONNECT_ATTEMPTS = 3
+AUDIO_RECONNECT_DELAY_SECONDS = 1.0
 
 
 def response_for(
@@ -24,6 +28,7 @@ def response_for(
         session_token = media_pipeline.acquire_session(output_name)
         media_pipeline.clear_output_error(output_name)
         if audio_only:
+            target = prefer_live_playlist(target)
             command = audio_only_mp3_args(target)
         else:
             command = normalized_live_input_args(target) + [
@@ -75,12 +80,12 @@ def response_for(
             detail = detail.replace(target, "[source]")
         return detail or fallback
 
-    def drain_audio_errors() -> None:
-        if process.stderr is None:
+    def drain_audio_errors(worker) -> None:
+        if worker.stderr is None:
             return
         try:
             while True:
-                raw = process.stderr.readline()
+                raw = worker.stderr.readline()
                 if not raw:
                     break
                 line = raw.decode("utf-8", errors="replace").strip()
@@ -93,6 +98,7 @@ def response_for(
     if audio_only and process.stderr is not None:
         threading.Thread(
             target=drain_audio_errors,
+            args=(process,),
             name="browser-audio-errors",
             daemon=True,
         ).start()
@@ -146,7 +152,53 @@ def response_for(
             media_pipeline.release_session(session_token)
             notify_stop()
 
+    def restart_audio_process() -> bool:
+        nonlocal process
+        # Serialize replacement against the disconnect watcher: a closed
+        # listener must never acquire a replacement FFmpeg worker.
+        with cleanup_lock:
+            if cleaned_up:
+                return False
+            terminate(process)
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except (OSError, ValueError):
+                        pass
+            try:
+                process = subprocess.Popen(
+                    command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+            except OSError:
+                return False
+            if process.stderr is not None:
+                threading.Thread(
+                    target=drain_audio_errors, args=(process,),
+                    name="browser-audio-errors", daemon=True,
+                ).start()
+            return True
+
+    if audio_only and callable(client_disconnected):
+        def watch_audio_disconnect() -> None:
+            # stdout can block while FFmpeg reconnects. Closing Listen must
+            # still release its worker/session even when no new audio arrives.
+            while not watcher_stop.wait(0.5):
+                if client_disconnected():
+                    cleanup_process()
+                    return
+
+        threading.Thread(
+            target=watch_audio_disconnect,
+            name="browser-audio-disconnect",
+            daemon=True,
+        ).start()
+
     def generate():
+        source_ended = False
+        empty_retries = 0
+        attempt_had_audio = False
         try:
             if process.stdout is None:
                 return
@@ -155,8 +207,31 @@ def response_for(
                     break
                 chunk = process.stdout.read(64 * 1024)
                 if not chunk:
+                    source_ended = not watcher_stop.is_set() and not (
+                        callable(client_disconnected) and client_disconnected()
+                    )
+                    if audio_only and source_ended and str(target).lower().startswith(("http://", "https://")):
+                        # Protocol reconnect flags cannot recover every demuxer
+                        # EOF (for example a provider's completed HLS window).
+                        # Keep the listener's HTTP response open while reopening
+                        # the live source. Bound retries if it produces nothing.
+                        if attempt_had_audio:
+                            empty_retries = 0
+                        if empty_retries < AUDIO_RECONNECT_ATTEMPTS:
+                            delay = AUDIO_RECONNECT_DELAY_SECONDS * (2 ** empty_retries)
+                            if watcher_stop.wait(delay):
+                                break
+                            if callable(client_disconnected) and client_disconnected():
+                                source_ended = False
+                                break
+                            if restart_audio_process():
+                                empty_retries += 1
+                                attempt_had_audio = False
+                                source_ended = False
+                                continue
                     break
                 if audio_only:
+                    attempt_had_audio = True
                     with stream_state_lock:
                         first_chunk = stream_state["bytes_sent"] == 0
                         stream_state["bytes_sent"] += len(chunk)
@@ -167,10 +242,13 @@ def response_for(
             if audio_only:
                 with stream_state_lock:
                     empty = stream_state["bytes_sent"] == 0
-                if empty:
+                if source_ended or (empty and not watcher_stop.is_set()):
                     media_pipeline.record_output_error(
                         output_name,
-                        audio_error_detail("The channel ended without producing audio data."),
+                        audio_error_detail(
+                            "The channel ended without producing audio data."
+                            if empty else "The live audio source ended after playback started."
+                        ),
                     )
             cleanup_process()
 

@@ -1585,17 +1585,33 @@ def manual_fallback_usage() -> dict:
 
 def manual_stream_target(token: str) -> str:
     """Resolve an opaque curated manual-channel token to its current provider URL."""
+    targets = manual_stream_candidates(token)
+    return targets[0] if targets else ""
+
+
+def manual_stream_candidates(token: str) -> list[str]:
+    """Return every matching provider URL with the last healthy target first."""
     expected_key = f"manual:{str(token or '').strip()}"
     if expected_key == "manual:":
-        return ""
+        return []
     for channel in saved_manual_guide_channels():
         if channel_key(channel) != expected_key:
             continue
         urls = candidate_urls(channel, active_primary_channels(), manual_fallback_channel_sets(), channel_key)
         _manual_health_candidates[expected_key] = urls
         _available, target = availability.lookup(urls)
-        return target
-    return ""
+        if target in urls:
+            return [target, *(url for url in urls if url != target)]
+        return urls
+    return []
+
+
+def remember_manual_stream_target(token: str, target: str | None) -> None:
+    """Feed an actual HLS relay result back into guide availability."""
+    expected_key = f"manual:{str(token or '').strip()}"
+    urls = _manual_health_candidates.get(expected_key, [])
+    if urls:
+        availability.remember(urls, bool(target), str(target or ""))
 
 
 def curated_channels_for_guide() -> list[dict]:

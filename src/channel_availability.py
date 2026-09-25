@@ -93,6 +93,18 @@ class AvailabilityCache:
             cached = self.results.get(key)
             return (cached[1], cached[2]) if cached else (None, "")
 
+    def remember(self, urls, available, target=""):
+        """Record the result of real playback without launching another probe."""
+        key = tuple(dict.fromkeys(url for url in urls if url))
+        if not key:
+            return
+        chosen = str(target or "") if available is True else ""
+        with self.lock:
+            self.results[key] = (time.monotonic(), available, chosen)
+            if len(self.results) > 2048:
+                oldest = min(self.results, key=lambda item: self.results[item][0])
+                self.results.pop(oldest, None)
+
 
 availability = AvailabilityCache()
 

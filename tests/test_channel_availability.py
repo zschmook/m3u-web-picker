@@ -69,6 +69,16 @@ class AvailabilityTests(unittest.TestCase):
             run.return_value.stdout = b'{"packets":[{"size":"188","side_data_list":[{"side_data_type":"MPEGTS Stream ID"}]}]}'
             self.assertTrue(probe_stream("http://example.test"))
 
+    def test_real_playback_result_updates_cached_target(self):
+        cache = AvailabilityCache(lambda _url: None)
+        try:
+            cache.remember(["primary", "fallback"], True, "fallback")
+            self.assertEqual(cache.lookup(["primary", "fallback"]), (True, "fallback"))
+            cache.remember(["primary", "fallback"], False)
+            self.assertEqual(cache.lookup(["primary", "fallback"]), (False, ""))
+        finally:
+            cache.worker.shutdown()
+
 
 class SelectionRetentionTests(unittest.TestCase):
     def test_missing_rows_survive_update_restart_and_recover_in_place(self):

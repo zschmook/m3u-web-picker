@@ -124,6 +124,9 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertEqual(args[args.index("-zerolatency") + 1], "1")
         self.assertEqual(args[args.index("-delay") + 1], "0")
         self.assertEqual(args[args.index("-bf") + 1], "0")
+        self.assertEqual(args[args.index("-reconnect") + 1], "1")
+        self.assertEqual(args[args.index("-reconnect_streamed") + 1], "1")
+        self.assertLess(args.index("-reconnect"), args.index("-i"))
         self.assertIn("http://provider.test/live.ts", args)
 
     def test_audio_only_stream_drops_video_and_emits_mp3(self):
