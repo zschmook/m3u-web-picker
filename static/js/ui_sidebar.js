@@ -2,7 +2,7 @@
   "use strict";
 
   const PAGE_IDS = ["overview", "providers", "channels", "sports", "settings"];
-  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "jellyfin", "epg", "devices"];
+  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "jellyfin", "epg", "devices", "custom-channels"];
   const state = {
     status: null,
     activePage: "overview",
@@ -202,6 +202,7 @@
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="devices">Devices</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="custom-channels">Custom Channels</button>
       </div>
       <div class="ui-settings-grid">
         <section class="ui-modern-card ui-settings-panel is-active" data-settings-panel-content="encoding" aria-labelledby="uiEncodingTitle">
@@ -326,6 +327,8 @@
         </section>
       </div>`;
     settings.querySelector(".ui-settings-grid")?.append(epgPanel, devicesPanel);
+    const customTemplate = document.getElementById('uiCustomChannelsTemplate');
+    if (customTemplate) settings.querySelector('.ui-settings-grid').append(customTemplate.content.cloneNode(true));
     root.appendChild(settings);
 
     settings.querySelectorAll("[data-settings-panel]").forEach(button => button.addEventListener("click", () => {

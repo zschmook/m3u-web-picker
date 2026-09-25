@@ -65,13 +65,13 @@ def assigned_channel_number(
     return block_start + slot_index * per_event + feed_index
 
 
-def effective_start_channel(configured_start: int, manual_channel_count: int) -> int:
-    """Return a sports block start that cannot collide with manual numbering."""
+def effective_start_channel(configured_start: int, occupied_through: int) -> int:
+    """Return a sports block start above the highest reserved channel number."""
     configured = max(1, int(configured_start))
-    manual_count = max(0, int(manual_channel_count))
-    if manual_count < configured:
+    occupied_through = max(0, int(occupied_through))
+    if occupied_through < configured:
         return configured
-    blocks_to_skip = ((manual_count - configured) // _s.LEAGUE_BLOCK_SIZE) + 1
+    blocks_to_skip = ((occupied_through - configured) // _s.LEAGUE_BLOCK_SIZE) + 1
     return configured + blocks_to_skip * _s.LEAGUE_BLOCK_SIZE
 
 

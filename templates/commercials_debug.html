@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Commercials playback debug</title>
+<style>
+body{background:#111827;color:#e5e7eb;font:15px system-ui;margin:24px}a{color:#93c5fd}table{border-collapse:collapse;width:100%}td,th{padding:10px;border-bottom:1px solid #374151;text-align:left}th{color:#93c5fd}.playing{color:#4ade80}.interrupted{color:#fbbf24}#note{color:#9ca3af}pre{white-space:pre-wrap}
+</style>
+<h1>Commercials playback debug</h1>
+<p><a href="/guide">TV guide</a> · Channels 0.01 / 0.002 / 0.03 · Updates every two seconds</p>
+<p id="note"></p><p id="summary">Waiting for playback…</p><pre id="errors"></pre>
+<pre id="handoffs"></pre>
+<table><thead><tr><th>File</th><th>Session</th><th>Queue / cycle</th><th>Started</th><th>Stopped</th><th>Streamed / length</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+const stamp=value=>value?new Date(value).toLocaleString(): '—';
+async function update(){
+ try{
+  const response=await fetch('/api/commercials/stats',{cache:'no-store'});if(!response.ok)throw Error(response.status);
+  const data=await response.json();document.getElementById('note').textContent=data.note;
+  const active=data.sessions.filter(s=>s.status==='playing');
+  document.getElementById('summary').textContent=`${active.length} active streams · ${data.sessions.length} recent sessions · ${data.plays.length} recent clip records`;
+  document.getElementById('errors').textContent=data.sessions.flatMap(s=>(s.errors||[]).map(e=>`${s.id}: ${e}`)).join('\n');
+  document.getElementById('handoffs').textContent=data.sessions.flatMap(s=>(s.transitions||[]).map(t=>`${t.from} → ${t.to}: ${t.ready_at_handoff?'BUFFER READY':'WAITING AT HANDOFF'}; ${t.warmup_seconds}s warm-up; ${t.wait_for_data_ms??'…'}ms data wait`)).slice(0,30).join('\n');
+  const body=document.getElementById('rows');body.replaceChildren();
+  for(const p of data.plays){const row=body.insertRow();row.className=p.status;
+   for(const value of [p.filename,p.session_id,`${p.queue_position} / ${p.cycle}`,stamp(p.started_at),stamp(p.stopped_at),`${p.streamed_seconds.toFixed(2)} / ${p.expected_seconds.toFixed(2)} s`,p.status])row.insertCell().textContent=value;
+  }
+ }catch(error){document.getElementById('summary').textContent='Unable to refresh: '+error.message;}
+ setTimeout(update,2000);
+}update();
+</script>

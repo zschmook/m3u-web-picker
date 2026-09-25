@@ -45,6 +45,7 @@ services:
       M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
       M3U_DVR_HOST_DIR: "${M3U_DVR_DIR:-./runtime/recordings}"
       M3U_DVR_CONTAINER_DIR: /recordings
+      M3U_COMMERCIALS_ROOT: /commercials
       M3U_DVR_HEVC_ENCODER: "${M3U_DVR_HEVC_ENCODER:-auto}"
       BACKUP_TIME: "03:15"
       BACKUP_TIMEZONE: "America/New_York"
@@ -65,8 +66,12 @@ services:
       - type: volume
         source: m3u-picker-data
         target: /app/data
+      - type: volume
+        source: m3u-picker-commercials
+        target: /commercials
 
     restart: unless-stopped
 
 volumes:
   m3u-picker-data:
+  m3u-picker-commercials:

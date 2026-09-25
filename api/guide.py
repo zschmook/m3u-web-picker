@@ -13,6 +13,16 @@ from settings import load_settings
 from playback import roku
 from sports.generated import generated_publish_lock
 from .http import json_error, no_cache
+from . import commercials
+from . import episode_test
+from . import breaking_bad
+from . import custom_channels
+
+
+def custom_channel_insert_position(items):
+    """Place custom TV after local/manual channels and before generated sports."""
+    return next((index for index,item in enumerate(items)
+        if str(item.get('play_url','')).startswith('/guide/play/sports/')),len(items))
 
 
 _ROKU_DIRECTOR_LOCK = threading.RLock()
@@ -59,6 +69,16 @@ def schedule_director_roku_relaunch(revision: int) -> None:
 def _resolve_guide_play_target(play_url: str) -> str:
     """Resolve a guide-owned opaque play path without trusting arbitrary URLs."""
     value = str(play_url or "").split("?", 1)[0].strip()
+    if value == commercials.PLAY_URL:
+        return commercials.local_stream_url()
+    if value == episode_test.PLAY_URL:
+        return episode_test.local_stream_url()
+    if value == breaking_bad.PLAY_URL:
+        return breaking_bad.local_stream_url()
+    custom = re.fullmatch(r'/guide/play/custom/([a-f0-9]{16})',value)
+    if custom:
+        try: return custom_channels.local_url(custom.group(1))
+        except ValueError: return ''
     if value == director.PLAY_URL:
         settings = load_settings()
         return f"http://127.0.0.1:{settings.port}{director.STREAM_PATH}"
@@ -159,6 +179,27 @@ def register_guide_routes(app):
                 timezone_name=str(sports_settings.get("timezone", "America/New_York")),
             )
         items = [director.guide_item(), *items]
+        local_channel = breaking_bad.guide_item()
+        if local_channel:
+            items.insert(0, local_channel)
+            epg_status['channel_count'] = epg_status.get('channel_count',0)+1
+            epg_status['matched_channels'] = epg_status.get('matched_channels',0)+1
+            epg_status['current_channels'] = epg_status.get('current_channels',0)+bool(local_channel['now'])
+            epg_status['programme_count'] = epg_status.get('programme_count',0)+len(local_channel['upcoming'])+bool(local_channel['now'])
+        commercial = commercials.guide_item()
+        custom_items=custom_channels.guide_items()
+        custom_position=custom_channel_insert_position(items)
+        items[custom_position:custom_position]=custom_items
+        for custom in custom_items:
+            epg_status['channel_count'] = epg_status.get('channel_count',0)+1
+            epg_status['matched_channels'] = epg_status.get('matched_channels',0)+bool(custom['now'] or custom['upcoming'])
+            epg_status['current_channels'] = epg_status.get('current_channels',0)+bool(custom['now'])
+            epg_status['programme_count'] = epg_status.get('programme_count',0)+len(custom['upcoming'])+bool(custom['now'])
+        if commercial:
+            items.insert(0, commercial)
+        test_channel = episode_test.guide_item()
+        if test_channel:
+            items.insert(0, test_channel)
         response = jsonify(count=len(items), channels=items, epg=epg_status)
         return no_cache(response)
 

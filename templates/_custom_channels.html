@@ -1,0 +1,87 @@
+<template id="uiCustomChannelsTemplate">
+<section class="ui-modern-card ui-settings-panel" data-settings-panel-content="custom-channels" aria-labelledby="uiCustomTitle">
+  <div class="ui-card-heading"><div><span id="uiCustomTitle">Custom Channels</span><small>Build your own live TV channels from Plex shows.</small></div><span class="ui-count-badge">Experimental</span></div>
+  <div class="ui-settings-form">
+    <label class="ui-settings-toggle"><input id="ccEnabled" type="checkbox" role="switch"><span><strong>Enable Plex TV show channels</strong><small>Include the TV catalog in manual and scheduled updates. Channel creation is always a separate step.</small></span></label>
+    <details id="ccStatusPanel" class="ui-settings-details cc-status-panel">
+      <summary><span>Status</span><span id="ccStatusSummary" class="small-muted"></span></summary>
+      <div class="ui-settings-details-body">
+        <div class="cc-discover-row"><button id="ccDiscover" class="btn ui-btn-secondary" type="button">Refresh Plex</button></div>
+        <div id="ccStatus" class="ui-settings-status" role="status" aria-live="polite"></div>
+        <div id="ccLastChecked" class="small-muted"></div>
+        <div id="ccServers" class="small-muted"></div>
+      </div>
+    </details>
+    <div class="ui-settings-field cc-minimum-setting">
+      <div class="cc-minimum-heading"><span>Minimum available episodes per series</span><label><input id="ccShowAll" type="checkbox"> Include series below the episode minimum</label></div>
+      <input id="ccMinimum" class="form-control" type="number" min="1" max="10000" value="30" aria-label="Minimum available episodes per series">
+    </div>
+    {# Manual Plex connection controls are temporarily hidden.
+    <details class="ui-settings-details"><summary>Add a Plex connection manually</summary><div class="ui-settings-details-body">
+      <label class="ui-settings-field"><span>Plex server URL</span><input id="ccServerUrl" class="form-control" placeholder="http://192.168.1.10:32400"></label>
+      <label class="ui-settings-field"><span>Plex token</span><input id="ccToken" type="password" class="form-control" autocomplete="new-password"></label>
+      <button id="ccConnect" class="btn ui-btn-secondary" type="button">Connect</button>
+    </div></details>
+    #}
+    <details class="ui-settings-details cc-commercials"><summary><span>Nostalgia commercials</span><span id="ccCommercialCollapsedSummary" class="small-muted"></span></summary><div class="ui-settings-details-body">
+      <div class="cc-commercial-heading"><label class="ui-settings-toggle"><input id="ccAds" type="checkbox"><span><strong>Add commercials to new channels</strong><small>Use clips from your own collection.</small></span></label><span class="ui-count-badge">New channels only</span></div>
+      <div id="ccCommercialSummary" class="cc-commercial-summary"></div>
+      <div id="ccImportDrop" class="cc-import-drop">
+        <div class="cc-import-icon" aria-hidden="true">⇧</div>
+        <strong>Drop a retro commercial compilation here</strong>
+        <span class="small-muted">Choose an MP4, even if it is several hours long.</span>
+        <span class="small-muted">Need an MP4? <a href="https://app.ytdown.to/en38/" target="_blank" rel="noopener noreferrer">Open YTDown</a>.</span>
+        <input id="ccImportInput" type="file" accept="video/mp4,.mp4" hidden>
+        <button id="ccImportChoose" class="btn ui-btn-secondary" type="button">Choose MP4</button>
+      </div>
+      <div id="ccImportProgress" class="cc-import-progress" hidden>
+        <div class="cc-import-progress-heading"><strong id="ccImportName"></strong><span id="ccImportNumbers" class="small-muted"></span></div>
+        <div class="cc-import-track"><span id="ccImportBar"></span></div>
+        <div id="ccImportMessage" class="small-muted" role="status" aria-live="polite"></div>
+      </div>
+      <div id="ccImports" class="cc-imports"></div>
+      <div class="cc-commercial-fields">
+        <label class="ui-settings-field"><span>Place breaks</span><select id="ccAdMode" class="form-select"><option value="minutes">By minutes of show time</option><option value="episodes">Between episodes</option></select></label>
+        <label class="ui-settings-field"><span id="ccIntervalLabel">Minutes between breaks</span><input id="ccInterval" type="number" class="form-control" min="1" max="240" value="15"></label>
+        <label class="ui-settings-field"><span>Ads in each break</span><input id="ccAdCount" class="form-control" type="number" min="1" max="20" value="3"></label>
+      </div>
+      <label class="ui-settings-toggle"><input id="ccPreroll" type="checkbox" checked><span><strong>Start each episode with one commercial</strong></span></label>
+      <small>These defaults are copied when a channel is created. Existing channels keep their current commercial schedule.</small>
+    </div></details>
+    <div><h3 class="h6">Available TV shows</h3><div class="small-muted">Create a channel from every available episode. In order begins now with the first episode; Random shuffles without repeats. You can exclude seasons later by editing the channel.</div></div>
+    <div class="cc-fields"><label class="ui-settings-field"><span>Find a show</span><input id="ccSearch" class="form-control" type="search" placeholder="Show or server"></label><label class="ui-settings-field"><span>Sort by</span><select id="ccSort" class="form-select"><option value="title">Show A–Z</option><option value="count">Most episodes</option><option value="hours">Longest runtime</option><option value="server">Server</option></select></label></div>
+    <div class="cc-catalog-actions"><div><div id="ccCatalogSummary" class="small-muted"></div><div id="ccAddAllImpact" class="small-muted"></div></div><button id="ccAddAll" class="btn ui-btn-secondary" type="button">Add All</button></div>
+    <div id="ccShows"></div>
+    <div class="small-muted">Counts use cataloged episodes with media. Specials are excluded. Shared files play once. Missing episodes are skipped; gaps can only be identified inside the available numbering, not beyond the last known episode.</div>
+    <h3 class="h6">Your channels</h3><div id="ccChannels"></div>
+    <div class="ui-settings-actions cc-guide-actions"><a class="btn ui-btn-secondary" href="/guide">Open TV Guide</a><span class="small-muted">Included in your existing channel playlists and EPG.</span></div>
+  </div>
+  <dialog id="ccEnableDialog" class="cc-dialog" aria-labelledby="ccEnableTitle">
+    <h3 id="ccEnableTitle" class="h5">Find your Plex servers?</h3><p>Can I scan your network for Plex servers and catalog your TV shows?</p><p class="small-muted">You choose which shows become channels afterward.</p>
+    <div class="ui-settings-actions"><button id="ccEnableCancel" class="btn ui-btn-secondary" type="button">Not now</button><button id="ccEnableConfirm" class="btn ui-btn-primary" type="button">Scan now</button></div>
+  </dialog>
+  <dialog id="ccEditDialog" class="cc-dialog" aria-labelledby="ccEditTitle">
+    <h3 id="ccEditTitle" class="h5">Edit custom channel</h3>
+    <div class="cc-fields">
+      <label class="ui-settings-field"><span>Channel name</span><input id="ccEditName" class="form-control" maxlength="120" required></label>
+      <label class="ui-settings-field"><span>Channel number</span><input id="ccEditNumber" class="form-control" inputmode="decimal" pattern="\d+(\.\d+)?" required></label>
+      <label class="ui-settings-field"><span>Episode order</span><select id="ccEditOrder" class="form-select"><option value="random">Random order</option><option value="ordered">From start (starts now)</option></select></label>
+      <label class="ui-settings-field"><span>First season</span><input id="ccEditFirst" class="form-control" type="number" min="1" max="9999" required></label>
+      <label class="ui-settings-field"><span>Last season</span><input id="ccEditLast" class="form-control" type="number" min="1" max="9999" required></label>
+    </div>
+    <p class="small-muted">Changing the episode order or season range restarts this channel’s live clock. Name and number changes do not.</p>
+    <div class="ui-settings-actions"><button id="ccEditCancel" class="btn ui-btn-secondary" type="button">Cancel</button><button id="ccEditSave" class="btn ui-btn-primary" type="button">Save changes</button></div>
+  </dialog>
+  <dialog id="ccDeleteDialog" class="cc-dialog" aria-labelledby="ccDeleteTitle">
+    <h3 id="ccDeleteTitle" class="h5">Delete custom channel?</h3>
+    <p id="ccDeleteMessage"></p><p class="small-muted">This removes its custom schedule. Your Plex files and manually saved IPTV channels are not changed.</p>
+    <div class="ui-settings-actions"><button id="ccDeleteCancel" class="btn ui-btn-secondary" type="button">Cancel</button><button id="ccDeleteConfirm" class="btn btn-outline-danger" type="button">Delete channel</button></div>
+  </dialog>
+  <dialog id="ccAddAllDialog" class="cc-dialog" aria-labelledby="ccAddAllTitle">
+    <h3 id="ccAddAllTitle" class="h5">Create channels for all shown series?</h3>
+    <div id="ccAddAllDetails"></div>
+    <p class="small-muted">The channels will begin now, appear in the existing playlists and EPG, and keep running on their shared live clocks.</p>
+    <div class="ui-settings-actions"><button id="ccAddAllCancel" class="btn ui-btn-secondary" type="button">Cancel</button><button id="ccAddAllConfirm" class="btn ui-btn-primary" type="button">Create Channels</button></div>
+  </dialog>
+</section>
+</template>

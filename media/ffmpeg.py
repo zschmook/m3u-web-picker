@@ -162,6 +162,16 @@ def audio_only_mp3_args(target: str) -> list[str]:
     ]
 
 
+def fragmented_mp4_copy_args(target: str) -> list[str]:
+    """Remux the compositor's already-normalized H.264/AAC output."""
+    return [
+        executable(), "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-copyts", "-start_at_zero", "-i", target,
+        "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy",
+        "-bsf:a", "aac_adtstoasc",
+    ]
+
+
 def terminate(process: subprocess.Popen, *, timeout: float = 2.0) -> None:
     if process.poll() is not None:
         return

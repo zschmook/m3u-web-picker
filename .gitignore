@@ -10,6 +10,7 @@ config.json
 *.xml
 
 backups/
+commercials/
 config/
 data/
 runtime/

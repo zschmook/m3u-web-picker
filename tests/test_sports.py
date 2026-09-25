@@ -583,6 +583,31 @@ http://provider.test/user/pass/philly.ts
         self.assertEqual(sports.effective_start_channel(1000, 1000), 2000)
         self.assertEqual(sports.effective_start_channel(1000, 1021), 2000)
         self.assertEqual(sports.effective_start_channel(1500, 1600), 2500)
+        self.assertEqual(sports.effective_start_channel(1000, 1999), 2000)
+
+    def test_scan_reserves_custom_tv_block_before_sports(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        result = sports.scan_channels(
+            self.db_path,
+            self.channels,
+            now=now,
+            trigger="test",
+            reserved_channel_number=1999,
+        )
+        rows = sports.generated_rows(self.db_path)
+        self.assertEqual(result["numbering"]["effective_start_channel"], 2000)
+        self.assertEqual(result["numbering"]["reserved_channel_number"], 1999)
+        self.assertEqual([row["assigned_number"] for row in rows], [2000, 2001, 2002])
+
+    def test_cached_sports_channels_shift_out_of_custom_tv_block(self):
+        now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))
+        sports.scan_channels(self.db_path,self.channels,now=now,trigger="test")
+        self.assertEqual(sports.move_generated_above(self.db_path,2000),3)
+        rows=sports.generated_rows(self.db_path)
+        self.assertEqual([row['assigned_number'] for row in rows],[2000,2001,2002])
+        self.assertTrue(all(f'tvg-chno="{row["assigned_number"]}"' in row['raw'][0] for row in rows))
+        self.assertTrue(all(row['raw'][-1]==f'/sports/stream/{row["assigned_number"]}' for row in rows))
+        self.assertEqual(sports.move_generated_above(self.db_path,2000),0)
 
     def test_scan_auto_shifts_sports_slots_above_large_manual_lineup(self):
         now = datetime(2026, 8, 2, 2, 30, tzinfo=ZoneInfo("America/New_York"))

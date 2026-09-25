@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import threading
 from contextlib import closing
@@ -163,6 +164,29 @@ def generated_rows(
         )
         output.append(item)
     return output
+
+
+def move_generated_above(db_path: Path | str, minimum_start: int) -> int:
+    """Shift a cached sports generation upward by whole league blocks."""
+    minimum=max(1,int(minimum_start));rows=generated_rows(db_path,include_cached=True)
+    if not rows: return 0
+    lowest=min(int(row['assigned_number']) for row in rows)
+    if lowest>=minimum: return 0
+    delta=math.ceil((minimum-lowest)/_s.LEAGUE_BLOCK_SIZE)*_s.LEAGUE_BLOCK_SIZE
+    with generated_publish_lock,closing(_s._connect(db_path)) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            conn.execute('UPDATE sports_generated SET assigned_number = assigned_number + 1000000000')
+            for row in rows:
+                number=int(row['assigned_number'])+delta
+                row['assigned_number']=number;row['playback_url']=generated_stream_path(number)
+                row['raw']=_generated_raw(row,row)
+                conn.execute('UPDATE sports_generated SET assigned_number = ?, raw_json = ? WHERE id = ?',
+                    (number,json.dumps(row['raw']),row['id']))
+            conn.commit()
+        except Exception:
+            conn.rollback();raise
+    return len(rows)
 
 
 def generated_stream_target(db_path: Path | str, assigned_number: int) -> str:

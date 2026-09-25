@@ -5,9 +5,18 @@ import media_pipeline
 import public_epg_logos
 import sports
 from media import director, mpegts
+from . import custom_channels
+from xml.etree import ElementTree as ET
 
 
 def register_output_routes(app):
+    from .commercials import register_commercial_routes
+    register_commercial_routes(app)
+    from .episode_test import register_episode_test_routes
+    register_episode_test_routes(app)
+    from .breaking_bad import register_breaking_bad_routes
+    register_breaking_bad_routes(app)
+
     def curated_playlist_text(*, encoded: bool) -> str:
         lines = ["#EXTM3U"]
         base_url = request.url_root.rstrip("/")
@@ -29,6 +38,7 @@ def register_output_routes(app):
                 if encoded and token else target or str(channel.get("url", "") or "")
             )
             lines.extend(raw)
+        lines.extend(custom_channels.playlist_lines(base_url))
         for row in sports.generated_rows(core.DB_PATH):
             candidates = core.enabled_sports_candidates(row, enabled_urls=enabled_urls)
             available, target = core.availability.lookup(candidates)
@@ -125,16 +135,17 @@ def register_output_routes(app):
     @app.get("/epg/combined.xml")
     def combined_epg():
         core.ensure_epg_exports_current()
-        response = send_file(
-            core.COMBINED_EPG_PATH,
-            mimetype="application/xml",
-            as_attachment=False,
-            download_name="epg.xml",
-        )
+        items=custom_channels.guide_items()
+        if items:
+            root=ET.parse(core.COMBINED_EPG_PATH).getroot() if core.COMBINED_EPG_PATH.exists() else ET.Element('tv')
+            custom_channels.merge_epg(root,items)
+            response=Response(ET.tostring(root,encoding='utf-8',xml_declaration=True),mimetype='application/xml')
+        else:
+            response = send_file(core.COMBINED_EPG_PATH,mimetype="application/xml",as_attachment=False,download_name="epg.xml")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
-        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.COMBINED_EPG_PATH.stat().st_mtime))
+        response.headers["X-M3U-Picker-Guide-Revision"] = str(int(core.COMBINED_EPG_PATH.stat().st_mtime)) if core.COMBINED_EPG_PATH.exists() else 'custom'
         return response
 
     def with_manual_epg_logos(text: str) -> str:

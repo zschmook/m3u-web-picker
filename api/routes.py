@@ -28,10 +28,12 @@ from .sports_routes import register_sports_routes
 # Import onboarding before ui_status so its Jellyfin post-update wrapper sits
 # inside the existing master-update reporting wrapper.
 from .onboarding import register_onboarding_routes
+from .custom_channels import register_custom_channel_routes
 from .ui_status import register_ui_status_routes
 
 
 def register_routes(app):
+    register_custom_channel_routes(app)
     register_provider_routes(app)
     register_epg_routes(app)
     register_group_routes(app)

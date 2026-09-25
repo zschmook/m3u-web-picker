@@ -140,7 +140,7 @@ _guide = import_module(f"{__name__}.guide")
 _install(_guide, ("_xmltv_time", "_parse_iso_datetime", "_serialize_programme_record", "_serialize_epg_programme", "_parse_programme_record", "_epg_programme_from_item", "_event_duration", "_clean_feed_subtitle", "build_sports_xmltv", "build_combined_xmltv", "_write_prepared_epg_files", "rebuild_epg_exports"))
 
 _generated = import_module(f"{__name__}.generated")
-_install(_generated, ("_rewrite_extinf", "generated_stream_path", "_generated_raw", "_generated_tvg_id", "purge_stale_generated", "generated_rows", "generated_stream_target", "generated_channel_payloads"))
+_install(_generated, ("_rewrite_extinf", "generated_stream_path", "_generated_raw", "_generated_tvg_id", "purge_stale_generated", "generated_rows", "move_generated_above", "generated_stream_target", "generated_channel_payloads"))
 
 _guide_validation = import_module(f"{__name__}.guide_validation")
 _install(_guide_validation, ("_local_xml_name", "_xmltv_index", "_playlist_tvg_ids", "validate_guide_exports"))

@@ -14,6 +14,7 @@ import master_update_worker
 import media_pipeline
 import roku_devices
 import sports
+import custom_channels
 from media import hls
 from .hdhr import HDHR_TUNER_COUNT
 
@@ -73,6 +74,11 @@ def _active_hls_sessions() -> int:
 def _update_health() -> dict:
     stages: list[dict] = []
     providers = core.provider_sources_payload()
+    if custom_channels.settings()['enabled']:
+        catalog = custom_channels.read('catalog.json',{})
+        warnings = catalog.get('warnings',[])
+        stages.append(_stage('Custom Channels', 'warning' if warnings else ('success' if catalog else 'setup'),
+            ' '.join(warnings) if warnings else f"{len(catalog.get('shows',[]))} Plex TV shows cataloged",kind='custom'))
     primary = next((item for item in providers if item.get("role") == "primary"), None)
     report = master_update_reports.latest(core.DB_PATH)
 

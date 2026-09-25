@@ -34,6 +34,7 @@ services:
       M3U_BACKUP_CONTAINER_DIR: /backups
       M3U_JELLYFIN_CACHE_HOST_DIR: "${M3U_JELLYFIN_CACHE_DIR:-}"
       M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
+      M3U_COMMERCIALS_ROOT: /commercials
       BACKUP_TIME: "03:15"
       BACKUP_TIMEZONE: "America/New_York"
       BACKUP_RETENTION_DAYS: "30"
@@ -50,8 +51,12 @@ services:
       - type: volume
         source: m3u-picker-dev-data
         target: /app/data
+      - type: volume
+        source: m3u-picker-dev-commercials
+        target: /commercials
 
     restart: unless-stopped
 
 volumes:
   m3u-picker-dev-data:
+  m3u-picker-dev-commercials:

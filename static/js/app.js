@@ -1757,10 +1757,13 @@ function applySportsState() {
   const effectiveStart = Number(numberingAdjustment.effective_start_channel || settings.start_channel || 1000);
   const configuredStart = Number(numberingAdjustment.configured_start_channel || settings.start_channel || 1000);
   const warning = sportsElement("sportsNumberWarning");
-  warning.classList.toggle("d-none", conflictCount === 0);
+  const numberingShifted = effectiveStart !== configuredStart;
+  warning.classList.toggle("d-none", !numberingShifted);
   warning.textContent = conflictCount
     ? `Configured sports start ${configuredStart} overlaps ${conflictCount} manual channel${conflictCount === 1 ? "" : "s"}. Generated sports channels will start at ${effectiveStart} automatically so Jellyfin receives unique channel numbers.`
-    : "";
+    : numberingShifted
+      ? `Channels 1000–1999 are reserved for custom TV channels. Generated sports channels start at ${effectiveStart}.`
+      : "";
 
   const generatedCount = (sportsState.generated || []).length;
   const cachedCount = Number(sportsState.disabled_cache?.count || 0);

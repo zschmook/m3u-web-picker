@@ -2911,6 +2911,7 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
             base_channel_ids=selected_xmltv_ids(),
             fallback_epg_paths=configured_epg_fallback_paths(active_base_epg_path()),
             manual_channel_count=len(selected_channels_from_selected_ids_in_order()),
+            reserved_channel_number=1999,
             preserve_existing=bool(provider_warnings),
             cancel_check=cancel_check,
         )
@@ -3014,11 +3015,13 @@ def sports_numbering_adjustment() -> dict:
     settings = sports.get_settings(DB_PATH)
     configured_start = int(settings.get("start_channel", 1000))
     manual_count = len(selected_channels_from_selected_ids_in_order())
-    effective_start = sports.effective_start_channel(configured_start, manual_count)
+    reserved_channel_number=1999
+    effective_start = sports.effective_start_channel(configured_start,max(manual_count,reserved_channel_number))
     return {
         "configured_start_channel": configured_start,
         "effective_start_channel": effective_start,
         "manual_channel_count": manual_count,
+        "reserved_channel_number": reserved_channel_number,
         "overlap_count": max(0, manual_count - configured_start + 1),
         "auto_shifted": effective_start != configured_start,
     }
@@ -3038,6 +3041,7 @@ def enrich_sports_status(payload: dict) -> dict:
     payload["numbering"]["configured_start_channel"] = adjustment["configured_start_channel"]
     payload["numbering"]["effective_start_channel"] = adjustment["effective_start_channel"]
     payload["numbering"]["manual_channel_count"] = adjustment["manual_channel_count"]
+    payload["numbering"]["reserved_channel_number"] = adjustment["reserved_channel_number"]
     payload["numbering"]["auto_shifted"] = adjustment["auto_shifted"]
     return payload
 
@@ -3392,6 +3396,9 @@ def load_cached_master_playlist_on_startup() -> None:
         print(f"Recovered {recovered_dvr} interrupted DVR recording(s).")
     if sports.recover_interrupted_scan(DB_PATH):
         print("Recovered an interrupted sports scan state from the previous app process.")
+    shifted_sports=sports.move_generated_above(DB_PATH,2000)
+    if shifted_sports:
+        print(f"Moved {shifted_sports} generated sports channel(s) above the custom TV channel block.")
     # Do the same cheap lifecycle cleanup used by the scheduler before serving
     # cached outputs after a restart. Finished games should not reappear as
     # blank channels for the first scheduler interval.

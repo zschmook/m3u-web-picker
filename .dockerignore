@@ -6,6 +6,7 @@ __pycache__
 .DS_Store
 *.zip
 backups/
+commercials/
 config/
 epg/
 logo_cache/

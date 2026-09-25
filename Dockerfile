@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
-RUN mkdir -p /app/exports /app/data /backups /recordings
+RUN mkdir -p /app/exports /app/data /backups /recordings /commercials/incoming /commercials/clips /commercials/work
 
 EXPOSE 9999
 

@@ -26,6 +26,7 @@ class ScanContext:
     base_channel_ids: set[str] | None
     fallback_epg_paths: Iterable[Path] | None
     manual_channel_count: int
+    reserved_channel_number: int
     cancel_check: _s.CancelCheck
     settings: dict
     preserve_existing: bool
@@ -273,7 +274,7 @@ def _build_generated_channels(ctx: ScanContext) -> None:
     ctx.configured_start_number = int(ctx.settings.get("start_channel", 1000))
     ctx.start_number = _s.effective_start_channel(
         ctx.configured_start_number,
-        ctx.manual_channel_count,
+        max(ctx.manual_channel_count,ctx.reserved_channel_number),
     )
     ctx.block_size = int(ctx.settings.get("channels_per_event", 10))
     group_title = str(ctx.settings.get("group_title", "Sports Today"))
@@ -483,6 +484,7 @@ def _result_payload(ctx: ScanContext, message: str, malformed_count: int) -> dic
             "configured_start_channel": ctx.configured_start_number,
             "effective_start_channel": ctx.start_number,
             "manual_channel_count": max(0, int(ctx.manual_channel_count)),
+            "reserved_channel_number": max(0, int(ctx.reserved_channel_number)),
             "auto_shifted": ctx.start_number != ctx.configured_start_number,
             "league_block_size": _s.LEAGUE_BLOCK_SIZE,
             "events_per_primary_block": max(
@@ -526,6 +528,7 @@ def scan_channels(
     base_channel_ids: set[str] | None = None,
     fallback_epg_paths: Iterable[Path] | None = None,
     manual_channel_count: int = 0,
+    reserved_channel_number: int = 0,
     preserve_existing: bool = False,
     cancel_check: _s.CancelCheck = None,
 ) -> dict:
@@ -573,6 +576,7 @@ def scan_channels(
         base_channel_ids=base_channel_ids,
         fallback_epg_paths=fallback_epg_paths,
         manual_channel_count=manual_channel_count,
+        reserved_channel_number=reserved_channel_number,
         cancel_check=cancel_check,
         settings=settings,
         preserve_existing=preserve_existing,
