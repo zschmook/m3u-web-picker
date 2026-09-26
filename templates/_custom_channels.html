@@ -6,7 +6,7 @@
     <details id="ccStatusPanel" class="ui-settings-details cc-status-panel">
       <summary><span>Status</span><span id="ccStatusSummary" class="small-muted"></span></summary>
       <div class="ui-settings-details-body">
-        <div class="cc-discover-row"><button id="ccDiscover" class="btn ui-btn-secondary" type="button">Refresh Plex</button></div>
+        <div class="cc-discover-row"><button id="ccDiscover" class="btn ui-btn-secondary" type="button">Refresh Custom Channels</button></div>
         <div id="ccStatus" class="ui-settings-status" role="status" aria-live="polite"></div>
         <div id="ccLastChecked" class="small-muted"></div>
         <div id="ccServers" class="small-muted"></div>
@@ -23,8 +23,8 @@
       <button id="ccConnect" class="btn ui-btn-secondary" type="button">Connect</button>
     </div></details>
     #}
-    <details class="ui-settings-details cc-commercials"><summary><span>Nostalgia commercials</span><span id="ccCommercialCollapsedSummary" class="small-muted"></span></summary><div class="ui-settings-details-body">
-      <div class="cc-commercial-heading"><label class="ui-settings-toggle"><input id="ccAds" type="checkbox"><span><strong>Add commercials to new channels</strong><small>Use clips from your own collection.</small></span></label><span class="ui-count-badge">New channels only</span></div>
+    <details class="ui-settings-details cc-commercials"><summary><span>Nostalgia commercials</span><span id="ccCommercialLoaded" class="cc-commercial-loaded"></span><span id="ccCommercialCollapsedSummary" class="small-muted"></span></summary><div class="ui-settings-details-body">
+      <div class="cc-commercial-heading"><label class="ui-settings-toggle"><input id="ccAds" type="checkbox"><span><strong>Add commercials to TV show channels</strong><small>Use clips from your own collection.</small></span></label></div>
       <div id="ccCommercialSummary" class="cc-commercial-summary"></div>
       <div id="ccImportDrop" class="cc-import-drop">
         <div class="cc-import-icon" aria-hidden="true">⇧</div>
@@ -46,14 +46,20 @@
         <label class="ui-settings-field"><span>Ads in each break</span><input id="ccAdCount" class="form-control" type="number" min="1" max="20" value="3"></label>
       </div>
       <label class="ui-settings-toggle"><input id="ccPreroll" type="checkbox" checked><span><strong>Start each episode with one commercial</strong></span></label>
-      <small>These defaults are copied when a channel is created. Existing channels keep their current commercial schedule.</small>
+      <small>Changes apply to every existing and future TV show channel.</small>
     </div></details>
-    <div><h3 class="h6">Available TV shows</h3><div class="small-muted">Create a channel from every available episode. In order begins now with the first episode; Random shuffles without repeats. You can exclude seasons later by editing the channel.</div></div>
-    <div class="cc-fields"><label class="ui-settings-field"><span>Find a show</span><input id="ccSearch" class="form-control" type="search" placeholder="Show or server"></label><label class="ui-settings-field"><span>Sort by</span><select id="ccSort" class="form-select"><option value="title">Show A–Z</option><option value="count">Most episodes</option><option value="hours">Longest runtime</option><option value="server">Server</option></select></label></div>
-    <div class="cc-catalog-actions"><div><div id="ccCatalogSummary" class="small-muted"></div><div id="ccAddAllImpact" class="small-muted"></div></div><button id="ccAddAll" class="btn ui-btn-secondary" type="button">Add All</button></div>
-    <div id="ccShows"></div>
-    <div class="small-muted">Counts use cataloged episodes with media. Specials are excluded. Shared files play once. Missing episodes are skipped; gaps can only be identified inside the available numbering, not beyond the last known episode.</div>
-    <h3 class="h6">Your channels</h3><div id="ccChannels"></div>
+    <details class="ui-settings-details cc-list-panel" open>
+      <summary>Available TV shows</summary><div class="ui-settings-details-body">
+        <div class="small-muted">Create a channel from every available episode. In order begins now with the first episode; Random shuffles without repeats. You can exclude seasons later by editing the channel.</div>
+        <div class="cc-fields"><label class="ui-settings-field"><span>Find a show</span><input id="ccSearch" class="form-control" type="search" placeholder="Show or server"></label><label class="ui-settings-field"><span>Sort by</span><select id="ccSort" class="form-select"><option value="title">Show A–Z</option><option value="count">Most episodes</option><option value="hours">Longest runtime</option><option value="server">Server</option></select></label></div>
+        <div class="cc-catalog-actions"><div><div id="ccCatalogSummary" class="small-muted"></div><div id="ccAddAllImpact" class="small-muted"></div></div><div class="cc-bulk-actions"><button id="ccAddAll" class="btn ui-btn-secondary" type="button">Add All</button><button id="ccRemoveAll" class="btn btn-outline-danger" type="button">Remove All</button></div></div>
+        <div id="ccShows"></div>
+        <div class="small-muted">Counts use cataloged episodes with media. Specials are excluded. Shared files play once. Missing episodes are skipped; gaps can only be identified inside the available numbering, not beyond the last known episode.</div>
+      </div>
+    </details>
+    <details class="ui-settings-details cc-list-panel" open>
+      <summary>Your channels</summary><div class="ui-settings-details-body"><div id="ccChannels"></div></div>
+    </details>
     <div class="ui-settings-actions cc-guide-actions"><a class="btn ui-btn-secondary" href="/guide">Open TV Guide</a><span class="small-muted">Included in your existing channel playlists and EPG.</span></div>
   </div>
   <dialog id="ccEnableDialog" class="cc-dialog" aria-labelledby="ccEnableTitle">
@@ -80,7 +86,7 @@
   <dialog id="ccAddAllDialog" class="cc-dialog" aria-labelledby="ccAddAllTitle">
     <h3 id="ccAddAllTitle" class="h5">Create channels for all shown series?</h3>
     <div id="ccAddAllDetails"></div>
-    <p class="small-muted">The channels will begin now, appear in the existing playlists and EPG, and keep running on their shared live clocks.</p>
+    <p id="ccAddAllNote" class="small-muted">The channels will begin now, appear in the existing playlists and EPG, and keep running on their shared live clocks.</p>
     <div class="ui-settings-actions"><button id="ccAddAllCancel" class="btn ui-btn-secondary" type="button">Cancel</button><button id="ccAddAllConfirm" class="btn ui-btn-primary" type="button">Create Channels</button></div>
   </dialog>
 </section>

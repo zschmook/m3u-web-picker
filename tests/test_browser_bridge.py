@@ -28,6 +28,31 @@ class _Process:
 
 
 class BrowserBridgeTests(unittest.TestCase):
+    def test_remux_only_preserves_pre_normalized_av_timestamps(self):
+        app = Flask(__name__)
+        process = _Process()
+        process.stdout = io.BytesIO(b"video")
+        with app.test_request_context("/guide/play"), patch.object(
+            browser.media_pipeline, "acquire_session", return_value="token"
+        ), patch.object(browser.media_pipeline, "release_session"), patch.object(
+            browser.subprocess, "Popen", return_value=process
+        ) as spawn, patch.object(
+            browser, "fragmented_mp4_copy_args", return_value=["ffmpeg", "-copyts"]
+        ) as copy_args, patch.object(
+            browser, "normalized_live_input_args"
+        ) as transcode_args, patch.object(browser, "terminate"):
+            response = browser.response_for(
+                "http://source.test/normalized.ts", remux_only=True
+            )
+            self.assertEqual(b"".join(response.response), b"video")
+            response.close()
+
+        copy_args.assert_called_once_with("http://source.test/normalized.ts")
+        transcode_args.assert_not_called()
+        command = spawn.call_args.args[0]
+        self.assertIn("-copyts", command)
+        self.assertIn("frag_keyframe+empty_moov+default_base_moof", command)
+
     def test_video_disconnect_releases_worker_while_source_read_is_blocked(self):
         app = Flask(__name__)
         process = _Process()

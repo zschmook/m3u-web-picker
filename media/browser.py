@@ -7,7 +7,12 @@ from collections.abc import Callable
 
 from flask import Response, request, stream_with_context
 
-from .ffmpeg import audio_only_mp3_args, normalized_live_input_args, terminate
+from .ffmpeg import (
+    audio_only_mp3_args,
+    fragmented_mp4_copy_args,
+    normalized_live_input_args,
+    terminate,
+)
 from .audio_source import prefer_live_playlist
 import media_pipeline
 
@@ -20,6 +25,7 @@ def response_for(
     *,
     on_stop: Callable[[], None] | None = None,
     audio_only: bool = False,
+    remux_only: bool = False,
 ) -> Response:
     """Transcode one curated IPTV stream for browser playback."""
     session_token = ""
@@ -32,6 +38,19 @@ def response_for(
         if audio_only:
             target = prefer_live_playlist(target)
             command = audio_only_mp3_args(target)
+        elif remux_only:
+            # Generated local channels are already normalized to H.264/AAC.
+            # Preserve their shared A/V clock across programme/ad handoffs
+            # instead of independently timestamping both tracks a second time.
+            command = fragmented_mp4_copy_args(target) + [
+                "-f",
+                "mp4",
+                "-movflags",
+                "frag_keyframe+empty_moov+default_base_moof",
+                "-frag_duration",
+                "1000000",
+                "pipe:1",
+            ]
         else:
             command = normalized_live_input_args(target) + [
                 "-f",

@@ -255,8 +255,35 @@ def save_settings(data):
             raise ValueError('Specify your own commercials folder')
         if validate_commercials_folder and not Path(cfg['commercials_folder']).is_dir():
             raise ValueError('Your commercials folder is unavailable. Choose a folder using Browse.')
+        commercial_keys={'commercials_enabled','commercials_folder','commercial_mode','commercial_minutes',
+                         'commercial_episodes','commercial_count','preroll'}
+        policy_requested=any(key in data for key in commercial_keys)
+        rebuilt=_commercial_policy_schedules(cfg) if policy_requested else []
         save_schedule(root()/'settings.json',cfg)
+        if rebuilt:
+            updated={row['id']:row for row,_state in rebuilt}
+            for row,state in rebuilt: save_schedule(root()/(row['id']+'.json'),state)
+            rows=[updated.get(row['id'],row) for row in read('channels.json',[])]
+            save_schedule(root()/'channels.json',rebalance_channel_numbers(rows))
         return cfg
+
+
+def _commercial_policy_schedules(cfg):
+    rows=read('channels.json',[])
+    if not rows: return []
+    assets=commercial_assets(cfg) if cfg['commercials_enabled'] else []
+    options=dict(enabled=cfg['commercials_enabled'],mode=cfg['commercial_mode'],minutes=cfg['commercial_minutes'],
+                 episodes=cfg['commercial_episodes'],count=cfg['commercial_count'],preroll=cfg['preroll'])
+    now=time.time();rebuilt=[]
+    for row in rows:
+        previous=read(row['id']+'.json',None)
+        if not previous or not previous.get('episodes'): continue
+        state=new_schedule(previous['episodes'],assets,now,secrets.token_hex(16),
+                           order=previous.get('order',row.get('order','random')),ads=options)
+        state['until_break']=options['minutes']*60
+        extend_schedule(state,now+6*86400)
+        rebuilt.append(({**row,'started_at':now},state))
+    return rebuilt
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -700,6 +727,22 @@ def create_channels(data):
         for row,state in built: save_schedule(root()/(row['id']+'.json'),state)
         save_schedule(root()/'channels.json',rebalance_channel_numbers(channels+[row for row,_state in built]))
         return dict(created=[row for row,_state in built],skipped=len(identities)-len(built))
+
+
+def delete_channels(data):
+    if not isinstance(data,dict) or not isinstance(data.get('show_ids'),list): raise ValueError('Choose series to remove.')
+    identities=[]
+    for value in data['show_ids']:
+        value=str(value)
+        if value not in identities: identities.append(value)
+    if not identities or len(identities)>10000: raise ValueError('Choose between 1 and 10,000 series.')
+    with LOCK:
+        rows=read('channels.json',[]);selected=[row for row in rows if row.get('show_id') in identities]
+        if not selected: return dict(deleted=[],skipped=len(identities))
+        selected_ids={row['id'] for row in selected}
+        save_schedule(root()/'channels.json',rebalance_channel_numbers([row for row in rows if row['id'] not in selected_ids]))
+        for identity in selected_ids: (root()/(identity+'.json')).unlink(missing_ok=True)
+        return dict(deleted=selected,skipped=len(identities)-len(selected))
 
 
 def channel(identity):

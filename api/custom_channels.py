@@ -150,6 +150,12 @@ def register_custom_channel_routes(app):
         except (ValueError,TypeError) as exc: return jsonify(error=str(exc)),400
         return jsonify(result),201
 
+    @app.delete('/api/custom-channels/bulk')
+    def custom_delete_bulk():
+        try: result=service.delete_channels(request.get_json(silent=True) or {})
+        except (ValueError,TypeError) as exc: return jsonify(error=str(exc)),400
+        return jsonify(result)
+
     @app.patch('/api/custom-channels/<identity>')
     def custom_change(identity):
         try: service.update_channel(identity,request.get_json(silent=True) or {})
@@ -166,7 +172,7 @@ def register_custom_channel_routes(app):
     def custom_play(identity):
         try: target=local_url(identity)
         except ValueError: return Response('Channel unavailable',status=404)
-        return browser.response_for(target)
+        return browser.response_for(target,remux_only=True)
 
     @app.route('/stream/custom/<identity>.ts',methods=['GET','HEAD'])
     def custom_stream(identity):

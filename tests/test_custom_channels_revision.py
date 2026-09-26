@@ -17,6 +17,16 @@ def guide_item():
 
 
 class CustomChannelRevisionTests(unittest.TestCase):
+    def test_custom_browser_playback_remuxes_normalized_stream(self):
+        app=Flask(__name__);custom_channels.register_custom_channel_routes(app)
+        target='http://127.0.0.1:9999/stream/custom/123456789abcdef0.ts'
+        with patch.object(custom_channels,'local_url',return_value=target),patch.object(
+            custom_channels.browser,'response_for',return_value='browser video'
+        ) as play:
+            response=app.test_client().get('/guide/play/custom/123456789abcdef0')
+            self.assertEqual(response.status_code,200)
+            play.assert_called_once_with(target,remux_only=True)
+
     def test_custom_guide_channels_follow_manual_and_precede_sports(self):
         items=[dict(play_url='/guide/play/local/breaking-bad'),dict(play_url='/guide/play/manual/one'),
                dict(play_url='/guide/play/manual/two'),dict(play_url='/guide/play/sports/2000')]
@@ -58,6 +68,22 @@ class CustomChannelRevisionTests(unittest.TestCase):
             saved=service.save_settings({'preroll':False})
             self.assertFalse(saved['preroll'])
             self.assertTrue(saved['commercials_enabled'])
+
+    def test_commercial_policy_changes_rebuild_existing_channel_schedules(self):
+        with tempfile.TemporaryDirectory() as temp,patch.object(service,'root',return_value=Path(temp)/'data'),patch.object(service,'commercials_root',return_value=Path(temp)/'media'):
+            episode=dict(season=1,episode=1,filename='show.mp4',title='Show',duration=3600,part='/show.mp4',folder='/')
+            old_options=dict(enabled=False,mode='minutes',minutes=15,episodes=1,count=3,preroll=True)
+            state=service.new_schedule([episode],[],1000,'old-seed',order='ordered',ads=old_options)
+            row=dict(id='show-channel',show_id='show',name='Show',number='1000',order='ordered',enabled=True,auto_numbered=True,started_at=1000)
+            service.save_schedule(service.root()/'channels.json',[row]);service.save_schedule(service.root()/'show-channel.json',state)
+            commercial=dict(filename='ad.mp4',path='/ad.mp4',duration=30)
+            with patch.object(service,'commercial_assets',return_value=[commercial]),patch.object(service.time,'time',return_value=2000):
+                service.save_settings({'commercials_enabled':True})
+            rebuilt=service.read('show-channel.json',{})
+            self.assertTrue(rebuilt['ads']['enabled'])
+            self.assertEqual(rebuilt['commercials'],[commercial])
+            self.assertIn('commercial',{segment['kind'] for segment in rebuilt['segments']})
+            self.assertEqual(service.read('channels.json',[])[0]['started_at'],2000)
 
     def test_completed_import_starts_processing_immediately(self):
         app=Flask(__name__);custom_channels.register_custom_channel_routes(app)

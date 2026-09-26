@@ -237,6 +237,19 @@ class CustomChannelsTests(unittest.TestCase):
         self.assertEqual(cc.read('catalog.json',{}),catalog)
         self.assertTrue(cc.settings()['enabled'])
 
+    def test_bulk_delete_removes_only_channels_for_selected_shows(self):
+        rows=[dict(id='one',show_id='show-one',name='One',number='1000',auto_numbered=True),
+              dict(id='two',show_id='show-two',name='Two',number='1001',auto_numbered=True),
+              dict(id='category',kind='category',name='Comedy',number='1900',auto_numbered=False)]
+        cc.save_schedule(cc.root()/'channels.json',rows)
+        for row in rows: cc.save_schedule(cc.root()/(row['id']+'.json'),{'id':row['id']})
+        result=cc.delete_channels({'show_ids':['show-one']})
+        self.assertEqual([row['id'] for row in result['deleted']],['one'])
+        self.assertEqual({row['id'] for row in cc.read('channels.json',[])},{'two','category'})
+        self.assertFalse((cc.root()/'one.json').exists())
+        self.assertTrue((cc.root()/'two.json').exists())
+        self.assertTrue((cc.root()/'category.json').exists())
+
     def test_stream_uses_each_episode_part_and_redacts_token_from_payload(self):
         slot=dict(kind='episode',part='/library/parts/second.mkv',start=5,duration=10)
         args=segment_command(slot,dict(server='http://plex',token='secret'),0,False)

@@ -4,7 +4,7 @@
   if(!el('ccEnabled'))return;
   let state=null,busy=false,poller=null,commercialPoller=null,importBusy=false;
   let editingChannel=null,deletingChannel=null;
-  let bulkSelection=null;
+  let bulkSelection=null,bulkRemoval=null,bulkMode='add';
   const choices=new Map();
   const text=(tag,value,className='')=>{const n=document.createElement(tag);n.textContent=value;n.className=className;return n;};
   const status=(message,error=false)=>{el('ccStatus').textContent=message;el('ccStatus').className='ui-settings-status'+(error?' is-error':'');};
@@ -19,8 +19,9 @@
     el('ccDiscover').disabled=busy||!state?.settings.enabled||state?.job.running;
     if(el('ccConnect'))el('ccConnect').disabled=busy;
     el('ccAddAll').disabled=busy||!state||!state.settings.enabled||Number(el('ccAddAll').dataset.count||0)===0;
+    el('ccRemoveAll').disabled=busy||!state||Number(el('ccRemoveAll').dataset.count||0)===0;
     for(const id of ['ccEditSave','ccDeleteConfirm'])el(id).disabled=busy;
-    el('ccAddAllConfirm').disabled=busy||!bulkSelection?.showIds.length;
+    el('ccAddAllConfirm').disabled=busy||(bulkMode==='remove'?!bulkRemoval?.showIds.length:!bulkSelection?.showIds.length);
     document.querySelectorAll('.cc-channel-action').forEach(button=>button.disabled=busy);
     document.querySelectorAll('.cc-create').forEach(button=>button.disabled=busy||button.dataset.allowed!=='true');
     for(const id of ['ccAdMode','ccInterval','ccAdCount','ccPreroll'])el(id).disabled=busy||!state||!el('ccAds').checked;
@@ -34,20 +35,23 @@
     el('ccInterval').value=s.commercial_mode==='minutes'?s.commercial_minutes:s.commercial_episodes;
     const interval=s.commercial_mode==='minutes'?`${s.commercial_minutes} minutes of show time`:`${s.commercial_episodes} episode${s.commercial_episodes===1?'':'s'}`;
     const opening=s.preroll?'1 opening ad, then ':'';
-    const summary=s.commercials_enabled?`${opening}${s.commercial_count} ad${s.commercial_count===1?'':'s'} every ${interval}`:'Off for new channels';
+    const summary=s.commercials_enabled?`${opening}${s.commercial_count} ad${s.commercial_count===1?'':'s'} every ${interval}`:'Off';
     el('ccCommercialCollapsedSummary').textContent=summary;
-    el('ccCommercialSummary').textContent=s.commercials_enabled?`New channels will play ${summary.toLowerCase()}.`:'New channels will be created without commercials.';
+    el('ccCommercialSummary').textContent=s.commercials_enabled?`TV show channels play ${summary.toLowerCase()}.`:'TV show channels play without commercials.';
   }
   const formatBytes=value=>{if(value<1024)return `${value} B`;const units=['KB','MB','GB','TB'];let n=value,i=-1;do{n/=1024;i++;}while(n>=1024&&i<units.length-1);return `${n.toFixed(n>=10?1:2)} ${units[i]}`;};
   function renderImports(){
     const host=el('ccImports');host.replaceChildren();
+    const loaded=(state.commercial_imports||[]).filter(item=>item.status==='complete').reduce((total,item)=>total+Number(item.clips_found||0),0);
+    el('ccCommercialLoaded').textContent=`| ${loaded.toLocaleString()} loaded`;
     for(const item of (state.commercial_imports||[]).slice(0,5)){
-      const row=text('div','','cc-import-row');row.append(text('span',item.name));
-      const label=item.message||(item.status==='ready'?'Ready for processing':`${formatBytes(item.received)} of ${formatBytes(item.size)}`);
-      row.append(text('span',label,'small-muted'));host.append(row);
+      const row=text('div','','cc-import-row');row.append(text('span',item.name,'cc-import-name'));
+      const label=item.status==='complete'?`${Number(item.clips_found||0).toLocaleString()} commercials · ${formatDuration(item.duration)}`:(item.message||(item.status==='ready'?'Ready for processing':`${formatBytes(item.received)} of ${formatBytes(item.size)}`));
+      row.append(text('span',label,'small-muted cc-import-result'));host.append(row);
     }
     const current=(state.commercial_imports||[])[0];
-    if(current&&['processing','complete','failed'].includes(current.status)){
+    el('ccImportProgress').hidden=true;
+    if(current&&['processing','failed'].includes(current.status)){
       el('ccImportProgress').hidden=false;el('ccImportName').textContent=current.name;el('ccImportMessage').textContent=current.message||'';
       let value=0,label='';
       if(current.phase==='validating'&&current.duration){value=current.processed/current.duration;label=`${current.processed} of ${current.duration} commercials`;}
@@ -65,34 +69,42 @@
     shows.sort((a,b)=>sort==='count'||sort==='hours'?b[sort]-a[sort]:a[sort].localeCompare(b[sort]));
     const host=el('ccShows');host.replaceChildren();
     el('ccCatalogSummary').textContent=`${shows.length} shown · ${eligible} series meet the ${minimum}-episode minimum · ${state.shows.length} series with available files${unavailable?` · ${unavailable.toLocaleString()} unavailable files excluded`:''}`;
-    const existing=new Set(state.channels.map(channel=>channel.show_id)),addable=shows.filter(show=>!show.stale&&!existing.has(show.id));
+    const channelsByShow=new Map(state.channels.map(channel=>[channel.show_id,channel])),existing=new Set(channelsByShow.keys()),addable=shows.filter(show=>!show.stale&&!existing.has(show.id)),removable=shows.map(show=>channelsByShow.get(show.id)).filter(Boolean);
     const episodes=addable.reduce((total,show)=>total+show.count,0),hours=addable.reduce((total,show)=>total+show.hours,0);
     bulkSelection={showIds:addable.map(show=>show.id),shown:shows.length,skipped:shows.length-addable.length,episodes,hours};
+    bulkRemoval={showIds:removable.map(channel=>channel.show_id),shown:shows.length};
     el('ccAddAll').dataset.count=String(addable.length);el('ccAddAll').textContent=`Add All${addable.length?` ${addable.length}`:''}`;
+    el('ccRemoveAll').dataset.count=String(removable.length);el('ccRemoveAll').textContent=`Remove All${removable.length?` ${removable.length}`:''}`;
     el('ccAddAllImpact').textContent=addable.length?`${addable.length} new channel${addable.length===1?'':'s'} · ${episodes.toLocaleString()} episodes · ${hours.toLocaleString(undefined,{maximumFractionDigits:1})} hours${bulkSelection.skipped?` · ${bulkSelection.skipped} existing skipped`:''}`:'Every shown series already has a channel.';
     if(!shows.length)host.append(text('p',state.shows.length?'No shows match these filters.':'Discover Plex to catalog your TV libraries.'));
     for(const show of shows){
       const row=text('div','','cc-show'),title=text('div',show.title,'cc-show-title');row.append(title);
+      const existingChannel=channelsByShow.get(show.id);
       const choice=choices.get(show.id)||{order:'ordered',first:Math.min(...show.seasons),last:Math.max(...show.seasons)};choices.set(show.id,choice);
       const controls=text('div','','cc-range');
       const order=document.createElement('select');order.className='form-select';order.setAttribute('aria-label','Episode order for '+show.title);
       for(const [v,t]of [['ordered','In order (starts now)'],['random','Random order']]){const option=text('option',t);option.value=v;order.append(option);}order.value=choice.order;
-      const orderLabel=text('label','Episode order');orderLabel.append(order);controls.append(orderLabel);
-      const button=text('button','Create Channel','btn ui-btn-primary cc-create');button.type='button';controls.append(button);row.append(controls);
-      const count=text('div','','small-muted'),gaps=text('div','','cc-gap');row.append(count,gaps);
+      const orderLabel=text('label','','cc-order');orderLabel.append(text('span','Episode order','cc-order-label'),order);controls.append(orderLabel);
+      const button=text('button',existingChannel?'Remove Channel':'Create Channel',existingChannel?'btn btn-danger cc-create':'btn ui-btn-primary cc-create');button.type='button';controls.append(button);row.append(controls);
+      const count=text('div','','small-muted cc-selection-summary'),countText=text('span',''),gapSeparator=text('span',' | ','cc-gap-separator'),gaps=text('span','','cc-gap');count.append(countText,gapSeparator,gaps);row.append(count);
       function update(){choice.order=order.value;
         const selected=show.files.filter(f=>f.season>=choice.first&&f.season<=choice.last);
         const n=selected.reduce((v,f)=>v+(f.covered_episodes?.length||1),0);
-        count.textContent=`Selected: ${n} episodes / ${selected.length} files · ${(selected.reduce((v,f)=>v+f.duration,0)/3600).toFixed(1)} hours`;
+        countText.textContent=`Selected: ${n} episodes / ${selected.length} files · ${(selected.reduce((v,f)=>v+f.duration,0)/3600).toFixed(1)} hours`;
         const seasons=new Map();for(const f of selected){if(!seasons.has(f.season))seasons.set(f.season,new Set());for(const ep of f.covered_episodes||[f.episode])seasons.get(f.season).add(ep);}
         const missing=[];
-        if(choice.first>=1&&choice.last-choice.first<=200){for(let s=choice.first;s<=choice.last;s++){const found=seasons.get(s);if(!found){missing.push(`S${s}: unavailable`);continue;}if(Math.min(...found)>100){missing.push(`S${s}: unusual Plex numbering starts at E${Math.min(...found)}; order retained`);continue;}const epMissing=[];let previous=0;for(const ep of [...found].sort((a,b)=>a-b)){if(ep>previous+1)epMissing.push(ep===previous+2?`E${previous+1}`:`E${previous+1}–E${ep-1}`);previous=ep;}if(epMissing.length)missing.push(`S${s}: missing ${epMissing.slice(0,10).join(', ')}`);}}
-        gaps.textContent=show.stale?'Server unavailable — cached catalog.':missing.slice(0,10).join(' · ')+(missing.length>10?' · …':'');
-        button.dataset.allowed=String(Boolean(state.settings.enabled&&!show.stale&&(n>=minimum||el('ccShowAll').checked)));
+        if(choice.first>=1&&choice.last-choice.first<=200){for(let s=choice.first;s<=choice.last;s++){const found=seasons.get(s);if(!found){missing.push(`S${s}: All`);continue;}if(Math.min(...found)>100){continue;}const epMissing=[];let previous=0;for(const ep of [...found].sort((a,b)=>a-b)){if(ep>previous+1)epMissing.push(ep===previous+2?`${previous+1}`:`${previous+1}–${ep-1}`);previous=ep;}if(epMissing.length)missing.push(`S${s}: E${epMissing.slice(0,10).join(', ')}`);}}
+        const missingSummary=missing.length?`Missing: ${missing.slice(0,10).join(' | ')}${missing.length>10?' | …':''}`:'';
+        gaps.textContent=show.stale?'Server unavailable — cached catalog.':missingSummary;
+        gapSeparator.hidden=!gaps.textContent;
+        button.dataset.allowed=String(Boolean(existingChannel||(state.settings.enabled&&!show.stale&&(n>=minimum||el('ccShowAll').checked))));
         button.disabled=busy||button.dataset.allowed!=='true';
       }
       order.addEventListener('change',update);update();
-      button.addEventListener('click',()=>action(async()=>{button.disabled=true;status('Building the channel schedule…');const data=await api('','POST',{show_id:show.id,order:choice.order,season_start:choice.first,season_end:choice.last,allow_below_minimum:el('ccShowAll').checked});await load(false);status(`Channel ${data.channel.number} created. Its live clock started now.`);}));
+      button.addEventListener('click',()=>{
+        if(existingChannel){deletingChannel=existingChannel;el('ccDeleteMessage').textContent=`Remove ${existingChannel.number} · ${existingChannel.name}?`;el('ccDeleteDialog').showModal();return;}
+        void action(async()=>{button.disabled=true;status('Building the channel schedule…');const data=await api('','POST',{show_id:show.id,order:choice.order,season_start:choice.first,season_end:choice.last,allow_below_minimum:el('ccShowAll').checked});await load(false);status(`Channel ${data.channel.number} created. Its live clock started now.`);});
+      });
       host.append(row);
     }
   }
@@ -139,6 +151,7 @@
   ['ccSearch','ccSort','ccShowAll'].forEach(id=>el(id).addEventListener(id==='ccSearch'?'input':'change',()=>{if(state){renderCatalog();locks();}}));
   el('ccAddAll').addEventListener('click',()=>{
     if(!bulkSelection?.showIds.length)return;
+    bulkMode='add';el('ccAddAllTitle').textContent='Create channels for all shown series?';el('ccAddAllNote').textContent='The channels will begin now, appear in the existing playlists and EPG, and keep running on their shared live clocks.';el('ccAddAllConfirm').className='btn ui-btn-primary';
     const details=el('ccAddAllDetails');details.replaceChildren(
       text('p',`${bulkSelection.showIds.length} new channel${bulkSelection.showIds.length===1?'':'s'} from ${bulkSelection.shown} shown series.`),
       text('p',`${bulkSelection.episodes.toLocaleString()} episodes · ${bulkSelection.hours.toLocaleString(undefined,{maximumFractionDigits:1})} hours of programming.`),
@@ -147,8 +160,20 @@
     );
     el('ccAddAllConfirm').textContent=`Create ${bulkSelection.showIds.length} Channel${bulkSelection.showIds.length===1?'':'s'}`;el('ccAddAllDialog').showModal();locks();
   });
+  el('ccRemoveAll').addEventListener('click',()=>{
+    if(!bulkRemoval?.showIds.length)return;
+    bulkMode='remove';el('ccAddAllTitle').textContent='Remove channels for all shown series?';el('ccAddAllDetails').replaceChildren(
+      text('p',`${bulkRemoval.showIds.length} existing channel${bulkRemoval.showIds.length===1?'':'s'} from ${bulkRemoval.shown} shown series.`)
+    );
+    el('ccAddAllNote').textContent='This removes their custom schedules. Your Plex files and manually saved IPTV channels are not changed.';
+    el('ccAddAllConfirm').textContent=`Remove ${bulkRemoval.showIds.length} Channel${bulkRemoval.showIds.length===1?'':'s'}`;el('ccAddAllConfirm').className='btn btn-outline-danger';el('ccAddAllDialog').showModal();locks();
+  });
   el('ccAddAllCancel').addEventListener('click',()=>el('ccAddAllDialog').close());
   el('ccAddAllConfirm').addEventListener('click',()=>{
+    if(bulkMode==='remove'){
+      if(!bulkRemoval?.showIds.length)return;const requested=[...bulkRemoval.showIds];
+      void action(async()=>{status(`Removing ${requested.length} channel schedules…`);const data=await api('/bulk','DELETE',{show_ids:requested});el('ccAddAllDialog').close();await load(false);status(`Removed ${data.deleted.length} channel${data.deleted.length===1?'':'s'}.`);});return;
+    }
     if(!bulkSelection?.showIds.length)return;const requested=[...bulkSelection.showIds],includeBelow=el('ccShowAll').checked;
     void action(async()=>{status(`Building ${requested.length} channel schedules…`);const data=await api('/bulk','POST',{show_ids:requested,allow_below_minimum:includeBelow});el('ccAddAllDialog').close();await load(false);status(`Created ${data.created.length} channels${data.skipped?`; skipped ${data.skipped} existing`:''}. Their live clocks started now.`);});
   });

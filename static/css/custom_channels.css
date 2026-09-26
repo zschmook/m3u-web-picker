@@ -4,6 +4,7 @@
 .cc-server-status{display:block}
 .cc-minimum-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.cc-minimum-heading>span{font-weight:600}.cc-minimum-heading label{margin-left:auto;font-weight:400}
 .cc-commercials>summary{display:list-item}.cc-commercials>summary .small-muted{float:right;margin-left:16px;font-weight:400;text-align:right}
+.cc-commercial-loaded{display:inline-block;margin-left:5px;color:var(--ui-muted,#aab6c5);font-size:.82rem;font-weight:500;opacity:1}
 .cc-commercial-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.cc-commercial-heading .ui-settings-toggle{flex:1}
 .cc-commercial-summary{padding:12px 14px;border:1px solid var(--ui-border,#334155);border-radius:10px;background:rgba(15,23,42,.35);font-weight:600}
 .cc-commercial-fields{display:grid;grid-template-columns:minmax(220px,1.2fr) repeat(2,minmax(140px,.8fr));gap:12px}
@@ -13,19 +14,23 @@
 .cc-import-progress{display:grid;gap:8px;padding:14px;border:1px solid var(--ui-border,#334155);border-radius:10px}
 .cc-import-progress-heading{display:flex;justify-content:space-between;gap:12px}.cc-import-progress-heading strong{min-width:0;overflow-wrap:anywhere}
 .cc-import-track{height:8px;overflow:hidden;border-radius:999px;background:rgba(148,163,184,.22)}.cc-import-track span{display:block;width:0;height:100%;background:var(--bs-primary,#3b82f6);transition:width .15s}
-.cc-imports{display:grid;gap:5px}.cc-import-row{display:flex;justify-content:space-between;gap:12px}
+.cc-imports{display:grid;gap:0}.cc-import-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:20px;padding:7px 0;border-top:1px solid var(--ui-border,#334155)}.cc-import-row:first-child{border-top:0}.cc-import-name{min-width:0;overflow-wrap:anywhere}.cc-import-result{white-space:nowrap;text-align:right}
 .cc-show{padding:16px 0;border-top:1px solid var(--ui-border,#334155)}
 .cc-show-title{font-weight:600;margin-bottom:4px}
-.cc-range{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin-top:10px}
-.cc-range label{display:grid;gap:5px;flex:1 1 120px}
+.cc-range{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+.cc-range .cc-order{display:flex;align-items:center;gap:10px;flex:1 1 440px;min-width:0}
+.cc-order-label{flex:0 0 auto;white-space:nowrap}
+.cc-range .cc-order .form-select{flex:1 1 auto;min-width:0}
 .cc-range .cc-season{flex:0 1 95px}
 .cc-catalog-actions{display:flex;align-items:center;justify-content:space-between;gap:16px}.cc-catalog-actions>div{min-width:0}.cc-catalog-actions .btn{flex:0 0 auto}
-.cc-gap{color:var(--bs-warning,#ffc107);margin-top:8px;font-size:.85rem}
+.cc-bulk-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 auto}
+.cc-selection-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:0}
+.cc-gap-separator{color:var(--bs-secondary-color,#94a3b8);white-space:pre}.cc-gap{color:var(--bs-warning,#ffc107);font-size:.85rem}
 .cc-files{max-height:240px;overflow:auto;margin-top:8px;overflow-wrap:anywhere}
 .cc-channel{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--ui-border,#334155)}
 .cc-channel-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;flex-shrink:0}
-.cc-guide-actions{flex-direction:column;align-items:flex-end;text-align:right}
+.cc-guide-actions{flex-direction:column;align-items:center;text-align:center}
 .cc-dialog{width:min(560px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--ui-border,#334155);border-radius:14px;background:var(--ui-card,#1f2937);color:inherit}
 .cc-dialog::backdrop{background:rgba(0,0,0,.65)}
 .cc-dialog .ui-settings-actions{margin-top:20px}
-@media(max-width:720px){.cc-commercial-fields{grid-template-columns:1fr}.cc-commercials>summary .small-muted,.cc-status-panel>summary .small-muted{display:block;float:none;margin:4px 0 0;text-align:left}.cc-commercial-heading{flex-direction:column}}
+@media(max-width:720px){.cc-commercial-fields{grid-template-columns:1fr}.cc-commercials>summary .small-muted,.cc-status-panel>summary .small-muted{display:block;float:none;margin:4px 0 0;text-align:left}.cc-commercial-heading{flex-direction:column}.cc-import-row{grid-template-columns:1fr;gap:3px}.cc-import-result{white-space:normal;text-align:left}}
