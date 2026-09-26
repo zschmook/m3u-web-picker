@@ -59,6 +59,7 @@ def normalized_live_input_args(
     *,
     video_extra: tuple[str, ...] = (),
     input_headers: dict[str, str] | None = None,
+    preserve_av_timing: bool = False,
 ) -> list[str]:
     """Common ffmpeg input + H.264/AAC normalization arguments.
 
@@ -107,11 +108,10 @@ def normalized_live_input_args(
         *encoder_options,
         "-pix_fmt",
         "yuv420p",
-        # Provider MPEG-TS feeds can begin with a large video PTS offset while
-        # audio starts at zero. Rebase video at every new live session so
-        # browsers do not wait for or replay that stale timestamp gap.
-        "-vf",
-        "setpts=PTS-STARTPTS",
+        # The browser bridge still rebases its video track. HLS keeps FFmpeg's
+        # shared input origin: resetting either track on its own would discard
+        # the offset that aligns their content when joining a live feed.
+        *([] if preserve_av_timing else ["-vf", "setpts=PTS-STARTPTS"]),
         *video_extra,
         "-c:a",
         "aac",

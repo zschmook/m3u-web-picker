@@ -168,6 +168,7 @@ def _hls_command(target: str, directory: Path) -> list[str]:
     base_command = normalized_live_input_args(
         target,
         video_extra=("-force_key_frames", "expr:gte(t,n_forced*2)"),
+        preserve_av_timing=True,
     )
     # Providers can send a buffered window immediately after reconnecting.
     # Consume it at playback speed so the rolling playlist does not run ahead
@@ -179,7 +180,7 @@ def _hls_command(target: str, directory: Path) -> list[str]:
         # Emit silence for missing samples so Roku does not close that gap and
         # let speech run ahead of the corresponding video.
         "-af",
-        "asetpts=PTS-STARTPTS,aresample=async=1000:first_pts=0",
+        "aresample=async=1000:first_pts=0",
         "-f",
         "hls",
         "-hls_time",
