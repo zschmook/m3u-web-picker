@@ -9,14 +9,14 @@ import time
 import unittest
 from unittest.mock import patch
 
-from media import hls
+from media import hls, roku_movie
 
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'Requires FFmpeg')
 class HlsAudioClockTests(unittest.TestCase):
     def test_audio_visual_cue_keeps_source_alignment_with_delayed_track(self):
-        for video_offset, audio_offset in ((0, .7), (.7, 0)):
-            with self.subTest(video_offset=video_offset, audio_offset=audio_offset), tempfile.TemporaryDirectory() as temp:
+        for video_offset, audio_offset, private_movie in ((0, .7, False), (.7, 0, False), (0, .7, True), (.7, 0, True)):
+            with self.subTest(video_offset=video_offset, audio_offset=audio_offset, private_movie=private_movie), tempfile.TemporaryDirectory() as temp:
                 directory = Path(temp)
                 source = directory / 'offset.mkv'
                 visual_cue = 2 - video_offset
@@ -31,7 +31,8 @@ class HlsAudioClockTests(unittest.TestCase):
                 output = directory / 'relay'
                 output.mkdir()
                 with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
-                    subprocess.run(hls._hls_command(str(source), output), check=True, timeout=15)
+                    command = roku_movie.command(dict(target=str(source), input_headers={}), output, live=True) if private_movie else hls._hls_command(str(source), output)
+                    subprocess.run(command, check=True, timeout=15)
                 combined = directory / 'relay.ts'
                 combined.write_bytes(b''.join(path.read_bytes() for path in sorted(output.glob('segment_*.ts'))))
                 timing = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
@@ -53,6 +54,40 @@ class HlsAudioClockTests(unittest.TestCase):
                 tone_time = starts['audio'] + tone / 48000
                 self.assertAlmostEqual(flash_time, tone_time, delta=.1,
                     msg='Rebasing each track separately must not shift a synchronized flash and tone.')
+
+    def test_live_movie_paused_segment_remains_decodable_as_encoder_advances(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            source = directory / 'movie.mkv'
+            subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=20:duration=8',
+                '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=8',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(source)], check=True, timeout=15)
+            output = directory / 'private'
+            output.mkdir()
+            with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
+                command = roku_movie.command(dict(target=str(source), input_headers={}), output, live=True)
+            with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as encoder:
+                try:
+                    deadline = time.monotonic() + 7
+                    paused_file = output / 'segment_000000.ts'
+                    while not paused_file.exists() and encoder.poll() is None and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    self.assertTrue(paused_file.exists())
+                    paused_bytes = paused_file.read_bytes()
+                    _, stderr = encoder.communicate(timeout=12)
+                    self.assertEqual(encoder.returncode, 0, stderr.decode(errors='replace'))
+                    self.assertGreaterEqual(len(list(output.glob('segment_*.ts'))), 4)
+                    self.assertEqual(paused_file.read_bytes(), paused_bytes)
+                    self.assertIn(paused_file.name, (output / 'stream.m3u8').read_text())
+                    decoded = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                        '-i', str(paused_file), '-map', '0:v:0', '-f', 'null', '-'], capture_output=True, timeout=10)
+                    self.assertEqual(decoded.returncode, 0, decoded.stderr.decode(errors='replace'))
+                    self.assertEqual(decoded.stderr, b'')
+                finally:
+                    if encoder.poll() is None:
+                        encoder.kill()
+                        encoder.communicate()
 
     def test_missing_audio_samples_preserve_timeline_and_live_pacing(self):
         with tempfile.TemporaryDirectory() as temp:

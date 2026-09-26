@@ -12,6 +12,9 @@ sub init()
     m.currentChannel = invalid
     m.playing = false
     m.movie = false
+    m.canPause = false
+    m.behindLive = false
+    m.startedProgramme = invalid
     m.liveDelay = 4
     m.guideLoading = false
     m.generation = 0
@@ -94,7 +97,8 @@ sub onApiResult(event as Object)
         end if
         if result.ok
             m.session = result.data
-            m.movie = result.data.kind = "movie"
+            m.movie = result.data.kind = "movie" and result.data.is_live <> true
+            m.canPause = result.data.can_pause = true or m.movie
             m.liveDelay = 4
             if result.data.live_delay_seconds <> invalid then m.liveDelay = result.data.live_delay_seconds
             startVideo(result.data.media_url)
@@ -191,6 +195,16 @@ sub playChannel(channel as Object, restartUrl = "" as String)
     m.video.control = "stop"
     m.currentChannel = channel
     m.movie = restartUrl <> ""
+    m.canPause = false
+    m.behindLive = false
+    m.startedProgramme = invalid
+    now = CreateObject("roDateTime")
+    for each programme in channel.programmes
+        if programme.start <= now.asSeconds() and programme.stop > now.asSeconds()
+            m.startedProgramme = programme
+            exit for
+        end if
+    end for
     m.playing = true
     m.grid.active = false
     m.panel.visible = false
@@ -243,6 +257,9 @@ sub playUrl(url as String)
     if not sameSession then releasePlayback()
     m.video.control = "stop"
     m.movie = false
+    m.canPause = false
+    m.behindLive = false
+    m.startedProgramme = invalid
     m.liveDelay = 4
     m.playing = true
     m.grid.active = false
@@ -258,6 +275,9 @@ sub showGuide()
     m.generation++
     m.playing = false
     m.movie = false
+    m.canPause = false
+    m.behindLive = false
+    m.startedProgramme = invalid
     m.video.control = "stop"
     m.video.visible = false
     m.playerStatus.visible = false
@@ -301,7 +321,7 @@ sub onVideoState()
     if m.video.state = "playing"
         m.playerStatus.text = ""
     else if m.video.state = "paused"
-        m.playerStatus.text = "Movie paused | Play/Pause: resume | *: options"
+        m.playerStatus.text = "Paused"
     else if m.video.state = "buffering"
         m.playerStatus.text = "Buffering..."
     else if m.video.state = "error"
@@ -318,17 +338,25 @@ sub showOptions()
     buttons = []
     if m.playing
         channel = m.currentChannel
-        if m.movie and channel <> invalid
+        if (m.movie or m.behindLive) and channel <> invalid
             buttons.push("Back to Live") : m.actions.push("live")
-        else if channel <> invalid
-            now = CreateObject("roDateTime")
-            for each p in channel.programmes
-                if p.start <= now.asSeconds() and p.stop > now.asSeconds() and p.restart_url <> ""
-                    m.restartUrl = p.restart_url
+        end if
+        if not m.movie and channel <> invalid
+            if m.canPause and m.startedProgramme <> invalid
+                if m.startedProgramme.restart_url <> ""
+                    m.restartUrl = m.startedProgramme.restart_url
                     buttons.push("Restart Movie") : m.actions.push("restart")
-                    exit for
                 end if
-            end for
+            else
+                now = CreateObject("roDateTime")
+                for each p in channel.programmes
+                    if p.start <= now.asSeconds() and p.stop > now.asSeconds() and p.restart_url <> ""
+                        m.restartUrl = p.restart_url
+                        buttons.push("Restart Movie") : m.actions.push("restart")
+                        exit for
+                    end if
+                end for
+            end if
         end if
         buttons.push("TV Guide") : m.actions.push("guide")
     end if
@@ -403,14 +431,13 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             showGuide()
             return true
         else if key = "play" or key = "pause"
-            if m.movie
+            if m.canPause
                 if m.video.state = "paused"
                     m.video.control = "resume"
                 else
+                    if not m.movie then m.behindLive = true
                     m.video.control = "pause"
                 end if
-            else
-                m.playerStatus.text = "Live TV keeps playing. Press * for options."
             end if
             return true
         else if key = "OK"

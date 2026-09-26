@@ -161,11 +161,22 @@ def register_roku_app_routes(app):
                 session = roku_movie.start(source, timeout=45, buffer_seconds=32)
             except (ValueError, RuntimeError, OSError):
                 return jsonify(error='Movie could not start. Try again or return to live.'), 502
-            return no_cache(jsonify(token=session.token, kind='movie', title=source['title'],
+            return no_cache(jsonify(token=session.token, kind='movie', is_live=False, can_pause=True, title=source['title'],
                 media_url=request.url_root.rstrip('/') + f'/roku/movie/{session.token}/stream.m3u8'))
         targets, callback = guide._resolve_guide_hls_targets(play_url)
         if not targets:
             return jsonify(error='Channel unavailable.'), 404
+        if play_url.startswith('/guide/play/movies/'):
+            try:
+                # Give this viewer a retained timeline. A rolling live relay
+                # deletes the exact footage a paused player needs to resume.
+                session = roku_movie.start(dict(target=targets[0], input_headers={}),
+                    timeout=45, buffer_seconds=32, live=True)
+            except (ValueError, RuntimeError, OSError):
+                return jsonify(error='Movie channel could not start. Try again.'), 502
+            return no_cache(jsonify(token=session.token, kind='movie', is_live=True, can_pause=True,
+                live_delay_seconds=ENTERTAINMENT_DELAY_SECONDS,
+                media_url=request.url_root.rstrip('/') + f'/roku/movie/{session.token}/stream.m3u8'))
         low_latency = play_url.startswith('/guide/play/sports/') or data.get('low_latency') is True
         delay = SPORTS_DELAY_SECONDS if low_latency else ENTERTAINMENT_DELAY_SECONDS
         try:
@@ -182,7 +193,7 @@ def register_roku_app_routes(app):
                 raise RuntimeError('Channel did not build a playback buffer.')
         except (ValueError, RuntimeError, OSError):
             return jsonify(error='Channel could not start. Try again.'), 502
-        return no_cache(jsonify(token=session.token, lease=lease_live(session.token), kind='live',
+        return no_cache(jsonify(token=session.token, lease=lease_live(session.token), kind='live', can_pause=False,
             live_delay_seconds=delay,
             media_url=request.url_root.rstrip('/') + f'/guide/roku/{session.token}/stream.m3u8'))
 

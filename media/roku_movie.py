@@ -30,12 +30,13 @@ class MovieSession:
     stderr: object
 
 
-def command(source, directory):
+def command(source, directory, *, live=False):
     args = normalized_live_input_args(source['target'], input_headers=source['input_headers'],
-        video_extra=('-force_key_frames', 'expr:gte(t,n_forced*2)'))
+        video_extra=('-force_key_frames', 'expr:gte(t,n_forced*2)'), preserve_av_timing=live)
     # Bound encoder speed/disk growth while the app retains the whole timeline.
     args[args.index('-i'):args.index('-i')] = ['-re']
-    args += ['-af', 'aresample=async=1:first_pts=0', '-sn', '-dn', '-f', 'hls',
+    audio_filter = 'aresample=async=1000:first_pts=0' if live else 'aresample=async=1:first_pts=0'
+    args += ['-af', audio_filter, '-sn', '-dn', '-f', 'hls',
         '-hls_time', '2', '-hls_playlist_type', 'event', '-hls_list_size', '0',
         '-hls_flags', 'independent_segments+temp_file', '-hls_segment_filename',
         str(directory / 'segment_%06d.ts'), str(directory / 'stream.m3u8')]
@@ -74,7 +75,7 @@ def media_file(token, filename):
     return path if path.is_file() else None
 
 
-def start(source, timeout=20, *, buffer_seconds=2):
+def start(source, timeout=20, *, buffer_seconds=2, live=False):
     pipeline = media_pipeline.acquire_session('roku-movie')
     token = secrets.token_urlsafe(18)
     directory = ROOT / token
@@ -82,7 +83,7 @@ def start(source, timeout=20, *, buffer_seconds=2):
         directory.mkdir(parents=True, exist_ok=False)
         stderr = (directory / 'encoder.log').open('wb')
         try:
-            process = subprocess.Popen(command(source, directory), stdout=subprocess.DEVNULL,
+            process = subprocess.Popen(command(source, directory, live=live), stdout=subprocess.DEVNULL,
                 stderr=stderr, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except Exception:
             stderr.close()

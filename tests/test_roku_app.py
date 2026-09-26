@@ -78,6 +78,34 @@ class RokuAppTests(unittest.TestCase):
         self.assertIn(response.json['lease'], roku_app.LIVE_LEASES)
         self.assertEqual(response.json['live_delay_seconds'], 30)
         self.assertEqual(warm.call_args.args[2], 32)
+        self.assertFalse(response.json['can_pause'])
+
+    def test_live_movie_channel_retains_pause_history_without_restarting(self):
+        source = dict(target='http://127.0.0.1/stream/movies/drama.ts', input_headers={})
+        with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=([source['target']], None)), \
+                patch.object(roku_movie, 'start', return_value=SimpleNamespace(token='opaque')) as start, \
+                patch.object(roku_app.hls, 'start_session') as rolling:
+            response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/movies/drama'))
+        self.assertEqual(response.status_code, 200)
+        start.assert_called_once_with(source, timeout=45, buffer_seconds=32, live=True)
+        rolling.assert_not_called()
+        self.assertTrue(response.json['can_pause'])
+        self.assertTrue(response.json['is_live'])
+        self.assertEqual(response.json['kind'], 'movie')
+        self.assertEqual(response.json['live_delay_seconds'], 30)
+        self.assertNotIn('stream/movies', response.get_data(as_text=True))
+        self.assertEqual(response.json['media_url'], 'http://localhost/roku/movie/opaque/stream.m3u8')
+
+    def test_paused_live_movie_heartbeat_and_stop_use_private_session(self):
+        with patch.object(roku_movie, 'touch', return_value=object()) as touch, \
+                patch.object(roku_movie, 'stop', return_value=True) as stop, \
+                patch.object(roku_app.hls, 'touch_session') as rolling:
+            session = dict(token='opaque', kind='movie', is_live=True, can_pause=True)
+            self.assertTrue(self.client.post('/api/roku/playback/heartbeat', json=session).json['active'])
+            self.assertTrue(self.client.post('/api/roku/playback/stop', json=session).json['stopped'])
+        touch.assert_called_once_with('opaque')
+        stop.assert_called_once_with('opaque')
+        rolling.assert_not_called()
 
     def test_sports_guide_detection_keeps_movies_out_of_low_latency(self):
         cases = [
@@ -102,6 +130,7 @@ class RokuAppTests(unittest.TestCase):
                 response = self.client.post('/api/roku/playback', json=dict(play_url=play_url, low_latency=low_latency))
             self.assertEqual(response.json['live_delay_seconds'], 4)
             self.assertEqual(warm.call_args.args[2], 6)
+            self.assertFalse(response.json['can_pause'])
 
     def test_buffer_failure_releases_reference_without_leaking_source(self):
         with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['http://private/password'], None)), \
@@ -123,6 +152,8 @@ class RokuAppTests(unittest.TestCase):
         start.assert_called_once_with(source, timeout=45, buffer_seconds=32)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['kind'], 'movie')
+        self.assertTrue(response.json['can_pause'])
+        self.assertFalse(response.json['is_live'])
         self.assertEqual(response.json['media_url'], 'http://localhost/roku/movie/opaque/stream.m3u8')
         self.assertNotIn('secret', response.get_data(as_text=True))
         self.assertNotIn('plex', response.get_data(as_text=True))
