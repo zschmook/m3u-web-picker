@@ -388,7 +388,7 @@
     const canRestart = current && /^\/guide\/play\/restart\/[A-Za-z0-9_-]{24,64}$/.test(restartUrl);
     el("guideProgrammeRestart").classList.toggle("d-none", !canRestart);
     el("guideProgrammePlay").classList.toggle("d-none", !current);
-    el("guideProgrammeListen").classList.toggle("d-none", !current);
+    el("guideProgrammeListen").classList.toggle("d-none", !current || isMovie);
     const existing = matchingRecording(channel, programme);
     el("guideRecordOnce").disabled = !dvrReady() || Boolean(existing && ["scheduled", "recording", "processing", "completed"].includes(existing.status));
     el("guideRecordSeries").disabled = !dvrReady();

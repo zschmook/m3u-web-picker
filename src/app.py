@@ -120,7 +120,7 @@ def guide():
         '<script src="/static/js/guide_pip.js?v=pip-4"></script>\n'
         '<script src="/static/js/guide_stream_menu.js?v=stream-menu-1"></script>\n'
         '<script src="/static/js/guide_programmes.js?v=movie-restart-1"></script>\n'
-        '<script src="/static/js/guide_dvr.js?v=movie-actions-2"></script>\n'
+        '<script src="/static/js/guide_dvr.js?v=movie-actions-3"></script>\n'
         '<script src="/static/js/guide_event_logo_bridge.js?v=event-logo-2"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
