@@ -49,6 +49,7 @@
         </div>
         <div class="guide-player-actions">
           <button id="guideRestartMovieBtn" class="btn btn-primary btn-sm d-none" type="button">Restart Movie</button>
+          <button id="guidePauseMovieBtn" class="btn btn-outline-light btn-sm d-none" type="button">Pause Movie</button>
           <button id="guideBackToLiveBtn" class="btn btn-outline-info btn-sm d-none" type="button">Back to Live</button>
           <button id="guidePopoutBtn" class="btn btn-outline-light btn-sm" type="button" disabled>Pop out</button>
           <button id="guideStopBtn" class="btn btn-outline-light btn-sm" type="button">Stop</button>
@@ -173,7 +174,7 @@
     </div>
   </dialog>
 
-  <script src="{{ url_for('static', filename='js/guide.js', v='movie-restart-1') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide.js', v='movie-restart-2') }}"></script>
   <script>
     (() => {
       const castButton = document.getElementById("guideCastBtn");

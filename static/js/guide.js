@@ -57,6 +57,7 @@ const guideEls = {
   audioPlayer: document.getElementById("guideAudioPlayer"),
   popoutBtn: document.getElementById("guidePopoutBtn"),
   restartMovieBtn: document.getElementById("guideRestartMovieBtn"),
+  pauseMovieBtn: document.getElementById("guidePauseMovieBtn"),
   backToLiveBtn: document.getElementById("guideBackToLiveBtn"),
   playerTitle: document.getElementById("guidePlayerTitle"),
   playerMeta: document.getElementById("guidePlayerMeta"),
@@ -619,6 +620,10 @@ function syncMovieActions(channel = guideState.currentChannel) {
   const restarted = Boolean(guideState.restart.active);
   const canRestart = !restarted && Boolean(restartProgrammeUrl(channel?.now));
   guideEls.restartMovieBtn?.classList.toggle("d-none", !canRestart);
+  guideEls.pauseMovieBtn?.classList.toggle("d-none", !restarted);
+  if (guideEls.pauseMovieBtn && restarted) {
+    guideEls.pauseMovieBtn.textContent = guideEls.player.paused ? "Resume Movie" : "Pause Movie";
+  }
   guideEls.backToLiveBtn?.classList.toggle("d-none", !restarted || !guideState.restart.channel);
 }
 
@@ -626,6 +631,7 @@ function clearRestartPlayback() {
   guideState.restart.active = false;
   guideState.restart.channel = null;
   guideState.restart.programme = null;
+  if (guideEls.pauseMovieBtn) guideEls.pauseMovieBtn.disabled = false;
   syncMovieActions();
 }
 
@@ -650,6 +656,7 @@ function playProgrammeFromBeginning(channel, programme) {
   guideEls.playerMeta.textContent = [channel.name, "Started at 00:00"].filter(Boolean).join(" • ");
   guideEls.playerMessage.textContent = "Starting movie from the beginning…";
   guideEls.player.src = `${restartUrl}?_=${Date.now()}`;
+  if (guideEls.pauseMovieBtn) guideEls.pauseMovieBtn.disabled = false;
   syncMovieActions(channel);
   const attempt = guideEls.player.play();
   if (attempt?.catch) {
@@ -662,6 +669,20 @@ function playProgrammeFromBeginning(channel, programme) {
 function backToLiveChannel() {
   const channel = guideState.restart.channel || guideState.currentChannel;
   if (channel) playLocalChannel(channel);
+}
+
+function toggleRestartMoviePause() {
+  if (!guideState.restart.active) return;
+  if (guideEls.player.paused) {
+    const attempt = guideEls.player.play();
+    if (attempt?.catch) {
+      attempt.catch(() => {
+        guideEls.playerMessage.textContent = "Press Play in the movie controls to resume.";
+      });
+    }
+  } else {
+    guideEls.player.pause();
+  }
 }
 
 function localListenUrl(channel) {
@@ -1076,7 +1097,17 @@ guideEls.player.addEventListener("playing", () => {
       guideState.video.attempts = 0;
     }, GUIDE_VIDEO_STABLE_RESET_MS);
   }
+  if (guideState.restart.active && guideEls.pauseMovieBtn) {
+    guideEls.pauseMovieBtn.disabled = false;
+    guideEls.pauseMovieBtn.textContent = "Pause Movie";
+  }
   guideEls.playerMessage.textContent = "";
+});
+
+guideEls.player.addEventListener("pause", () => {
+  if (!guideState.restart.active || guideEls.player.ended) return;
+  if (guideEls.pauseMovieBtn) guideEls.pauseMovieBtn.textContent = "Resume Movie";
+  guideEls.playerMessage.textContent = "Movie paused. The live channel is still moving.";
 });
 
 guideEls.player.addEventListener("waiting", () => {
@@ -1098,6 +1129,7 @@ guideEls.player.addEventListener("error", () => {
 
 guideEls.player.addEventListener("ended", () => {
   if (guideState.restart.active) {
+    if (guideEls.pauseMovieBtn) guideEls.pauseMovieBtn.disabled = true;
     guideEls.playerMessage.textContent = "Movie finished.";
     return;
   }
@@ -1160,6 +1192,7 @@ guideEls.restartMovieBtn?.addEventListener("click", () => {
   const channel = guideState.currentChannel;
   if (channel?.now) playProgrammeFromBeginning(channel, channel.now);
 });
+guideEls.pauseMovieBtn?.addEventListener("click", toggleRestartMoviePause);
 guideEls.backToLiveBtn?.addEventListener("click", backToLiveChannel);
 document.getElementById("guideCloseBtn").addEventListener("click", () => window.close());
 guideEls.castBtn.addEventListener("click", toggleCast);
