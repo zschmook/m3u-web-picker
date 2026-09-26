@@ -8,7 +8,6 @@
       <Label text="TV Guide" translation="[156, 52]" width="1600" height="60" font="font:LargeBoldSystemFont" />
       <Label id="status" visible="false" translation="[64, 150]" width="1760" height="44" color="0x9eafc8ff" />
       <GuideGrid id="grid" translation="[64, 160]" duration="10800" numRows="9" />
-      <Label text="OK: watch   |   *: options   |   Back: guide" translation="[64, 1020]" width="1760" height="38" color="0x9eafc8ff" />
     </Group>
     <Video id="video" visible="false" width="1920" height="1080" enableUI="false" />
     <Label id="playerStatus" visible="false" translation="[64, 980]" width="1760" height="64" color="0xffffffff" />
