@@ -2,6 +2,8 @@ sub Main(args as Dynamic)
     screen = CreateObject("roSGScreen")
     port = CreateObject("roMessagePort")
     screen.SetMessagePort(port)
+    input = CreateObject("roInput")
+    input.SetMessagePort(port)
 
     scene = screen.CreateScene("MainScene")
     screen.Show()

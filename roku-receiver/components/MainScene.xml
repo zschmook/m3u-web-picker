@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <interface><function name="playUrl" /></interface>
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+  <children>
+    <Group id="guidePanel">
+      <Poster uri="pkg:/images/icon.png" translation="[64, 44]" width="72" height="72" />
+      <Label text="TV Guide" translation="[156, 52]" width="1600" height="60" font="font:LargeBoldSystemFont" />
+      <Label id="status" translation="[64, 136]" width="1760" height="44" color="0x9eafc8ff" />
+      <TimeGrid id="grid" translation="[64, 208]" duration="10800" maxDays="1" channelInfoWidth="320" channelInfoColumnLabel="Channel" timeBarHeight="48" fillProgramGaps="false" channelNoDataText="No guide data" />
+      <Label id="details" translation="[64, 900]" width="1760" height="100" numLines="3" wrap="true" color="0xc6d3e5ff" />
+      <Label text="OK: watch   |   *: options   |   Back: guide" translation="[64, 1020]" width="1760" height="38" color="0x9eafc8ff" />
+    </Group>
+    <Video id="video" visible="false" width="1920" height="1080" enableUI="false" />
+    <Label id="playerStatus" visible="false" translation="[64, 980]" width="1760" height="64" color="0xffffffff" />
+    <Timer id="refreshTimer" duration="120" repeat="true" />
+    <Timer id="heartbeatTimer" duration="30" repeat="true" />
+  </children>
+</component>

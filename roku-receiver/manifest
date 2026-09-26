@@ -1,6 +1,11 @@
-title=M3U Web Picker Receiver
+title=M3U TV
 major_version=0
-minor_version=1
+minor_version=2
 build_version=0
 ui_resolutions=fhd
 supports_input_launch=1
+mm_icon_focus_hd=pkg:/images/icon.png
+mm_icon_side_hd=pkg:/images/icon.png
+mm_icon_focus_sd=pkg:/images/icon.png
+mm_icon_side_sd=pkg:/images/icon.png
+splash_color=#101827

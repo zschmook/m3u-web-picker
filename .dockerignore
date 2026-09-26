@@ -22,5 +22,6 @@ config.json
 *.db
 *.m3u
 *.xml
+!roku-receiver/components/**/*.xml
 .env
 data/

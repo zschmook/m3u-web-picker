@@ -8,6 +8,12 @@ config.json
 *.db
 *.m3u
 *.xml
+!roku-receiver/components/**/*.xml
+
+roku-receiver/node_modules/
+roku-receiver/out/
+roku-receiver/dist/m3u-tv-roku.zip
+roku-receiver/.roku-deploy-staging/
 
 backups/
 commercials/

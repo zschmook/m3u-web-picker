@@ -30,6 +30,7 @@ from .sports_routes import register_sports_routes
 from .onboarding import register_onboarding_routes
 from .custom_channels import register_custom_channel_routes
 from .movie_channels import register_movie_channel_routes
+from .roku_app import register_roku_app_routes
 from .ui_status import register_ui_status_routes
 
 
@@ -42,6 +43,7 @@ def register_routes(app):
     register_sports_routes(app)
     register_remote_routes(app)
     register_guide_routes(app)
+    register_roku_app_routes(app)
     register_dvr_routes(app)
     register_guide_debug_routes(app)
     register_hdhr_routes(app)
