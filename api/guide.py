@@ -198,13 +198,6 @@ def register_guide_routes(app):
                 timezone_name=str(sports_settings.get("timezone", "America/New_York")),
             )
         items = [director.guide_item(), *items]
-        local_channel = breaking_bad.guide_item()
-        if local_channel:
-            items.insert(0, local_channel)
-            epg_status['channel_count'] = epg_status.get('channel_count',0)+1
-            epg_status['matched_channels'] = epg_status.get('matched_channels',0)+1
-            epg_status['current_channels'] = epg_status.get('current_channels',0)+bool(local_channel['now'])
-            epg_status['programme_count'] = epg_status.get('programme_count',0)+len(local_channel['upcoming'])+bool(local_channel['now'])
         commercial = commercials.guide_item()
         custom_items=custom_channels.guide_items()+movie_channels.guide_items()
         custom_position=custom_channel_insert_position(items)
@@ -216,9 +209,6 @@ def register_guide_routes(app):
             epg_status['programme_count'] = epg_status.get('programme_count',0)+len(custom['upcoming'])+bool(custom['now'])
         if commercial:
             items.insert(0, commercial)
-        test_channel = episode_test.guide_item()
-        if test_channel:
-            items.insert(0, test_channel)
         response = jsonify(count=len(items), channels=items, epg=epg_status)
         return no_cache(response)
 

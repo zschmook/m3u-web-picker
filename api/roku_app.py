@@ -73,6 +73,8 @@ def guide_payload(channels, now=None, hours=8):
     now = time.time() if now is None else now
     rows = []
     for channel in channels:
+        if channel.get('play_url') == director.PLAY_URL:
+            continue
         programmes = []
         seen = set()
         for p in [channel.get('now'), channel.get('next'), *channel.get('upcoming', [])]:
