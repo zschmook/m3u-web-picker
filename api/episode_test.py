@@ -1,5 +1,6 @@
 """On-demand Plex episode with deliberate, fixed-interval test ad breaks."""
 import json
+from itertools import chain
 from pathlib import Path
 import random
 import queue
@@ -87,7 +88,8 @@ def segment_command(slot, cfg, offset, realtime=True):
         args += ['-re']
     if slot['kind'] == 'episode' and not slot.get('path'):
         source=cfg.get('servers',{}).get(slot.get('server_id'),cfg)
-        args += ['-rw_timeout','15000000','-headers','X-Plex-Token: '+source['token']+'\r\n']
+        args += ['-rw_timeout','15000000','-reconnect','1','-reconnect_streamed','1',
+                 '-reconnect_delay_max','2','-headers','X-Plex-Token: '+source['token']+'\r\n']
         target = source['server'].rstrip('/')+(slot.get('part') or source['part'])
     else:
         target = slot['path']
@@ -127,6 +129,7 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
 
     try:
         index = 0
+        retries = 0
         previous = None
         while slot is not None:
             if stopped():
@@ -145,6 +148,7 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
             next_slot = None
             lookahead_started = False
             received = False
+            progress = 0.0
             while not stopped():
                 try:
                     value = current.output.get(timeout=.1)
@@ -182,9 +186,28 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
             current = None
             if stopped():
                 break
-            if code != 0:
-                debug.error(f"FFmpeg stopped during {slot['label']} (exit {code})")
-                break
+            remaining = max(0.0, slot['duration']-progress)
+            incomplete = remaining > .5
+            if code != 0 or incomplete:
+                debug.error(f"FFmpeg stopped during {slot['label']} (exit {code}; {remaining:.3f}s unread)")
+                if slot['kind'] != 'episode' or slot.get('path') or retries >= 3:
+                    break
+                # A successful FFmpeg exit can still be a truncated HTTP read.
+                # Resume this asset at the footage actually emitted, never at
+                # the end of its scheduled duration or the next movie.
+                if upcoming is not None:
+                    upcoming.close()
+                    upcoming = None
+                if next_slot is not None:
+                    schedule = chain([next_slot], schedule)
+                debug.interrupt()
+                retries += 1
+                previous = slot
+                slot = dict(slot, start=slot['start']+progress, duration=remaining,
+                            label=slot['label']+f'_retry{retries}')
+                offset += progress
+                index += 1
+                continue
             if not lookahead_started:
                 # A viewer can tune into the last fraction of a frame.
                 # Keep the live channel going even if that tail emits no data.
@@ -193,6 +216,7 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
             debug.complete(offset,total_bytes)
             previous,slot = slot,next_slot
             index += 1
+            retries = 0
     except (OSError,ValueError) as exc:
         message=str(exc)
         for secret in secrets: message=message.replace(secret,'[redacted]')

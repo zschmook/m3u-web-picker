@@ -140,3 +140,10 @@ class PlayoutDebugSession(DebugSession):
     def transition(self, item):
         with LOCK:
             self.record['transitions'] = (self.record['transitions']+[item])[-100:]
+
+    def interrupt(self):
+        with LOCK:
+            if self.play:
+                self.play.update(status='interrupted', stopped_at=timestamp())
+            self.play = None
+            self.record['current_file'] = None

@@ -47,6 +47,49 @@ class EpisodeTestChannelTests(unittest.TestCase):
         self.assertEqual(args[args.index('-output_ts_offset')+1],'180')
         self.assertEqual(args[args.index('-ac')+1],'2')
         self.assertIn('http://plex.test:32400/library/parts/1/file.mkv',args)
+        self.assertEqual(args[args.index('-reconnect')+1],'1')
+
+    def test_truncated_success_resumes_same_movie_at_emitted_position(self):
+        from media.episode_buffer import END
+        created=[]
+        class Segment:
+            def __init__(self,args,offset,duration,*rest):
+                self.args=args;self.closed=False;self.started_at=0
+                self.ready=threading.Event();self.ready.set();self.returncode=0
+                self.output=queue.Queue();created.append(self)
+                progress=2 if len(created)==1 else duration
+                self.output.put((bytes([0x47,0x01,0,0x10])+bytes(184),progress))
+                self.output.put(END)
+            def close(self):self.closed=True
+        plan=[dict(label='movie',kind='episode',filename='movie.mp4',part='/library/parts/1/movie.mp4',start=100,duration=10),
+              dict(label='next',kind='episode',filename='next.mp4',part='/library/parts/2/next.mp4',start=0,duration=1)]
+        cfg=dict(server='http://plex',token='private')
+        from media.commercials_debug import snapshot
+        with patch.object(episode,'BufferedSegment',Segment),patch.object(episode.time,'monotonic',side_effect=range(100,200)):
+            self.assertEqual(len(list(episode.stream_plan(plan,cfg,channel='2500'))),3)
+        self.assertEqual(len(created),4)
+        self.assertEqual(created[2].args[created[2].args.index('-ss')+1],'102')
+        self.assertEqual(created[2].args[created[2].args.index('-t')+1],'8')
+        self.assertIn('http://plex/library/parts/2/next.mp4',created[3].args)
+        self.assertTrue(all(s.closed for s in created))
+        self.assertEqual(snapshot()['sessions'][0]['clips_completed'],2)
+
+    def test_empty_plex_reads_stop_after_bounded_retries_without_completing_movie(self):
+        from media.episode_buffer import END
+        created=[]
+        class Segment:
+            def __init__(self,*args):
+                self.closed=False;self.started_at=0;self.returncode=0
+                self.ready=threading.Event();self.output=queue.Queue();self.output.put(END);created.append(self)
+            def close(self):self.closed=True
+        plan=[dict(label='movie',kind='episode',filename='movie.mp4',part='/library/parts/1/movie.mp4',start=100,duration=100)]
+        from media.commercials_debug import snapshot
+        with patch.object(episode,'BufferedSegment',Segment):
+            self.assertEqual(list(episode.stream_plan(plan,dict(server='http://plex',token='private'),channel='2500')),[])
+        self.assertEqual(len(created),4)
+        self.assertTrue(all(s.closed for s in created))
+        self.assertEqual(snapshot()['sessions'][0]['streamed_seconds'],0)
+        self.assertEqual(snapshot()['sessions'][0]['clips_completed'],0)
 
     def test_next_segment_starts_when_current_begins_and_both_cancel(self):
         from media.episode_buffer import END

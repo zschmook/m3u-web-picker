@@ -22,7 +22,7 @@ class GuideListenContractTests(unittest.TestCase):
         self.assertIn('data-guide-listen="true"', programmes)
         self.assertIn('data-guide-listen-action="${isListening ? "stop" : "start"}"', programmes)
         self.assertIn('${isListening ? "Stop" : "Listen"}', programmes)
-        self.assertIn('el("guideProgrammeListen").classList.toggle("d-none", !current)', dvr)
+        self.assertIn('el("guideProgrammeListen").classList.toggle("d-none", !current || isMovie)', dvr)
         self.assertIn("browser.response_for(target, audio_only=True)", guide_api)
         self.assertIn('const GUIDE_LISTEN_SESSION_KEY = "m3u-guide-active-listen"', guide)
         self.assertIn("function restoreListenSession()", guide)
