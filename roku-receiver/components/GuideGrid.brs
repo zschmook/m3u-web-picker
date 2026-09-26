@@ -19,7 +19,12 @@ sub init()
 end sub
 
 function makeFont(size as Integer) as Object
-    font = CreateObject("roSGNode", "Font")
+    ' Resolve a system face before resizing it. A Font with an empty URI does
+    ' not render glyphs on Roku, even when its size has been configured.
+    holder = CreateObject("roSGNode", "Label")
+    holder.font = "font:SmallSystemFont"
+    if size >= 23 then holder.font = "font:SmallBoldSystemFont"
+    font = holder.font
     font.size = size
     return font
 end function
