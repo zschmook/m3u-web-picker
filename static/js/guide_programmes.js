@@ -63,6 +63,11 @@
 
   function programmePlayerCopy(channel) {
     if (!channel) return;
+    if (guideState.restart?.active) {
+      guideState.restart.channel = channel;
+      if (typeof syncMovieActions === "function") syncMovieActions(channel);
+      return;
+    }
     const now = channel.now || null;
     guideEls.playerTitle.textContent = now?.title || channel.name || "Channel";
     const meta = [];
@@ -71,6 +76,7 @@
     if (range) meta.push(range);
     if (channel.group) meta.push(channel.group);
     guideEls.playerMeta.textContent = meta.join(" • ");
+    if (typeof syncMovieActions === "function") syncMovieActions(channel);
     if (guideState.mode === "listen" && guideState.listen.active) {
       updateListenMediaSession(channel);
     }

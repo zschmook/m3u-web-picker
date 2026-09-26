@@ -5,6 +5,7 @@ import time
 from flask import Response, jsonify, redirect, request, send_file
 
 import core
+import movie_restart
 import roku_devices
 import sports
 from guide_epg import enrich_guide_channels
@@ -164,6 +165,20 @@ def register_guide_routes(app):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         return response
+
+    @app.get("/guide/play/restart/<identity>")
+    def guide_play_restart(identity: str):
+        try:
+            source = movie_restart.resolve(identity)
+        except ValueError:
+            return Response(
+                "Restart link is unavailable. Refresh the guide and try again.\n",
+                status=404,
+                content_type="text/plain; charset=utf-8",
+            )
+        return browser.response_for(
+            source["target"], input_headers=source["input_headers"], finite=True
+        )
 
     @app.get("/api/guide/channels")
     def api_guide_channels():

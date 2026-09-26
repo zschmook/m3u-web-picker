@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path, PureWindowsPath
 
 from settings import load_settings
+import movie_restart
 from media.scheduled_channel import new_schedule, extend_schedule, save_schedule, trim_schedule
 
 LOCK = threading.RLock()
@@ -294,6 +295,13 @@ def plex_xml(base, path, token):
     req = urllib.request.Request(base.rstrip('/')+path,headers={'X-Plex-Token':token,'Accept':'application/xml'})
     with urllib.request.build_opener(NoRedirect).open(req,timeout=10) as response:
         return ET.fromstring(response.read(32*1024*1024))
+
+
+def movie_restart_url(server_id, part, title=''):
+    """Mint a private guide URL for one Plex movie part."""
+    server=next((row for row in read('servers.json',[]) if row.get('id')==server_id),None)
+    if not server: raise ValueError('Plex server unavailable')
+    return movie_restart.issue_plex(server.get('url',''),server.get('token',''),part,title=title)
 
 
 def seed_connection():

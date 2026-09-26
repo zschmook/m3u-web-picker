@@ -155,6 +155,8 @@
 .guide-player-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: .5rem;
   flex: 0 0 auto;
 }

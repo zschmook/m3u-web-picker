@@ -380,6 +380,9 @@
     const start = new Date(programme.start || "").getTime();
     const stop = new Date(programme.stop || "").getTime();
     const current = Number.isFinite(start) && Number.isFinite(stop) && start <= now && now < stop;
+    const restartUrl = String(programme.restart_url || "");
+    const canRestart = current && /^\/guide\/play\/restart\/[A-Za-z0-9_-]{24,64}$/.test(restartUrl);
+    el("guideProgrammeRestart").classList.toggle("d-none", !canRestart);
     el("guideProgrammePlay").classList.toggle("d-none", !current);
     el("guideProgrammeListen").classList.toggle("d-none", !current);
     const existing = matchingRecording(channel, programme);
@@ -487,6 +490,14 @@
     const channel = state.selected?.channel;
     el("guideProgrammeDialog").close();
     if (channel) playChannel(channel);
+  });
+  el("guideProgrammeRestart")?.addEventListener("click", () => {
+    const channel = state.selected?.channel;
+    const programme = state.selected?.programme;
+    el("guideProgrammeDialog").close();
+    if (channel && programme && typeof playProgrammeFromBeginning === "function") {
+      playProgrammeFromBeginning(channel, programme);
+    }
   });
   el("guideProgrammeListen")?.addEventListener("click", () => {
     const channel = state.selected?.channel;

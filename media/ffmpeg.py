@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -40,7 +41,25 @@ def executable() -> str:
     return ffmpeg
 
 
-def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()) -> list[str]:
+def _input_header_args(input_headers: dict[str, str] | None) -> list[str]:
+    if not input_headers:
+        return []
+    lines = []
+    for name, value in input_headers.items():
+        name = str(name or "").strip()
+        value = str(value or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9-]+", name) or "\r" in value or "\n" in value:
+            raise ValueError("Invalid media input header.")
+        lines.append(f"{name}: {value}\r\n")
+    return ["-headers", "".join(lines)]
+
+
+def normalized_live_input_args(
+    target: str,
+    *,
+    video_extra: tuple[str, ...] = (),
+    input_headers: dict[str, str] | None = None,
+) -> list[str]:
     """Common ffmpeg input + H.264/AAC normalization arguments.
 
     Browser fMP4 and remote HLS intentionally share these settings so device
@@ -76,6 +95,7 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         "-fflags",
         "+genpts",
         *reconnect,
+        *_input_header_args(input_headers),
         "-i",
         target,
         "-map",

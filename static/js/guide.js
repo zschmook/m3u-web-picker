@@ -38,6 +38,11 @@ const guideState = {
     stallTimer: null,
     stableTimer: null,
   },
+  restart: {
+    active: false,
+    channel: null,
+    programme: null,
+  },
 };
 
 const guideEls = {
@@ -51,6 +56,8 @@ const guideEls = {
   listenPanel: document.getElementById("guideListenPanel"),
   audioPlayer: document.getElementById("guideAudioPlayer"),
   popoutBtn: document.getElementById("guidePopoutBtn"),
+  restartMovieBtn: document.getElementById("guideRestartMovieBtn"),
+  backToLiveBtn: document.getElementById("guideBackToLiveBtn"),
   playerTitle: document.getElementById("guidePlayerTitle"),
   playerMeta: document.getElementById("guidePlayerMeta"),
   playbackBadge: document.getElementById("guidePlaybackBadge"),
@@ -579,6 +586,7 @@ async function stopPlayback() {
   await stopRemoteMedia();
   await stopCastRelay();
   await stopRokuPlayback({sendHome: true});
+  clearRestartPlayback();
   guideState.currentChannel = null;
   guideEls.playerPanel.classList.add("d-none");
   guideEls.playerMessage.textContent = "";
@@ -600,6 +608,60 @@ function setCurrentChannel(channel) {
 function localChannelUrl(channel) {
   const url = channel?.play_url || "";
   return `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+}
+
+function restartProgrammeUrl(programme) {
+  const value = String(programme?.restart_url || "").trim();
+  return /^\/guide\/play\/restart\/[A-Za-z0-9_-]{24,64}$/.test(value) ? value : "";
+}
+
+function syncMovieActions(channel = guideState.currentChannel) {
+  const restarted = Boolean(guideState.restart.active);
+  const canRestart = !restarted && Boolean(restartProgrammeUrl(channel?.now));
+  guideEls.restartMovieBtn?.classList.toggle("d-none", !canRestart);
+  guideEls.backToLiveBtn?.classList.toggle("d-none", !restarted || !guideState.restart.channel);
+}
+
+function clearRestartPlayback() {
+  guideState.restart.active = false;
+  guideState.restart.channel = null;
+  guideState.restart.programme = null;
+  syncMovieActions();
+}
+
+function playProgrammeFromBeginning(channel, programme) {
+  const restartUrl = restartProgrammeUrl(programme);
+  if (!channel || !restartUrl) return;
+  stopListenStream();
+  stopLocalStream({hidePanel: false});
+  void stopRemoteMedia();
+  void stopCastRelay();
+  void stopRokuPlayback({sendHome: true});
+  setCurrentChannel(channel);
+  guideState.restart.active = true;
+  guideState.restart.channel = guideState.currentChannel || channel;
+  guideState.restart.programme = programme;
+  guideState.video.active = false;
+  showLocalPlayer();
+  guideEls.nowPlayingLabel.textContent = "Restarted from beginning";
+  guideEls.playbackBadge.textContent = "Movie";
+  guideEls.playbackBadge.className = "badge rounded-pill text-bg-primary";
+  guideEls.playerTitle.textContent = programme.title || channel.name || "Movie";
+  guideEls.playerMeta.textContent = [channel.name, "Started at 00:00"].filter(Boolean).join(" • ");
+  guideEls.playerMessage.textContent = "Starting movie from the beginning…";
+  guideEls.player.src = `${restartUrl}?_=${Date.now()}`;
+  syncMovieActions(channel);
+  const attempt = guideEls.player.play();
+  if (attempt?.catch) {
+    attempt.catch(() => {
+      guideEls.playerMessage.textContent = "Press Play to start this movie from the beginning.";
+    });
+  }
+}
+
+function backToLiveChannel() {
+  const channel = guideState.restart.channel || guideState.currentChannel;
+  if (channel) playLocalChannel(channel);
 }
 
 function localListenUrl(channel) {
@@ -687,6 +749,7 @@ function startListenMode(channel, {handoff = false} = {}) {
   // Keep play() in the original click call stack. Some browsers revoke media
   // autoplay permission as soon as an awaited cleanup yields control.
   stopLocalStream({hidePanel: false});
+  clearRestartPlayback();
   stopListenStream({preserveSession: handoff});
   void stopRemoteMedia();
   void stopCastRelay();
@@ -730,8 +793,10 @@ function restoreListenSession() {
 function playLocalChannel(channel) {
   stopListenStream();
   stopLocalStream({hidePanel: false});
+  clearRestartPlayback();
   setCurrentChannel(channel);
   showLocalPlayer();
+  syncMovieActions(guideState.currentChannel || channel);
   guideState.video.active = true;
   guideState.video.attempts = 0;
   guideEls.playerMessage.textContent = "Starting stream…";
@@ -1024,10 +1089,18 @@ guideEls.player.addEventListener("waiting", () => {
 });
 
 guideEls.player.addEventListener("error", () => {
+  if (guideState.restart.active) {
+    guideEls.playerMessage.textContent = "The restarted movie could not continue. Return to live TV or try Restart Movie again.";
+    return;
+  }
   scheduleVideoRecovery("The live stream ended unexpectedly.");
 });
 
 guideEls.player.addEventListener("ended", () => {
+  if (guideState.restart.active) {
+    guideEls.playerMessage.textContent = "Movie finished.";
+    return;
+  }
   scheduleVideoRecovery("The live stream ended unexpectedly.");
 });
 
@@ -1083,6 +1156,11 @@ guideEls.rows.addEventListener("click", event => {
 guideEls.search.addEventListener("input", renderGuide);
 document.getElementById("guideRefreshBtn").addEventListener("click", loadGuide);
 document.getElementById("guideStopBtn").addEventListener("click", stopPlayback);
+guideEls.restartMovieBtn?.addEventListener("click", () => {
+  const channel = guideState.currentChannel;
+  if (channel?.now) playProgrammeFromBeginning(channel, channel.now);
+});
+guideEls.backToLiveBtn?.addEventListener("click", backToLiveChannel);
 document.getElementById("guideCloseBtn").addEventListener("click", () => window.close());
 guideEls.castBtn.addEventListener("click", toggleCast);
 guideEls.rokuBtn.addEventListener("click", toggleRoku);

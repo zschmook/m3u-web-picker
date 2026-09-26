@@ -98,7 +98,7 @@ class GuideRemotePlaybackContractTests(unittest.TestCase):
         self.assertIn('data-dvr-play="${item.id}"', dvr_ui)
         self.assertIn("browser.response_for(", dvr_api)
         self.assertIn('guide_dvr.css?v=dvr-library-7', app)
-        self.assertIn('guide_dvr.js?v=guide-audio-only-1', app)
+        self.assertIn('guide_dvr.js?v=movie-restart-1', app)
 
 if __name__ == "__main__":
     unittest.main()

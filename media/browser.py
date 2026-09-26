@@ -26,6 +26,8 @@ def response_for(
     on_stop: Callable[[], None] | None = None,
     audio_only: bool = False,
     remux_only: bool = False,
+    finite: bool = False,
+    input_headers: dict[str, str] | None = None,
 ) -> Response:
     """Transcode one curated IPTV stream for browser playback."""
     session_token = ""
@@ -52,7 +54,7 @@ def response_for(
                 "pipe:1",
             ]
         else:
-            command = normalized_live_input_args(target) + [
+            command = normalized_live_input_args(target, input_headers=input_headers) + [
                 "-f",
                 "mp4",
                 "-movflags",
@@ -265,11 +267,14 @@ def response_for(
         finally:
             with stream_state_lock:
                 empty = stream_state["bytes_sent"] == 0
-            if not client_gone and ((remote_source and source_ended) or (empty and not watcher_stop.is_set())):
+            failed = (empty and not watcher_stop.is_set()) or (
+                not finite and remote_source and source_ended
+            )
+            if not client_gone and failed:
                 media_pipeline.record_output_error(
                     output_name,
                     error_detail(
-                        f"The channel ended without producing {media_label} data."
+                        f"The source ended without producing {media_label} data."
                         if empty else f"The live {media_label} source ended after playback started."
                     ),
                 )
@@ -287,7 +292,7 @@ def response_for(
     response.headers["Content-Disposition"] = (
         'inline; filename="live.mp3"'
         if audio_only
-        else 'inline; filename="live.mp4"'
+        else ('inline; filename="movie.mp4"' if finite else 'inline; filename="live.mp4"')
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Access-Control-Allow-Origin"] = "*"
