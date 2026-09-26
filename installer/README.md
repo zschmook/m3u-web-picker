@@ -1,24 +1,21 @@
 # Installer packaging
 
-M3U Web Picker ships two packaged host-runtime installers:
+M3U Web Picker has one Docker installer implementation in `installer/docker/install.py`. It is standard-library Python and is frozen by PyInstaller on each target operating system.
 
-- `windows-python/` — Windows Python/Waitress installer, packaged as a single EXE with PyInstaller.
-- `macos/` — macOS user-scoped host installer packaged as a DMG containing install/uninstall `.command` files.
+The release workflow produces three downloads:
+
+- `M3U-Web-Picker-Windows-Setup.exe`
+- `M3U-Web-Picker-macOS.dmg` (unsigned)
+- `M3U-Web-Picker-Linux.tar.gz`
+
+All three downloads install the same Docker edition, use port `9999`, download source without Git, and provide the same `UPGRADE (UP)` and confirmed `CLEAN (CL)` behavior. Docker and Docker Compose v2 must already be installed and running.
 
 Latest public downloads:
 
 - Windows: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe
 - macOS: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg
+- Linux: https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz
 
-GitHub packaging is defined in `.github/workflows/package-installers.yml`. The workflow is intentionally **not** push-triggered.
+GitHub packaging is defined in `.github/workflows/package-installers.yml`. The workflow is intentionally not push-triggered. Run it manually for temporary artifacts, or provide a release tag to attach all three downloads to a release.
 
-For a manual run, open **Actions → Package installers → Run workflow**. Leave `release_tag` blank for temporary Actions artifacts, or enter a tag such as `v30.0` to create/update a GitHub Release and attach the installers permanently.
-
-Publishing a GitHub Release normally also runs the packaging workflow and attaches:
-
-```text
-M3U-Web-Picker-Windows-Setup.exe
-M3U-Web-Picker-macOS.dmg
-```
-
-Linux does not have a packaged installer. Use the source/Docker runtime and handle the host details yourself.
+The older `windows-python/` and `macos/` directories are host-Python experiments. They remain available for fallback investigation, but they are not the canonical packaged installers.

@@ -1,16 +1,24 @@
 # M3U Web Picker — User Guide
 
-This guide describes the current v31 application. Docker is the supported runtime while packaged installation workflows are being revised.
+This guide describes the current v31 application. Docker is the supported runtime.
 
 ## 1. Start the application
 
-Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git:
+Install and start Docker Desktop on Windows/macOS, or Docker Engine with Compose v2 on Linux. Download the matching packaged installer:
+
+- `M3U-Web-Picker-Windows-Setup.exe`
+- `M3U-Web-Picker-macOS.dmg` (unsigned)
+- `M3U-Web-Picker-Linux.tar.gz`
+
+All three packages use the same installer logic and run production on port `9999`. An upgrade preserves saved setup; a clean reinstall explicitly warns before deleting the Docker application-data volume and retains the separate DVR folder.
+
+For a source-based installation, install Git and run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
 ```
 
-The setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. On Windows, a new setup also creates `C:/DVR` and uses it as the persistent DVR mount. Existing custom DVR paths are preserved. Set `M3U_PICKER_DIR` first to choose another checkout location.
+The source setup script installs or updates the application in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, writes the required `.env` values, and builds the container without deleting existing application data. Existing custom DVR paths are preserved. Set `M3U_PICKER_DIR` first to choose another checkout location.
 
 To start manually from an existing checkout:
 
@@ -139,7 +147,7 @@ The built-in TV Guide displays the curated lineup and program windows. Provider 
 The in-app DVR is disabled by default. Before enabling it, set `M3U_DVR_DIR` in `.env` to a dedicated folder on the Docker host and rebuild/restart the container:
 
 ```text
-M3U_DVR_DIR=C:/DVR
+M3U_DVR_DIR=C:/Users/YourName/Videos/M3U-Web-Picker-DVR
 ```
 
 Then open **Settings → DVR**, enter that exact local host path, validate it, and enable DVR. The application refuses to schedule recordings until the path matches the active Docker bind mount and `/recordings` is writable inside the container.
@@ -148,7 +156,7 @@ Select a program in the TV Guide to record that airing or create a series rule f
 
 When **Remove detected commercials** is enabled, Comskip creates a proposed cut list before FFmpeg performs the H.265 conversion. The app rejects implausibly large cut lists. If detection or cutting fails, it creates an uncut MKV instead and reports the fallback on the DVR recording. H.265 conversion prefers NVIDIA NVENC when GPU passthrough is active and retries safely with CPU `libx265` if NVENC fails. NVENC conversions target 3 Mbps with 4.5 Mbps peak headroom so ordinary 1080p provider recordings remain smaller than their raw transport streams. A failed conversion always leaves the original `.ts` capture in place.
 
-By default, successful MKVs are stored under the DVR folder's `converted/` directory. To hand completed shows to Plex, enter a **Plex folder** in **Settings → DVR**. The current Docker setup requires this folder to be inside the mounted DVR folder, such as `C:/DVR/PLEX`. Successful recordings then move into show and season folders with Plex-friendly names; an episode described as `S06 E10` becomes `Show Name/Season 06/Show Name.S06E10.mkv`. Raw `.ts` captures and completed files do not share the same folder. Neither temporary nor completed recording data is stored in the container layer.
+By default, successful MKVs are stored under the DVR folder's `converted/` directory. To hand completed shows to Plex, enter a **Plex folder** in **Settings → DVR**. The current Docker setup requires this folder to be inside the mounted DVR folder, such as `C:/Users/YourName/Videos/M3U-Web-Picker-DVR/PLEX`. Successful recordings then move into show and season folders with Plex-friendly names; an episode described as `S06 E10` becomes `Show Name/Season 06/Show Name.S06E10.mkv`. Raw `.ts` captures and completed files do not share the same folder. Neither temporary nor completed recording data is stored in the container layer.
 
 For LAN playback/discovery, configure the host LAN IPv4 address in `.env`:
 

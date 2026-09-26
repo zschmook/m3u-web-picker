@@ -1355,6 +1355,7 @@ def _start_recording(db_path: Path | str, item: dict[str, Any], now: datetime) -
             _capture_command(target, capture, duration),
             stdout=subprocess.DEVNULL,
             stderr=log_handle,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, RuntimeError) as exc:
         log_handle.close()

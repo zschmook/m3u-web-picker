@@ -1,4 +1,23 @@
-# Windows Python installer
+# Windows Python fallback
+
+## Plain Python bootstrap
+
+For a machine that already has Python 3.12 but cannot run Docker Desktop:
+
+```text
+python install.py
+```
+
+This path does not use Git, WSL, Docker, PyInstaller, or an EXE installer. It
+downloads `main`, creates a private virtual environment below
+`%LOCALAPPDATA%\m3u-web-picker`, installs FFmpeg and ffprobe, starts Waitress on
+port 9999, opens setup, and creates `M3U Web Picker.cmd` on the desktop. Running
+the same command again offers `UPGRADE (UP)` or `CLEAN (CL)`. Upgrade preserves
+the saved setup. Clean requires typing `CLEAN`, removes application state, and
+preserves files in the separate DVR recordings folder. Commercial removal
+remains unavailable until a verified Windows Comskip distribution is selected.
+
+The packaged installer below is the older, separate distribution path.
 
 This is the packaged Windows installer for the host-Python edition of M3U Web Picker.
 

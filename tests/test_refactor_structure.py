@@ -46,8 +46,9 @@ class RefactorStructureTests(unittest.TestCase):
         powershell_setup = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
         self.assertIn('M3U_DVR_DIR=C:/DVR', shell_setup)
         self.assertIn('mkdir -p /c/DVR', shell_setup)
-        self.assertIn('$dvrPath = "C:/DVR"', powershell_setup)
-        self.assertIn('New-Item -ItemType Directory -Path "C:\\DVR"', powershell_setup)
+        self.assertIn('[Environment+SpecialFolder]::MyVideos', powershell_setup)
+        self.assertIn('"M3U-Web-Picker-DVR"', powershell_setup)
+        self.assertIn('New-Item -ItemType Directory -LiteralPath $dvrPath', powershell_setup)
 
     def test_cross_platform_installers_describe_gpu_behavior(self):
         docker_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")

@@ -114,6 +114,7 @@ def _subscribe(target: str) -> tuple[SharedMpegtsStream, str, Subscriber]:
                 process = subprocess.Popen(
                     _command(target), stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, bufsize=0,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             except (OSError, RuntimeError):
                 media_pipeline.release_session(pipeline_token)
