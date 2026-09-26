@@ -115,6 +115,7 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
     total_bytes = 0
     current = upcoming = None
     clock_start = None
+    client_buffer = max(0, min(30, float(cfg.get('client_buffer_seconds', 3))))
     continuity = TransportContinuity()
     secrets = {cfg.get('token',''),*(source.get('token','') for source in cfg.get('servers',{}).values())}-{''}
 
@@ -166,9 +167,10 @@ def stream_plan(plan, cfg, disconnected=None, channel='0.002'):
                     clock_start = time.monotonic()
                     if cfg.get('wall_clock_anchor') is not None:
                         clock_start -= time.time()-cfg['wall_clock_anchor']
-                # Keep three seconds of client buffer. Prefetched data is
-                # paced on this one clock and is only logged when sent.
-                deadline = clock_start+transport_offset+progress-3
+                # Ordinary live playout keeps three seconds of client buffer;
+                # a private Roku movie can build a larger cushion immediately.
+                # Prefetched data follows one clock and is only logged when sent.
+                deadline = clock_start+transport_offset+progress-client_buffer
                 while time.monotonic()<deadline and not stopped():
                     time.sleep(max(0,min(.05,deadline-time.monotonic())))
                 if stopped():

@@ -126,6 +126,8 @@ def register_movie_channel_routes(app):
             return Response(content_type='video/mp2t')
         now = time.time()
         cfg = dict(wall_clock_anchor=now, servers=servers)
+        if request.args.get('roku_buffer') == '1':
+            cfg['client_buffer_seconds'] = 30
         return Response(stream_with_context(stream_plan(playout(identity, now), cfg,
             request.environ.get('waitress.client_disconnected'), channel=row['number'])),
             content_type='video/mp2t', direct_passthrough=True, headers={'Cache-Control': 'no-store'})

@@ -224,8 +224,9 @@ sub startVideo(url as String)
     content.url = url
     content.streamFormat = "hls"
     content.title = "M3U TV"
-    if m.movie
+    if m.movie or m.canPause
         content.playStart = 0
+        if not m.movie then content.live = true
     else
         content.live = true
         content.playStart = -m.liveDelay

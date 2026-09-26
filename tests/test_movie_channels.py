@@ -94,5 +94,21 @@ class MovieChannelTests(unittest.TestCase):
             self.assertEqual(p.findtext('date'),'20260901')
             self.assertIsNone(p.find('episode-num'))
 
+    def test_private_roku_buffer_keeps_the_shared_schedule_and_other_clients_pacing(self):
+        with patch.object(movies,'scan_server',return_value=[film('one',['Drama'])]):
+            movies.refresh(self.servers,now=100)
+        app=Flask(__name__)
+        api.register_movie_channel_routes(app)
+        client=app.test_client()
+        with patch.object(api.time,'time',return_value=105), \
+                patch.object(plex,'read',return_value=self.servers), \
+                patch.object(api,'stream_plan',side_effect=lambda *args,**kwargs:iter([b'movie'])) as play:
+            self.assertEqual(client.get('/stream/movies/drama.ts?roku_buffer=1').data,b'movie')
+            plan,cfg=play.call_args.args[:2]
+            self.assertEqual(cfg['client_buffer_seconds'],30)
+            self.assertEqual(next(plan)['start'],5)
+            self.assertEqual(client.get('/stream/movies/drama.ts').data,b'movie')
+            self.assertNotIn('client_buffer_seconds',play.call_args.args[1])
+
 
 if __name__=='__main__':unittest.main()

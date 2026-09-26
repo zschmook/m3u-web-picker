@@ -14,6 +14,10 @@ from media import hls, roku_movie
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'Requires FFmpeg')
 class HlsAudioClockTests(unittest.TestCase):
+    def tearDown(self):
+        for token in list(roku_movie.SESSIONS):
+            roku_movie.stop(token)
+
     def test_audio_visual_cue_keeps_source_alignment_with_delayed_track(self):
         for video_offset, audio_offset, private_movie in ((0, .7, False), (.7, 0, False), (0, .7, True), (.7, 0, True)):
             with self.subTest(video_offset=video_offset, audio_offset=audio_offset, private_movie=private_movie), tempfile.TemporaryDirectory() as temp:
@@ -31,8 +35,13 @@ class HlsAudioClockTests(unittest.TestCase):
                 output = directory / 'relay'
                 output.mkdir()
                 with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
-                    command = roku_movie.command(dict(target=str(source), input_headers={}), output, live=True) if private_movie else hls._hls_command(str(source), output)
-                    subprocess.run(command, check=True, timeout=15)
+                    if private_movie:
+                        with patch.object(roku_movie, 'ROOT', output):
+                            session = roku_movie.start(dict(target=str(source), input_headers={}), live=True)
+                        self.assertEqual(session.process.wait(timeout=15), 0)
+                        output = session.directory
+                    else:
+                        subprocess.run(hls._hls_command(str(source), output), check=True, timeout=15)
                 combined = directory / 'relay.ts'
                 combined.write_bytes(b''.join(path.read_bytes() for path in sorted(output.glob('segment_*.ts'))))
                 timing = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
@@ -65,29 +74,55 @@ class HlsAudioClockTests(unittest.TestCase):
                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(source)], check=True, timeout=15)
             output = directory / 'private'
             output.mkdir()
-            with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
-                command = roku_movie.command(dict(target=str(source), input_headers={}), output, live=True)
-            with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as encoder:
-                try:
-                    deadline = time.monotonic() + 7
-                    paused_file = output / 'segment_000000.ts'
-                    while not paused_file.exists() and encoder.poll() is None and time.monotonic() < deadline:
-                        time.sleep(.05)
-                    self.assertTrue(paused_file.exists())
-                    paused_bytes = paused_file.read_bytes()
-                    _, stderr = encoder.communicate(timeout=12)
-                    self.assertEqual(encoder.returncode, 0, stderr.decode(errors='replace'))
-                    self.assertGreaterEqual(len(list(output.glob('segment_*.ts'))), 4)
-                    self.assertEqual(paused_file.read_bytes(), paused_bytes)
-                    self.assertIn(paused_file.name, (output / 'stream.m3u8').read_text())
-                    decoded = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
-                        '-i', str(paused_file), '-map', '0:v:0', '-f', 'null', '-'], capture_output=True, timeout=10)
-                    self.assertEqual(decoded.returncode, 0, decoded.stderr.decode(errors='replace'))
-                    self.assertEqual(decoded.stderr, b'')
-                finally:
-                    if encoder.poll() is None:
-                        encoder.kill()
-                        encoder.communicate()
+            with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'), \
+                    patch.object(roku_movie, 'ROOT', output):
+                session = roku_movie.start(dict(target=str(source), input_headers={}), live=True)
+            encoder = session.process
+            output = session.directory
+            try:
+                paused_file = output / 'segment_000000.ts'
+                paused_bytes = paused_file.read_bytes()
+                self.assertEqual(encoder.wait(timeout=12), 0)
+                self.assertGreaterEqual(len(list(output.glob('segment_*.ts'))), 4)
+                self.assertEqual(paused_file.read_bytes(), paused_bytes)
+                self.assertIn(paused_file.name, (output / 'stream.m3u8').read_text())
+                decoded = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                    '-i', str(paused_file), '-map', '0:v:0', '-f', 'null', '-'], capture_output=True, timeout=10)
+                self.assertEqual(decoded.returncode, 0, decoded.stderr.decode(errors='replace'))
+                self.assertEqual(decoded.stderr, b'')
+            finally:
+                roku_movie.stop(session.token)
+
+    def test_movie_starts_before_full_cushion_and_producer_stays_bounded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            source = directory / 'long-movie.mkv'
+            subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=20:duration=90',
+                '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=90',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(source)], check=True, timeout=20)
+            started = time.monotonic()
+            with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'), \
+                    patch.object(roku_movie, 'ROOT', directory / 'sessions'):
+                session = roku_movie.start(dict(target=str(source), input_headers={}))
+            try:
+                self.assertLess(time.monotonic() - started, 5, 'Do not wait for thirty seconds before returning playback.')
+                deadline = time.monotonic() + 5
+                while hls.buffered_seconds(session.directory) < 8 and time.monotonic() < deadline:
+                    time.sleep(.05)
+                self.assertGreaterEqual(hls.buffered_seconds(session.directory), 8,
+                    'The cushion should fill after the first segment is ready.')
+                time.sleep(.5)
+                self.assertLessEqual(hls.buffered_seconds(session.directory),
+                    roku_movie.READ_AHEAD_SECONDS + time.monotonic() - started + 2,
+                    'An ongoing movie must not be encoded all the way to its end immediately.')
+                self.assertIsNone(session.process.poll())
+                self.assertTrue((session.directory / 'segment_000000.ts').is_file())
+            finally:
+                roku_movie.stop(session.token)
+            self.assertFalse(session.feeder.is_alive())
+            self.assertFalse(session.producer.reader.is_alive())
+            self.assertFalse(session.directory.exists())
 
     def test_missing_audio_samples_preserve_timeline_and_live_pacing(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -87,12 +87,13 @@ class RokuAppTests(unittest.TestCase):
                 patch.object(roku_app.hls, 'start_session') as rolling:
             response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/movies/drama'))
         self.assertEqual(response.status_code, 200)
-        start.assert_called_once_with(source, timeout=45, buffer_seconds=32, live=True)
+        start.assert_called_once_with(dict(source, target=source['target'] + '?roku_buffer=1'),
+            timeout=45, buffer_seconds=2, live=True)
         rolling.assert_not_called()
         self.assertTrue(response.json['can_pause'])
         self.assertTrue(response.json['is_live'])
         self.assertEqual(response.json['kind'], 'movie')
-        self.assertEqual(response.json['live_delay_seconds'], 30)
+        self.assertEqual(response.json['live_delay_seconds'], 0)
         self.assertNotIn('stream/movies', response.get_data(as_text=True))
         self.assertEqual(response.json['media_url'], 'http://localhost/roku/movie/opaque/stream.m3u8')
 
@@ -149,7 +150,7 @@ class RokuAppTests(unittest.TestCase):
                 patch.object(roku_movie, 'start', return_value=SimpleNamespace(token='opaque')) as start:
             response = self.client.post('/api/roku/playback', json=dict(mode='movie',
                 restart_url='/guide/play/restart/' + 'a' * 24))
-        start.assert_called_once_with(source, timeout=45, buffer_seconds=32)
+        start.assert_called_once_with(source, timeout=45, buffer_seconds=2)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['kind'], 'movie')
         self.assertTrue(response.json['can_pause'])
@@ -200,12 +201,14 @@ class RokuMovieTests(unittest.TestCase):
         source = dict(target='http://plex/movie', input_headers={'X-Plex-Token': 'secret'})
         with patch('media.ffmpeg.executable', return_value='ffmpeg'), \
                 patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
-            args = roku_movie.command(source, Path('/tmp/movie'))
-        self.assertEqual(args[args.index('-hls_playlist_type') + 1], 'event')
-        self.assertEqual(args[args.index('-hls_list_size') + 1], '0')
-        self.assertNotIn('delete_segments', ' '.join(args))
+            args = roku_movie.command(source)
+            mux = roku_movie.hls_command(Path('/tmp/movie'))
+        self.assertEqual(mux[mux.index('-hls_playlist_type') + 1], 'event')
+        self.assertEqual(mux[mux.index('-hls_list_size') + 1], '0')
+        self.assertNotIn('delete_segments', ' '.join(mux))
         self.assertNotIn('-ss', args)
-        self.assertLess(args.index('-re'), args.index('-i'))
+        self.assertNotIn('-re', args)
+        self.assertEqual(mux[mux.index('-c') + 1], 'copy')
         self.assertLess(args.index('-headers'), args.index('-i'))
 
     def test_safe_files_and_cleanup_after_movie_stop(self):
@@ -233,12 +236,31 @@ class RokuMovieTests(unittest.TestCase):
                 patch.object(roku_movie, 'ROOT', Path(temp)), \
                 patch.object(roku_movie.media_pipeline, 'acquire_session', return_value='slot'), \
                 patch.object(roku_movie.media_pipeline, 'release_session') as release, \
-                patch.object(roku_movie, 'command', return_value=['ffmpeg']), \
+                patch.object(roku_movie, 'hls_command', return_value=['ffmpeg']), \
                 patch.object(roku_movie.subprocess, 'Popen', side_effect=OSError('missing')):
             with self.assertRaises(OSError):
                 roku_movie.start(dict())
             release.assert_called_once_with('slot')
             self.assertEqual(list(Path(temp).iterdir()), [])
+
+    def test_failed_movie_source_stops_muxer_and_releases_pipeline_slot(self):
+        process=Mock(stdin=io.BytesIO())
+        with tempfile.TemporaryDirectory() as temp, \
+                patch.object(roku_movie,'ROOT',Path(temp)), \
+                patch.object(roku_movie.media_pipeline,'acquire_session',return_value='slot'), \
+                patch.object(roku_movie.media_pipeline,'release_session') as release, \
+                patch.object(roku_movie,'hls_command',return_value=['ffmpeg']), \
+                patch.object(roku_movie,'command',return_value=['ffmpeg']), \
+                patch.object(roku_movie.subprocess,'Popen',return_value=process), \
+                patch.object(roku_movie,'BufferedSegment',side_effect=OSError('source unavailable')), \
+                patch.object(roku_movie,'terminate') as terminate:
+            with self.assertRaises(OSError):
+                roku_movie.start(dict(target='private',input_headers={}))
+            terminate.assert_called_once_with(process)
+            release.assert_called_once_with('slot')
+            self.assertTrue(process.stdin.closed)
+            self.assertFalse(roku_movie.SESSIONS)
+            self.assertEqual(list(Path(temp).iterdir()),[])
 
 
 if __name__ == '__main__':

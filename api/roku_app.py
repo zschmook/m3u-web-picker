@@ -158,7 +158,7 @@ def register_roku_app_routes(app):
                 return jsonify(error='Movie restart link unavailable. Refresh the guide.'), 400
             try:
                 source = movie_restart.resolve(ticket.group(1))
-                session = roku_movie.start(source, timeout=45, buffer_seconds=32)
+                session = roku_movie.start(source, timeout=45, buffer_seconds=2)
             except (ValueError, RuntimeError, OSError):
                 return jsonify(error='Movie could not start. Try again or return to live.'), 502
             return no_cache(jsonify(token=session.token, kind='movie', is_live=False, can_pause=True, title=source['title'],
@@ -170,12 +170,13 @@ def register_roku_app_routes(app):
             try:
                 # Give this viewer a retained timeline. A rolling live relay
                 # deletes the exact footage a paused player needs to resume.
-                session = roku_movie.start(dict(target=targets[0], input_headers={}),
-                    timeout=45, buffer_seconds=32, live=True)
+                target = targets[0] + ('&' if '?' in targets[0] else '?') + 'roku_buffer=1'
+                session = roku_movie.start(dict(target=target, input_headers={}),
+                    timeout=45, buffer_seconds=2, live=True)
             except (ValueError, RuntimeError, OSError):
                 return jsonify(error='Movie channel could not start. Try again.'), 502
             return no_cache(jsonify(token=session.token, kind='movie', is_live=True, can_pause=True,
-                live_delay_seconds=ENTERTAINMENT_DELAY_SECONDS,
+                live_delay_seconds=0,
                 media_url=request.url_root.rstrip('/') + f'/roku/movie/{session.token}/stream.m3u8'))
         low_latency = play_url.startswith('/guide/play/sports/') or data.get('low_latency') is True
         delay = SPORTS_DELAY_SECONDS if low_latency else ENTERTAINMENT_DELAY_SECONDS
