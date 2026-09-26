@@ -212,10 +212,11 @@ def _hls_command(target: str, directory: Path) -> list[str]:
     base_command[input_index:input_index] = ["-re"]
     return base_command + [
         # Reconnects can drop AAC packets while the video clock keeps moving.
-        # Emit silence for missing samples so Roku does not close that gap and
-        # let speech run ahead of the corresponding video.
+        # Fill missing samples and trim reconnect overlap. Hard compensation
+        # keeps sample timestamps monotonic when the provider clock restarts;
+        # soft stretching can replay padding and send AAC timestamps backward.
         "-af",
-        "aresample=async=1000:first_pts=0",
+        "aresample=async=1:first_pts=0",
         "-f",
         "hls",
         "-hls_time",

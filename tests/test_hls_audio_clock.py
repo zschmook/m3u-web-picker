@@ -124,6 +124,53 @@ class HlsAudioClockTests(unittest.TestCase):
             self.assertFalse(session.producer.reader.is_alive())
             self.assertFalse(session.directory.exists())
 
+    def test_provider_clock_reset_keeps_audio_monotonic_and_cues_aligned(self):
+        # A reconnect can replace the TS source with an encoder whose clock
+        # starts over. The resampler must trim overlap rather than emit the
+        # first four seconds of padding a second time.
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            clip=root/'clip.ts'
+            subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
+                '-f','lavfi','-i',"color=c=black:s=160x90:r=20:d=4,drawbox=color=white:t=fill:enable='between(t,2,2.3)'",
+                '-f','lavfi','-i',r'aevalsrc=if(between(t\,2\,2.3)\,sin(2*PI*440*t)\,0):s=48000:d=4',
+                '-c:v','libx264','-pix_fmt','yuv420p','-bf','0','-g','40',
+                '-c:a','aac','-f','mpegts',str(clip)],check=True,timeout=15)
+            source=root/'reconnected.ts'
+            source.write_bytes(clip.read_bytes()*2)
+            output=root/'relay'
+            output.mkdir()
+            with patch('media.ffmpeg.media_pipeline.active_encoder',return_value='libx264'):
+                subprocess.run(hls._hls_command(str(source),output),check=True,timeout=20)
+            combined=root/'output.ts'
+            combined.write_bytes(b''.join(p.read_bytes() for p in sorted(output.glob('segment_*.ts'))))
+            packets=json.loads(subprocess.run(['ffprobe','-v','error','-show_packets','-show_entries',
+                'packet=stream_index,pts_time','-of','json',str(combined)],
+                capture_output=True,check=True,timeout=10).stdout)['packets']
+            tracks={}
+            for packet in packets:
+                if 'pts_time' in packet:
+                    tracks.setdefault(packet['stream_index'],[]).append(float(packet['pts_time']))
+            for values in tracks.values():
+                self.assertTrue(all(b>=a-.002 for a,b in zip(values,values[1:])),
+                    'A provider reset must not send Roku an audio or video clock that goes backward.')
+            audio=array.array('h',subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
+                '-i',str(combined),'-map','0:a:0','-ac','1','-ar','48000','-f','s16le','pipe:1'],
+                capture_output=True,check=True,timeout=10).stdout)
+            self.assertAlmostEqual(len(audio)/48000,8,delta=.15,
+                msg='A reconnect must not duplicate several seconds of audio or silence.')
+            video=subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
+                '-i',str(combined),'-map','0:v:0','-pix_fmt','gray','-fps_mode','passthrough',
+                '-f','rawvideo','pipe:1'],capture_output=True,check=True,timeout=10).stdout
+            flashes=[tracks[0][0]+i/20 for i in range(len(video)//(160*90))
+                if sum(video[i*160*90:(i+1)*160*90])/(160*90)>128]
+            tones=[tracks[1][0]+i/48000 for i in range(0,len(audio)-960,960)
+                if sum(abs(s) for s in audio[i:i+960])/960>500]
+            for lower,upper in ((3,4),(7,8)):
+                flash=next(t for t in flashes if lower<t<upper)
+                tone=next(t for t in tones if lower<t<upper)
+                self.assertAlmostEqual(flash,tone,delta=.1)
+
     def test_missing_audio_samples_preserve_timeline_and_live_pacing(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)

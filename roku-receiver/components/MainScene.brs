@@ -263,12 +263,18 @@ sub playUrl(url as String)
     m.startedProgramme = invalid
     m.liveDelay = 4
     m.playing = true
+    delay = CreateObject("roRegex", "[?&]live_delay_seconds=(4|30)(&|$)", "").match(url)
+    if delay.count() > 1 then m.liveDelay = delay[1].toInt()
     m.grid.active = false
     m.currentChannel = invalid
     m.panel.visible = false
     m.playerStatus.visible = true
     m.playerStatus.text = "Loading live TV..."
-    if token.count() > 1 then m.session = {token: token[1], kind: "live"}
+    if token.count() > 1
+        m.session = {token: token[1], kind: "live"}
+        lease = CreateObject("roRegex", "[?&]lease=([A-Za-z0-9_-]{24})(&|$)", "").match(url)
+        if lease.count() > 1 then m.session.lease = lease[1]
+    end if
     startVideo(url)
 end sub
 

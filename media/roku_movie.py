@@ -40,8 +40,7 @@ class MovieSession:
 def command(source, *, live=False):
     args = normalized_live_input_args(source['target'], input_headers=source['input_headers'],
         video_extra=('-force_key_frames', 'expr:gte(t,n_forced*2)'), preserve_av_timing=live)
-    audio_filter = 'aresample=async=1000:first_pts=0' if live else 'aresample=async=1:first_pts=0'
-    return args + ['-af', audio_filter, '-sn', '-dn', '-f', 'mpegts',
+    return args + ['-af', 'aresample=async=1:first_pts=0', '-sn', '-dn', '-f', 'mpegts',
         '-muxdelay', '0', '-muxpreload', '0', 'pipe:1']
 
 
