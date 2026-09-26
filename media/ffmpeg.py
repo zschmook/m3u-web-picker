@@ -9,6 +9,23 @@ from urllib.parse import urlsplit
 import media_pipeline
 
 
+HTTP_READ_TIMEOUT_MICROSECONDS = "10000000"
+
+
+def _http_reconnect_args(target: str) -> list[str]:
+    if not str(target).lower().startswith(("http://", "https://")):
+        return []
+    return [
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "2",
+        # A provider can leave its TCP connection open while sending no media.
+        # Turn that silent hang into an FFmpeg exit so the owning player can
+        # reopen the live source instead of buffering forever.
+        "-rw_timeout", HTTP_READ_TIMEOUT_MICROSECONDS,
+    ]
+
+
 def executable() -> str:
     configured = str(os.environ.get("M3U_FFMPEG", "") or "").strip()
     if configured:
@@ -46,17 +63,10 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
         ]
     else:
         encoder_options = []
-    reconnect = []
-    if str(target).lower().startswith(("http://", "https://")):
-        # Live providers regularly close a connection for a second while their
-        # origin or edge changes. Let FFmpeg absorb the brief interruption;
-        # the HLS relay supervisor advances to another provider if FFmpeg still
-        # exits after these bounded retries.
-        reconnect = [
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "2",
-        ]
+    # Live providers regularly close a connection for a second while their
+    # origin or edge changes. Let FFmpeg absorb the brief interruption. A read
+    # timeout also exposes half-open sources to the owning stream supervisor.
+    reconnect = _http_reconnect_args(target)
     return [
         executable(),
         "-nostdin",
@@ -98,17 +108,10 @@ def normalized_live_input_args(target: str, *, video_extra: tuple[str, ...] = ()
 
 def audio_only_mp3_args(target: str) -> list[str]:
     """Transcode one live input to a browser-friendly audio-only stream."""
-    reconnect = []
-    if str(target).lower().startswith(("http://", "https://")):
-        # Recover transport interruptions here. Clean EOF is handled by the
-        # browser worker supervisor: reconnect_at_eof can loop individual HLS
-        # segments instead of advancing through the live playlist.
-        reconnect = [
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "2",
-            "-rw_timeout", "10000000",
-        ]
+    # Recover transport interruptions here. Clean EOF is handled by the
+    # browser worker supervisor: reconnect_at_eof can loop individual HLS
+    # segments instead of advancing through the live playlist.
+    reconnect = _http_reconnect_args(target)
     live_playlist = []
     if str(target).lower().startswith(("http://", "https://")) and urlsplit(target).path.lower().endswith(".m3u8"):
         # Join the newest available segment, including after worker recovery,
