@@ -351,6 +351,7 @@ function showRokuPlayer() {
 async function startRokuChannel(channel) {
   const host = configuredRokuHost();
   if (!host) throw new Error("Enter the Roku TV IP in Diagnostics first.");
+  clearRestartPlayback();
 
   if (currentCastSession()) {
     await stopRemoteMedia();
@@ -468,9 +469,9 @@ function showLocalPlayer() {
   guideEls.listenPanel.classList.add("d-none");
   guideEls.castScreen.classList.add("d-none");
   guideEls.popoutBtn.classList.remove("d-none");
-  guideEls.nowPlayingLabel.textContent = "Now playing";
-  guideEls.playbackBadge.textContent = "Local";
-  guideEls.playbackBadge.className = "badge rounded-pill text-bg-secondary";
+  guideEls.nowPlayingLabel.textContent = guideState.restart.active ? "Restarted from beginning" : "Now playing";
+  guideEls.playbackBadge.textContent = guideState.restart.active ? "Movie" : "Local";
+  guideEls.playbackBadge.className = "badge rounded-pill " + (guideState.restart.active ? "text-bg-primary" : "text-bg-secondary");
 }
 
 function showCastPlayer() {
@@ -597,6 +598,7 @@ async function stopPlayback() {
 }
 
 function setCurrentChannel(channel) {
+  if (guideState.restart.active && channel?.play_url !== guideState.restart.channel?.play_url) clearRestartPlayback();
   guideState.currentChannel = channel;
   guideEls.playerPanel.classList.remove("d-none");
   guideEls.playerTitle.textContent = channel.name || "Channel";
@@ -871,6 +873,7 @@ function scheduleVideoRecovery(reason, {waitForStall = false} = {}) {
 }
 
 async function castChannel(channel) {
+  clearRestartPlayback();
   const session = currentCastSession();
   if (!session) throw new Error("Choose a Chromecast / Google TV receiver first.");
   if (guideState.cast.loadInFlight) return;

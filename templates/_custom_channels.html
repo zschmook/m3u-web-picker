@@ -1,8 +1,9 @@
 <template id="uiCustomChannelsTemplate">
 <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="custom-channels" aria-labelledby="uiCustomTitle">
-  <div class="ui-card-heading"><div><span id="uiCustomTitle">Custom Channels</span><small>Build your own live TV channels from Plex shows.</small></div><span class="ui-count-badge">Experimental</span></div>
+  <div class="ui-card-heading"><div><span id="uiCustomTitle">Custom Channels</span><small>Build live TV and movie channels from your Plex library.</small></div><span class="ui-count-badge">Experimental</span></div>
   <div class="ui-settings-form">
     <label class="ui-settings-toggle"><input id="ccEnabled" type="checkbox" role="switch"><span><strong>Enable Plex TV show channels</strong><small>Include the TV catalog in manual and scheduled updates. Channel creation is always a separate step.</small></span></label>
+    <label class="ui-settings-toggle"><input id="ccMoviesEnabled" type="checkbox" role="switch"><span><strong>Enable Plex movie channels</strong><small>Commercial-free genre channels, Hallmark, Film Noir, and the five newest releases. Restart a movie in the guide to pause and resume it.</small></span></label>
     <details id="ccStatusPanel" class="ui-settings-details cc-status-panel">
       <summary><span>Status</span><span id="ccStatusSummary" class="small-muted"></span></summary>
       <div class="ui-settings-details-body">
@@ -59,6 +60,13 @@
     </details>
     <details class="ui-settings-details cc-list-panel" open>
       <summary>Your channels</summary><div class="ui-settings-details-body"><div id="ccChannels"></div></div>
+    </details>
+    <details class="ui-settings-details cc-list-panel">
+      <summary><span>Movie channels</span><span id="ccMovieSummary" class="small-muted"></span></summary>
+      <div class="ui-settings-details-body">
+        <p class="small-muted">Movies play in random order without repeats until each channel's pool is exhausted. Movies can appear on every matching genre channel. Each refresh reshuffles the lineup. Just Released uses release dates, not the date you added a file.</p>
+        <div id="ccMovieChannels"></div>
+      </div>
     </details>
     <div class="ui-settings-actions cc-guide-actions"><a class="btn ui-btn-secondary" href="/guide">Open TV Guide</a><span class="small-muted">Included in your existing channel playlists and EPG.</span></div>
   </div>

@@ -24,6 +24,7 @@ SCAN_LOCK = threading.Lock()
 JOB = {'running': False, 'message': ''}
 COMMERCIAL_PROCESSING = set()
 DEFAULTS = dict(enabled=False, minimum_episodes=30, commercials_enabled=False,
+                movies_enabled=False,
                 commercials_folder='', commercial_mode='minutes', commercial_minutes=15,
                 commercial_episodes=1, commercial_count=3, preroll=True)
 CHANNEL_NUMBER_START = 1000
@@ -231,7 +232,7 @@ def browse_folders(value=''):
 def save_settings(data):
     with LOCK:
         cfg = settings()
-        for key in ('enabled','commercials_enabled','preroll'):
+        for key in ('enabled','movies_enabled','commercials_enabled','preroll'):
             if key in data:
                 if not isinstance(data[key],bool): raise ValueError('Invalid switch value')
                 cfg[key] = data[key]
@@ -497,7 +498,7 @@ def refresh_category_channels(shows,now=None):
 
 
 def refresh(discover=False):
-    if not settings()['enabled']:
+    if not settings()['enabled'] and not settings()['movies_enabled']:
         JOB.update(running=False,message='Custom Channels is disabled.')
         return {'status':'disabled','message':JOB['message']}
     with SCAN_LOCK:
@@ -509,7 +510,7 @@ def refresh(discover=False):
             for server in servers:
                 JOB['message']='Scanning '+server['name']+'…'
                 try:
-                    found=scan_server(server)
+                    found=scan_server(server) if settings()['enabled'] else []
                     shows.extend(found)
                     unavailable=server.get('_unavailable_files',0)
                     if unavailable and not found:
@@ -523,11 +524,18 @@ def refresh(discover=False):
             result=dict(shows=shows,servers=statuses,updated_at=time.time(),warnings=warnings)
             category_count=0
             try:
-                with LOCK: category_count=len(refresh_category_channels(shows,result['updated_at']))
+                if settings()['enabled']:
+                    with LOCK: category_count=len(refresh_category_channels(shows,result['updated_at']))
             except Exception as exc:
                 warnings.append('Category channels were not refreshed ('+type(exc).__name__+').')
             with LOCK: save_schedule(root()/'catalog.json',result)
+            import movie_channels
+            movies=movie_channels.refresh(servers,result['updated_at'])
+            warnings.extend(movies.get('warnings',[]))
+            with LOCK: save_schedule(root()/'catalog.json',result)
             JOB['message']=f'{len(shows)} TV series cataloged across {len(servers)} servers. {category_count} category channels randomized.'
+            if settings()['movies_enabled']:
+                JOB['message']+=f" {movies['count']} movie channels refreshed."
             return dict(status='warning' if warnings else 'success',message=JOB['message'],warnings=warnings)
         except Exception as exc:
             JOB['message']='Plex scan failed ('+type(exc).__name__+'); no cached shows reused.'
@@ -543,7 +551,7 @@ def refresh(discover=False):
 
 def start_discovery():
     with LOCK:
-        if not settings()['enabled']: raise ValueError('Enable Custom Channels and save settings first.')
+        if not settings()['enabled'] and not settings()['movies_enabled']: raise ValueError('Enable Plex channels first.')
         if JOB['running']: return
         JOB.update(running=True,message='Discovering Plex…')
         threading.Thread(target=refresh,kwargs={'discover':True},daemon=True,name='plex-custom-discovery').start()
@@ -593,11 +601,12 @@ def summary(show, detailed=False):
 
 
 def payload():
+    import movie_channels
     cfg=settings();catalog=read('catalog.json',{})
     return dict(settings=cfg,commercials_folder_label=folder_label(Path(cfg['commercials_folder'])) if cfg['commercials_folder'] else '',job=dict(JOB),catalog={k:v for k,v in catalog.items() if k!='shows'},
         shows=[summary(s) for s in catalog.get('shows',[])],channels=read('channels.json',[]),
         servers=[dict(id=s['id'],name=s['name'],url=s['url']) for s in read('servers.json',[])],
-        commercial_imports=commercial_imports())
+        commercial_imports=commercial_imports(),movies=movie_channels.payload())
 
 
 def commercial_assets(cfg):
@@ -834,7 +843,7 @@ def install(core):
     if getattr(current,'_custom_channels',False): return
     def run(*,trigger='manual'):
         # Independent catalog refresh still runs when the IPTV provider is offline.
-        result=refresh() if settings()['enabled'] else {'status':'disabled'}
+        result=refresh() if settings()['enabled'] or settings()['movies_enabled'] else {'status':'disabled'}
         output=current(trigger=trigger)
         output['custom_channels']=result
         if result.get('warnings'):

@@ -13,16 +13,17 @@
     const data=await response.json();if(!response.ok)throw Error(data.error||'Request failed');return data;
   }
   function locks(){
-    for(const id of ['ccEnabled','ccMinimum','ccAds'])el(id).disabled=busy||!state;
+    for(const id of ['ccEnabled','ccMoviesEnabled','ccMinimum','ccAds'])el(id).disabled=busy||!state;
     el('ccImportChoose').disabled=busy||importBusy||!state;
     el('ccImportInput').disabled=el('ccImportChoose').disabled;
-    el('ccDiscover').disabled=busy||!state?.settings.enabled||state?.job.running;
+    el('ccDiscover').disabled=busy||(!state?.settings.enabled&&!state?.settings.movies_enabled)||state?.job.running;
     if(el('ccConnect'))el('ccConnect').disabled=busy;
     el('ccAddAll').disabled=busy||!state||!state.settings.enabled||Number(el('ccAddAll').dataset.count||0)===0;
     el('ccRemoveAll').disabled=busy||!state||Number(el('ccRemoveAll').dataset.count||0)===0;
     for(const id of ['ccEditSave','ccDeleteConfirm'])el(id).disabled=busy;
     el('ccAddAllConfirm').disabled=busy||(bulkMode==='remove'?!bulkRemoval?.showIds.length:!bulkSelection?.showIds.length);
     document.querySelectorAll('.cc-channel-action').forEach(button=>button.disabled=busy);
+    document.querySelectorAll('.cc-movie-toggle').forEach(input=>input.disabled=busy||!state?.movies?.enabled);
     document.querySelectorAll('.cc-create').forEach(button=>button.disabled=busy||button.dataset.allowed!=='true');
     for(const id of ['ccAdMode','ccInterval','ccAdCount','ccPreroll'])el(id).disabled=busy||!state||!el('ccAds').checked;
     el('ccIntervalLabel').textContent=el('ccAdMode').value==='minutes'?'Minutes between breaks':'Episodes between breaks';
@@ -30,6 +31,7 @@
   }
   async function action(fn){if(busy)return;busy=true;locks();try{return await fn();}catch(e){if(state)renderSettings();status(e.message,true);}finally{busy=false;locks();}}
   function renderSettings(){const s=state.settings;
+    el('ccMoviesEnabled').checked=Boolean(s.movies_enabled);
     for(const [id,key] of [['ccEnabled','enabled'],['ccAds','commercials_enabled'],['ccPreroll','preroll']])el(id).checked=s[key];
     for(const [id,key] of [['ccMinimum','minimum_episodes'],['ccAdMode','commercial_mode'],['ccAdCount','commercial_count']])el(id).value=s[key];
     el('ccInterval').value=s.commercial_mode==='minutes'?s.commercial_minutes:s.commercial_episodes;
@@ -124,7 +126,23 @@
       row.append(actions);host.append(row);
     }
   }
-  async function load(fields=true){state=await api();if(fields)renderSettings();renderCatalog();renderChannels();renderImports();locks();
+  function renderMovieChannels(){
+    const movie=state.movies||{},rows=movie.channels||[],host=el('ccMovieChannels');host.replaceChildren();
+    el('ccMovieSummary').textContent=`${rows.filter(row=>row.enabled).length} channels · ${Number(movie.catalog?.count||0).toLocaleString()} movies`;
+    if(!rows.length)host.append(text('p','Enable movie channels and refresh to scan your Plex movie libraries.','small-muted'));
+    for(const channel of rows){
+      const row=text('label','','cc-channel'),toggle=document.createElement('input');toggle.type='checkbox';toggle.className='cc-movie-toggle';toggle.checked=channel.enabled;toggle.disabled=busy||!movie.enabled;
+      toggle.setAttribute('aria-label','Enable '+channel.name+' movie channel');
+      toggle.addEventListener('change',()=>action(async()=>{
+        const response=await fetch('/api/movie-channels/'+channel.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:toggle.checked})});
+        const data=await response.json();if(!response.ok)throw Error(data.error||'Could not update movie channel');await load(false);
+      }));
+      const copy=text('span',`${channel.number} · ${channel.name} · ${channel.count.toLocaleString()} movies`);
+      if(channel.movies?.length)copy.append(text('small',channel.movies.map(movie=>`${movie.title} (${movie.release_date})`).join(' · '),'small-muted d-block'));
+      row.append(copy,toggle);host.append(row);
+    }
+  }
+  async function load(fields=true){state=await api();if(fields)renderSettings();renderCatalog();renderChannels();renderMovieChannels();renderImports();locks();
     const observed=state.catalog.updated_at?new Date(state.catalog.updated_at*1000).toLocaleString():'';
     el('ccLastChecked').textContent=observed?`Catalog snapshot from ${observed}. Unavailable servers contribute zero series.`:'No Plex catalog snapshot yet.';
     el('ccServers').replaceChildren(...state.servers.map(s=>{const result=state.catalog.servers?.find(v=>v.id===s.id);let value;if(!result)value=s.name+' (not checked)';else if(result.status==='unavailable')value=s.name+' (scan unavailable, 0 current series)';else value=s.name+` (${result.shows} series${result.unavailable_files?`, ${result.unavailable_files} unavailable files`:''})`;return text('div',value,'cc-server-status');}));
@@ -160,6 +178,10 @@
     );
     el('ccAddAllConfirm').textContent=`Create ${bulkSelection.showIds.length} Channel${bulkSelection.showIds.length===1?'':'s'}`;el('ccAddAllDialog').showModal();locks();
   });
+  el('ccMoviesEnabled').addEventListener('change',()=>action(async()=>{
+    const enabled=el('ccMoviesEnabled').checked;await persist({movies_enabled:enabled});
+    if(enabled)await api('/discover','POST',{});await load(false);
+  }));
   el('ccRemoveAll').addEventListener('click',()=>{
     if(!bulkRemoval?.showIds.length)return;
     bulkMode='remove';el('ccAddAllTitle').textContent='Remove channels for all shown series?';el('ccAddAllDetails').replaceChildren(

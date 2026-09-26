@@ -6,6 +6,7 @@ import public_epg_logos
 import sports
 from media import director, mpegts
 from . import custom_channels
+from . import movie_channels
 from xml.etree import ElementTree as ET
 
 
@@ -39,6 +40,7 @@ def register_output_routes(app):
             )
             lines.extend(raw)
         lines.extend(custom_channels.playlist_lines(base_url))
+        lines.extend(movie_channels.playlist_lines(base_url))
         for row in sports.generated_rows(core.DB_PATH):
             candidates = core.enabled_sports_candidates(row, enabled_urls=enabled_urls)
             available, target = core.availability.lookup(candidates)
@@ -136,9 +138,11 @@ def register_output_routes(app):
     def combined_epg():
         core.ensure_epg_exports_current()
         items=custom_channels.guide_items()
-        if items:
+        movie_items=movie_channels.guide_items()
+        if items or movie_items:
             root=ET.parse(core.COMBINED_EPG_PATH).getroot() if core.COMBINED_EPG_PATH.exists() else ET.Element('tv')
             custom_channels.merge_epg(root,items)
+            movie_channels.merge_epg(root,movie_items)
             response=Response(ET.tostring(root,encoding='utf-8',xml_declaration=True),mimetype='application/xml')
         else:
             response = send_file(core.COMBINED_EPG_PATH,mimetype="application/xml",as_attachment=False,download_name="epg.xml")

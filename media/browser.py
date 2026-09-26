@@ -102,6 +102,9 @@ def response_for(
             detail = "\n".join(stderr_tail).strip()
         if target:
             detail = detail.replace(target, "[source]")
+        for value in (input_headers or {}).values():
+            if value:
+                detail = detail.replace(str(value), "[redacted]")
         return detail or fallback
 
     def drain_errors(worker) -> None:

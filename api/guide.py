@@ -18,6 +18,7 @@ from . import commercials
 from . import episode_test
 from . import breaking_bad
 from . import custom_channels
+from . import movie_channels
 
 
 def custom_channel_insert_position(items):
@@ -76,6 +77,9 @@ def _resolve_guide_play_target(play_url: str) -> str:
         return episode_test.local_stream_url()
     if value == breaking_bad.PLAY_URL:
         return breaking_bad.local_stream_url()
+    if value.startswith(movie_channels.PLAY_PREFIX):
+        try: return movie_channels.local_url(value.removeprefix(movie_channels.PLAY_PREFIX))
+        except ValueError: return ''
     custom = re.fullmatch(r'/guide/play/custom/([a-f0-9]{16})',value)
     if custom:
         try: return custom_channels.local_url(custom.group(1))
@@ -202,7 +206,7 @@ def register_guide_routes(app):
             epg_status['current_channels'] = epg_status.get('current_channels',0)+bool(local_channel['now'])
             epg_status['programme_count'] = epg_status.get('programme_count',0)+len(local_channel['upcoming'])+bool(local_channel['now'])
         commercial = commercials.guide_item()
-        custom_items=custom_channels.guide_items()
+        custom_items=custom_channels.guide_items()+movie_channels.guide_items()
         custom_position=custom_channel_insert_position(items)
         items[custom_position:custom_position]=custom_items
         for custom in custom_items:

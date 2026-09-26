@@ -96,6 +96,9 @@ def extend_schedule(state, horizon):
         state['programmes'].append(dict(title=episode['title'], filename=episode['filename'],
                                        season=episode['season'], episode=episode['episode'],
                                        start=begin, stop=state['cursor']))
+        for key in ('id', 'server_id', 'part', 'release_date', 'year', 'description', 'genres'):
+            if key in episode:
+                state['programmes'][-1][key] = episode[key]
 
 
 def trim_schedule(state, before):
