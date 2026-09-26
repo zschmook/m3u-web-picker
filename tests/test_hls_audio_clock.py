@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -11,7 +12,7 @@ from media import hls
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'Requires FFmpeg')
 class HlsAudioClockTests(unittest.TestCase):
-    def test_missing_audio_samples_do_not_shorten_video_timeline(self):
+    def test_missing_audio_samples_preserve_timeline_and_live_pacing(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             source = directory / 'audio-gap.mkv'
@@ -25,7 +26,10 @@ class HlsAudioClockTests(unittest.TestCase):
             output.mkdir()
             with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
                 command = hls._hls_command(str(source), output)
+            started = time.monotonic()
             subprocess.run(command, check=True, timeout=15)
+            self.assertGreaterEqual(time.monotonic() - started, 5,
+                msg='A buffered source must not publish six seconds of live media in a burst.')
             combined = directory / 'relay.ts'
             combined.write_bytes(b''.join(path.read_bytes() for path in sorted(output.glob('segment_*.ts'))))
             decoded = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',

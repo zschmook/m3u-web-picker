@@ -169,6 +169,11 @@ def _hls_command(target: str, directory: Path) -> list[str]:
         target,
         video_extra=("-force_key_frames", "expr:gte(t,n_forced*2)"),
     )
+    # Providers can send a buffered window immediately after reconnecting.
+    # Consume it at playback speed so the rolling playlist does not run ahead
+    # of the receiver and delete segments it has not downloaded yet.
+    input_index = base_command.index("-i")
+    base_command[input_index:input_index] = ["-re"]
     return base_command + [
         # Reconnects can drop AAC packets while the video clock keeps moving.
         # Emit silence for missing samples so Roku does not close that gap and
