@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="GuideGrid" extends="Group">
+  <interface>
+    <field id="content" type="node" onChange="onContentChanged" />
+    <field id="contentStartTime" type="integer" />
+    <field id="duration" type="integer" value="10800" />
+    <field id="numRows" type="integer" value="9" />
+    <field id="channelFocused" type="integer" value="0" />
+    <field id="programFocused" type="integer" value="0" />
+    <field id="programSelected" type="integer" alwaysNotify="true" />
+    <field id="channelInfoSelected" type="integer" alwaysNotify="true" />
+    <field id="jumpToChannel" type="integer" alwaysNotify="true" onChange="onJumpChannel" />
+    <field id="jumpToTime" type="string" alwaysNotify="true" onChange="onJumpTime" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/GuideGrid.brs" />
+  <children>
+    <Group id="canvas" clippingRect="[0,0,1760,838]" />
+    <Timer id="clock" duration="30" repeat="true" />
+  </children>
+</component>

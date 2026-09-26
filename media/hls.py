@@ -170,6 +170,11 @@ def _hls_command(target: str, directory: Path) -> list[str]:
         video_extra=("-force_key_frames", "expr:gte(t,n_forced*2)"),
     )
     return base_command + [
+        # Reconnects can drop AAC packets while the video clock keeps moving.
+        # Emit silence for missing samples so Roku does not close that gap and
+        # let speech run ahead of the corresponding video.
+        "-af",
+        "asetpts=PTS-STARTPTS,aresample=async=1000:first_pts=0",
         "-f",
         "hls",
         "-hls_time",

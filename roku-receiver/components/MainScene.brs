@@ -1,10 +1,10 @@
 sub init()
     m.top.backgroundColor = "0x101827ff"
+    m.top.backgroundURI = ""
     m.video = m.top.findNode("video")
     m.panel = m.top.findNode("guidePanel")
     m.grid = m.top.findNode("grid")
     m.status = m.top.findNode("status")
-    m.details = m.top.findNode("details")
     m.playerStatus = m.top.findNode("playerStatus")
     m.tasks = []
     m.channels = []
@@ -25,10 +25,6 @@ sub init()
     m.video.observeField("state", "onVideoState")
     m.grid.observeField("programSelected", "onProgramSelected")
     m.grid.observeField("channelInfoSelected", "onChannelSelected")
-    m.grid.observeField("programFocusedDetails", "onProgramFocused")
-    m.grid.channelInfoFocusable = true
-    if m.grid.hasField("numRows") then m.grid.numRows = 7
-    if m.grid.hasField("itemSize") then m.grid.itemSize = [1760, 82]
     m.top.findNode("refreshTimer").observeField("fire", "refreshGuide")
     m.top.findNode("heartbeatTimer").observeField("fire", "keepPlaybackAlive")
     m.top.findNode("refreshTimer").control = "start"
@@ -57,7 +53,11 @@ end sub
 sub refreshGuide()
     if m.server = "" or m.guideLoading then return
     m.guideLoading = true
-    if not m.playing then m.status.text = "Loading guide..."
+    if not m.playing and m.channels.count() = 0
+        m.status.visible = true
+        m.status.text = "Loading guide..."
+        m.grid.visible = false
+    end if
     requestApi("/api/roku/guide", "GET", {}, "guide", m.guideGeneration)
 end sub
 
@@ -83,6 +83,7 @@ sub onApiResult(event as Object)
             renderGuide(result.data.server_time)
         else
             m.status.text = result.error + " Press * to change server."
+            m.status.visible = true
         end if
     else if result.purpose = "play"
         if result.requestId <> m.generation
@@ -104,11 +105,15 @@ sub renderGuide(serverTime as Integer)
     for each channel in m.channels
         row = root.createChild("ContentNode")
         row.title = channel.number + "  " + channel.name
+        logo = channel.logo
+        if Left(logo, 1) = "/" then logo = m.server + logo
+        row.addFields({number: channel.number, name: channel.name, groupName: channel.group, logoUrl: logo})
         for each programme in channel.programmes
             cell = row.createChild("ContentNode")
             cell.title = programme.title
             cell.playStart = programme.start
             cell.playDuration = programme.stop - programme.start
+            cell.addFields({subtitle: programme.subtitle})
         end for
     end for
     focused = m.grid.channelFocused
@@ -118,7 +123,8 @@ sub renderGuide(serverTime as Integer)
     now = CreateObject("roDateTime")
     now.fromSeconds(serverTime)
     m.grid.jumpToTime = now.toISOString()
-    m.status.text = m.channels.count().toStr() + " channels  |  " + m.server
+    m.status.visible = false
+    m.grid.visible = true
     if not m.playing and m.top.dialog = invalid then m.grid.setFocus(true)
 end sub
 
@@ -135,13 +141,6 @@ function selectedProgramme() as Dynamic
     if index < 0 or index >= channel.programmes.count() then return invalid
     return channel.programmes[index]
 end function
-
-sub onProgramFocused()
-    channel = selectedChannel()
-    programme = selectedProgramme()
-    if channel = invalid or programme = invalid then return
-    m.details.text = channel.name + " | " + programme.title + Chr(10) + programme.description
-end sub
 
 sub onChannelSelected(event as Object)
     index = event.getData()
