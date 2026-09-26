@@ -1,5 +1,9 @@
 const GUIDE_LISTEN_SESSION_KEY = "m3u-guide-active-listen";
 const GUIDE_LISTEN_SESSION_MAX_AGE_MS = 2 * 60 * 1000;
+const GUIDE_VIDEO_RECONNECT_ATTEMPTS = 3;
+const GUIDE_VIDEO_RECONNECT_DELAY_MS = 1000;
+const GUIDE_VIDEO_STALL_TIMEOUT_MS = 12500;
+const GUIDE_VIDEO_STABLE_RESET_MS = 30000;
 const guideListenClientId = globalThis.crypto?.randomUUID?.()
   || `guide-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -26,6 +30,13 @@ const guideState = {
     diagnosticTimer: null,
     heartbeatTimer: null,
     restoreAttempted: false,
+  },
+  video: {
+    active: false,
+    attempts: 0,
+    recoveryTimer: null,
+    stallTimer: null,
+    stableTimer: null,
   },
 };
 
@@ -471,10 +482,21 @@ function showCastPlayer() {
 }
 
 function stopLocalStream({hidePanel = false} = {}) {
+  guideState.video.active = false;
+  clearVideoRecoveryTimers();
   guideEls.player.pause();
   guideEls.player.removeAttribute("src");
   guideEls.player.load();
   if (hidePanel) guideEls.playerPanel.classList.add("d-none");
+}
+
+function clearVideoRecoveryTimers() {
+  for (const key of ["recoveryTimer", "stallTimer", "stableTimer"]) {
+    if (guideState.video[key] !== null) {
+      window.clearTimeout(guideState.video[key]);
+      guideState.video[key] = null;
+    }
+  }
 }
 
 function storedListenSession() {
@@ -710,6 +732,8 @@ function playLocalChannel(channel) {
   stopLocalStream({hidePanel: false});
   setCurrentChannel(channel);
   showLocalPlayer();
+  guideState.video.active = true;
+  guideState.video.attempts = 0;
   guideEls.playerMessage.textContent = "Starting stream…";
   guideEls.player.src = localChannelUrl(channel);
   const attempt = guideEls.player.play();
@@ -718,6 +742,46 @@ function playLocalChannel(channel) {
       guideEls.playerMessage.textContent = "The browser did not start this stream automatically. Press Play again; if it still fails, check the container logs for ffmpeg errors.";
     });
   }
+}
+
+function scheduleVideoRecovery(reason, {waitForStall = false} = {}) {
+  if (!guideState.video.active || guideState.mode !== "local" || !guideState.currentChannel) return;
+
+  if (waitForStall) {
+    if (guideState.video.recoveryTimer !== null || guideState.video.stallTimer !== null) return;
+    guideState.video.stallTimer = window.setTimeout(() => {
+      guideState.video.stallTimer = null;
+      scheduleVideoRecovery(reason);
+    }, GUIDE_VIDEO_STALL_TIMEOUT_MS);
+    return;
+  }
+
+  if (guideState.video.stallTimer !== null) {
+    window.clearTimeout(guideState.video.stallTimer);
+    guideState.video.stallTimer = null;
+  }
+  if (guideState.video.recoveryTimer !== null) return;
+
+  if (guideState.video.attempts >= GUIDE_VIDEO_RECONNECT_ATTEMPTS) {
+    guideState.video.active = false;
+    guideEls.playerMessage.textContent = "The live stream stopped after three reconnect attempts. Press Play to try again.";
+    return;
+  }
+
+  const delay = GUIDE_VIDEO_RECONNECT_DELAY_MS * (2 ** guideState.video.attempts);
+  guideEls.playerMessage.textContent = `${reason} Reconnecting…`;
+  guideState.video.recoveryTimer = window.setTimeout(() => {
+    guideState.video.recoveryTimer = null;
+    if (!guideState.video.active || guideState.mode !== "local" || !guideState.currentChannel) return;
+    guideState.video.attempts += 1;
+    guideEls.player.pause();
+    guideEls.player.src = localChannelUrl(guideState.currentChannel);
+    guideEls.player.load();
+    const attempt = guideEls.player.play();
+    if (attempt?.catch) {
+      attempt.catch(() => scheduleVideoRecovery("The browser could not restart the stream."));
+    }
+  }, delay);
 }
 
 async function castChannel(channel) {
@@ -934,15 +998,37 @@ window.__onGCastApiAvailable = function(isAvailable) {
 
 guideEls.player.addEventListener("playing", () => {
   showLocalPlayer();
+  for (const key of ["stallTimer", "recoveryTimer"]) {
+    if (guideState.video[key] !== null) {
+      window.clearTimeout(guideState.video[key]);
+      guideState.video[key] = null;
+    }
+  }
+  if (guideState.video.stableTimer !== null) window.clearTimeout(guideState.video.stableTimer);
+  if (guideState.video.active) {
+    guideState.video.stableTimer = window.setTimeout(() => {
+      guideState.video.stableTimer = null;
+      guideState.video.attempts = 0;
+    }, GUIDE_VIDEO_STABLE_RESET_MS);
+  }
   guideEls.playerMessage.textContent = "";
 });
 
 guideEls.player.addEventListener("waiting", () => {
+  if (guideState.video.stableTimer !== null) {
+    window.clearTimeout(guideState.video.stableTimer);
+    guideState.video.stableTimer = null;
+  }
   guideEls.playerMessage.textContent = "Buffering…";
+  scheduleVideoRecovery("The live stream stalled.", {waitForStall: true});
 });
 
 guideEls.player.addEventListener("error", () => {
-  guideEls.playerMessage.textContent = "Playback failed. ffmpeg may have rejected the provider stream, or the browser may have rejected the converted MP4.";
+  scheduleVideoRecovery("The live stream ended unexpectedly.");
+});
+
+guideEls.player.addEventListener("ended", () => {
+  scheduleVideoRecovery("The live stream ended unexpectedly.");
 });
 
 guideEls.audioPlayer.addEventListener("playing", () => {

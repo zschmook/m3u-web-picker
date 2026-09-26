@@ -24,6 +24,8 @@ def response_for(
     """Transcode one curated IPTV stream for browser playback."""
     session_token = ""
     output_name = "browser-audio" if audio_only else "browser"
+    media_label = "audio" if audio_only else "video"
+    remote_source = str(target).lower().startswith(("http://", "https://"))
     try:
         session_token = media_pipeline.acquire_session(output_name)
         media_pipeline.clear_output_error(output_name)
@@ -52,8 +54,9 @@ def response_for(
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if audio_only else subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             bufsize=0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except OSError as exc:
         media_pipeline.release_session(session_token)
@@ -73,14 +76,14 @@ def response_for(
     stream_state = {"bytes_sent": 0}
     stderr_tail: deque[str] = deque(maxlen=80)
 
-    def audio_error_detail(fallback: str) -> str:
+    def error_detail(fallback: str) -> str:
         with stream_state_lock:
             detail = "\n".join(stderr_tail).strip()
         if target:
             detail = detail.replace(target, "[source]")
         return detail or fallback
 
-    def drain_audio_errors(worker) -> None:
+    def drain_errors(worker) -> None:
         if worker.stderr is None:
             return
         try:
@@ -95,15 +98,15 @@ def response_for(
         except (OSError, ValueError):
             pass
 
-    if audio_only and process.stderr is not None:
+    if process.stderr is not None:
         threading.Thread(
-            target=drain_audio_errors,
+            target=drain_errors,
             args=(process,),
-            name="browser-audio-errors",
+            name=f"browser-{media_label}-errors",
             daemon=True,
         ).start()
 
-        def watch_audio_startup() -> None:
+        def watch_startup() -> None:
             if watcher_stop.wait(12.0):
                 return
             with stream_state_lock:
@@ -111,12 +114,12 @@ def response_for(
             if empty:
                 media_pipeline.record_output_error(
                     output_name,
-                    audio_error_detail("No audio data was produced within 12 seconds."),
+                    error_detail(f"No {media_label} data was produced within 12 seconds."),
                 )
 
         threading.Thread(
-            target=watch_audio_startup,
-            name="browser-audio-startup",
+            target=watch_startup,
+            name=f"browser-{media_label}-startup",
             daemon=True,
         ).start()
 
@@ -144,7 +147,7 @@ def response_for(
                     process.stdout.close()
                 except Exception:
                     pass
-            if audio_only and process.stderr is not None:
+            if process.stderr is not None:
                 try:
                     process.stderr.close()
                 except Exception:
@@ -175,28 +178,29 @@ def response_for(
                 return False
             if process.stderr is not None:
                 threading.Thread(
-                    target=drain_audio_errors, args=(process,),
+                    target=drain_errors, args=(process,),
                     name="browser-audio-errors", daemon=True,
                 ).start()
             return True
 
-    if audio_only and callable(client_disconnected):
-        def watch_audio_disconnect() -> None:
-            # stdout can block while FFmpeg reconnects. Closing Listen must
-            # still release its worker/session even when no new audio arrives.
+    if callable(client_disconnected):
+        def watch_disconnect() -> None:
+            # stdout can block while FFmpeg waits on a half-open provider.
+            # Closing either player must still release its worker/session.
             while not watcher_stop.wait(0.5):
                 if client_disconnected():
                     cleanup_process()
                     return
 
         threading.Thread(
-            target=watch_audio_disconnect,
-            name="browser-audio-disconnect",
+            target=watch_disconnect,
+            name=f"browser-{media_label}-disconnect",
             daemon=True,
         ).start()
 
     def generate():
         source_ended = False
+        client_gone = False
         empty_retries = 0
         attempt_had_audio = False
         try:
@@ -204,13 +208,14 @@ def response_for(
                 return
             while True:
                 if callable(client_disconnected) and client_disconnected():
+                    client_gone = True
                     break
                 chunk = process.stdout.read(64 * 1024)
                 if not chunk:
                     source_ended = not watcher_stop.is_set() and not (
                         callable(client_disconnected) and client_disconnected()
                     )
-                    if audio_only and source_ended and str(target).lower().startswith(("http://", "https://")):
+                    if audio_only and source_ended and remote_source:
                         # Protocol reconnect flags cannot recover every demuxer
                         # EOF (for example a provider's completed HLS window).
                         # Keep the listener's HTTP response open while reopening
@@ -232,24 +237,23 @@ def response_for(
                     break
                 if audio_only:
                     attempt_had_audio = True
-                    with stream_state_lock:
-                        first_chunk = stream_state["bytes_sent"] == 0
-                        stream_state["bytes_sent"] += len(chunk)
-                    if first_chunk:
-                        media_pipeline.clear_output_error(output_name)
+                with stream_state_lock:
+                    first_chunk = stream_state["bytes_sent"] == 0
+                    stream_state["bytes_sent"] += len(chunk)
+                if first_chunk:
+                    media_pipeline.clear_output_error(output_name)
                 yield chunk
         finally:
-            if audio_only:
-                with stream_state_lock:
-                    empty = stream_state["bytes_sent"] == 0
-                if source_ended or (empty and not watcher_stop.is_set()):
-                    media_pipeline.record_output_error(
-                        output_name,
-                        audio_error_detail(
-                            "The channel ended without producing audio data."
-                            if empty else "The live audio source ended after playback started."
-                        ),
-                    )
+            with stream_state_lock:
+                empty = stream_state["bytes_sent"] == 0
+            if not client_gone and ((remote_source and source_ended) or (empty and not watcher_stop.is_set())):
+                media_pipeline.record_output_error(
+                    output_name,
+                    error_detail(
+                        f"The channel ended without producing {media_label} data."
+                        if empty else f"The live {media_label} source ended after playback started."
+                    ),
+                )
             cleanup_process()
 
     response = Response(

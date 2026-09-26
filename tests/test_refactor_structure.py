@@ -46,8 +46,9 @@ class RefactorStructureTests(unittest.TestCase):
         powershell_setup = (ROOT / "scripts" / "docker-windows.ps1").read_text(encoding="utf-8")
         self.assertIn('M3U_DVR_DIR=C:/DVR', shell_setup)
         self.assertIn('mkdir -p /c/DVR', shell_setup)
-        self.assertIn('$dvrPath = "C:/DVR"', powershell_setup)
-        self.assertIn('New-Item -ItemType Directory -Path "C:\\DVR"', powershell_setup)
+        self.assertIn('[Environment+SpecialFolder]::MyVideos', powershell_setup)
+        self.assertIn('"M3U-Web-Picker-DVR"', powershell_setup)
+        self.assertIn('New-Item -ItemType Directory -LiteralPath $dvrPath', powershell_setup)
 
     def test_cross_platform_installers_describe_gpu_behavior(self):
         docker_setup = (ROOT / "scripts" / "docker-setup.sh").read_text(encoding="utf-8")
@@ -126,8 +127,18 @@ class RefactorStructureTests(unittest.TestCase):
         self.assertEqual(args[args.index("-bf") + 1], "0")
         self.assertEqual(args[args.index("-reconnect") + 1], "1")
         self.assertEqual(args[args.index("-reconnect_streamed") + 1], "1")
+        self.assertEqual(args[args.index("-rw_timeout") + 1], "10000000")
         self.assertLess(args.index("-reconnect"), args.index("-i"))
+        self.assertLess(args.index("-rw_timeout"), args.index("-i"))
         self.assertIn("http://provider.test/live.ts", args)
+
+    def test_guide_reopens_stalled_video_with_bounded_retries(self):
+        guide = (ROOT / "static" / "js" / "guide.js").read_text(encoding="utf-8")
+        self.assertIn("GUIDE_VIDEO_RECONNECT_ATTEMPTS = 3", guide)
+        self.assertIn("function scheduleVideoRecovery", guide)
+        self.assertIn('guideEls.player.addEventListener("ended"', guide)
+        self.assertIn('scheduleVideoRecovery("The live stream stalled.", {waitForStall: true})', guide)
+        self.assertIn("guideEls.player.src = localChannelUrl(guideState.currentChannel)", guide)
 
     def test_audio_only_stream_drops_video_and_emits_mp3(self):
         with patch("media.ffmpeg.shutil.which", return_value="/usr/bin/ffmpeg"):

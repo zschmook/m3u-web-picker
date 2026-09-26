@@ -121,12 +121,14 @@ Write-Host "Advertising M3U Web Picker at http://${lanHost}:9999"
 
 $dvrPath = Get-DotEnvValue -Path $envPath -Name "M3U_DVR_DIR"
 if (-not $envPreexisting -or [string]::IsNullOrWhiteSpace($dvrPath)) {
-    $dvrPath = "C:/DVR"
+    $videosPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyVideos)
+    if ([string]::IsNullOrWhiteSpace($videosPath)) {
+        $videosPath = Join-Path $env:USERPROFILE "Videos"
+    }
+    $dvrPath = (Join-Path $videosPath "M3U-Web-Picker-DVR").Replace("\", "/")
     Set-DotEnvValue -Path $envPath -Name "M3U_DVR_DIR" -Value $dvrPath
-}
-if ($dvrPath -eq "C:/DVR") {
-    New-Item -ItemType Directory -Path "C:\DVR" -Force | Out-Null
-    Write-Host "Using C:/DVR for persistent DVR recordings."
+    New-Item -ItemType Directory -LiteralPath $dvrPath -Force | Out-Null
+    Write-Host "Using $dvrPath for persistent DVR recordings."
 }
 
 if ($ConfigureOnly) {

@@ -2,11 +2,21 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide and DVR, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v31**. Docker is the supported runtime while the packaged installation workflows are being revised.
+The current main line is **v31**. Docker is the supported runtime.
 
-## Docker quick start
+## Packaged installers
 
-Install Docker Desktop first. On Windows, also install [Git for Windows](https://git-scm.com/download/win), then run this command in Git Bash. On macOS, run it in Terminal after installing Git.
+Install and start Docker Desktop (Windows/macOS) or Docker Engine with Compose v2 (Linux), then use the installer for the host:
+
+- [Windows EXE](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe)
+- [macOS DMG](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — unsigned
+- [Linux archive](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz)
+
+The three packages use one installer implementation. They download the application without Git, install production on port `9999`, preserve saved setup during `UPGRADE (UP)`, and require a separate `CLEAN` confirmation before deleting Docker application data. DVR recordings remain in their separately mounted host folder.
+
+## Docker quick start from source
+
+The existing source-based setup remains available. On Windows, install Git for Windows and run this in Git Bash. On macOS or Linux, run it in Terminal after installing Git:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
@@ -20,11 +30,11 @@ Open `http://localhost:9999`.
 
 A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
 
-The standalone setup flow is currently available as an isolated test stack on port `9998`. It walks through provider validation, channel selection, Sports Automation, optional API schedules, DVR, and media-server choices, then performs the first Master Update before opening the configured application in the same isolated container. It does not modify or restart the normal port `9999` installation; production installer handoff and host-folder creation are still future work.
+The standalone setup flow is also available as an isolated test stack on port `9998`. It does not modify or restart the normal port `9999` installation.
 
 ## Running the application
 
-The quick-start script above is the recommended installation path. It creates or updates the checkout, prepares `.env`, detects the LAN address used by Roku/Cast/HDHomeRun, selects the NVIDIA Compose override when available, and starts the app.
+The packaged installer is the recommended path. The source script remains useful for development checkouts and manual installations.
 
 To install manually from a fresh Windows PowerShell session after Docker Desktop is installed and running:
 
@@ -37,7 +47,7 @@ notepad .env
 docker compose up -d --build
 ```
 
-Before starting, set `M3U_LAN_HOST` in `.env` to the Windows computer's private IPv4 address if Roku, Cast, or HDHomeRun clients will be used. A new Windows installation can also set `M3U_DVR_DIR=C:/DVR` before the first start. Create that folder first if the setup script was not used.
+Before starting, set `M3U_LAN_HOST` in `.env` to the Windows computer's private IPv4 address if Roku, Cast, or HDHomeRun clients will be used. A new Windows installation can also set `M3U_DVR_DIR` to a dedicated recording folder before the first start. The Windows setup script defaults to `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` and creates it automatically.
 
 For an NVIDIA-equipped Windows or Linux host with Docker GPU support, start with both Compose files:
 
@@ -252,11 +262,11 @@ The normal Compose project is `m3u-picker` and stores application state in the `
 
 Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
 
-In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `C:/DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default.
+In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default.
 
 **Settings → DVR** controls whether completed recordings are processed immediately, during scheduled or manual application updates, or only through the **Process Recordings Now** action in **Upcoming & Status**. Immediate processing is serialized so only one conversion runs at a time. Comskip commercial detection runs before conversion when enabled. Implausible cut lists are rejected, and a detection or cutting failure produces an uncut MKV rather than discarding the recording. A failed conversion preserves the original transport stream.
 
-The optional media-server library folder (currently labeled **Plex folder** in Settings) moves successful conversions into show and season folders with episode names such as `The Wall.S06E10.mkv`. The files are ordinary MKVs and are not tied to a particular media server. For the current Docker setup, the destination must be inside the mounted DVR folder—for example, `C:/DVR/PLEX`—because Docker cannot write to an arbitrary host path that was not mounted when the container started.
+The optional media-server library folder (currently labeled **Plex folder** in Settings) moves successful conversions into show and season folders with episode names such as `The Wall.S06E10.mkv`. The files are ordinary MKVs and are not tied to a particular media server. For the current Docker setup, the destination must be inside the mounted DVR folder—for example, `%USERPROFILE%/Videos/M3U-Web-Picker-DVR/PLEX`—because Docker cannot write to an arbitrary host path that was not mounted when the container started.
 
 DVR conversion automatically prefers NVIDIA NVENC when the GPU Compose override is active, targets 3 Mbps with 4.5 Mbps peak headroom for 1080p recordings, and safely retries with CPU `libx265` if hardware encoding is unavailable. Comskip, temporary conversion files, final recordings, and media-server library files all remain on host-mounted storage; recording data is never written into the container layer. Database rows retain the relative path to each completed file so Library playback can resolve it without accepting arbitrary filesystem paths from the browser.
 

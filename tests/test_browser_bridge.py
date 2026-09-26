@@ -28,6 +28,25 @@ class _Process:
 
 
 class BrowserBridgeTests(unittest.TestCase):
+    def test_video_disconnect_releases_worker_while_source_read_is_blocked(self):
+        app = Flask(__name__)
+        process = _Process()
+        disconnected = threading.Event()
+        released = threading.Event()
+        with app.test_request_context("/guide/play", environ_overrides={
+            "waitress.client_disconnected": disconnected.is_set,
+        }), patch.object(browser.media_pipeline, "acquire_session", return_value="token"), patch.object(
+            browser.media_pipeline, "release_session", side_effect=lambda _: released.set()
+        ) as release, patch.object(browser.subprocess, "Popen", return_value=process), patch.object(
+            browser, "normalized_live_input_args", return_value=["ffmpeg", "pipe:1"]
+        ), patch.object(browser, "terminate", side_effect=lambda _: process.stopped.set()) as terminate:
+            response = browser.response_for("http://source.test/live")
+            disconnected.set()
+            self.assertTrue(released.wait(2), "Disconnected viewer kept its video session")
+            response.close()
+        terminate.assert_called_once_with(process)
+        release.assert_called_once_with("token")
+
     def test_audio_disconnect_releases_worker_while_source_read_is_blocked(self):
         app = Flask(__name__)
         process = _Process()
@@ -63,6 +82,22 @@ class BrowserBridgeTests(unittest.TestCase):
             self.assertEqual(b"".join(response.response), b"audio")
             response.close()
         record.assert_called_once_with("browser-audio", "The live audio source ended after playback started.")
+
+    def test_source_ending_after_video_started_is_reported(self):
+        app = Flask(__name__)
+        process = _Process()
+        process.stdout = io.BytesIO(b"video")
+        with app.test_request_context("/guide/play"), patch.object(
+            browser.media_pipeline, "acquire_session", return_value="token"
+        ), patch.object(browser.media_pipeline, "release_session"), patch.object(
+            browser.media_pipeline, "record_output_error"
+        ) as record, patch.object(browser.subprocess, "Popen", return_value=process), patch.object(
+            browser, "normalized_live_input_args", return_value=["ffmpeg", "pipe:1"]
+        ), patch.object(browser, "terminate"):
+            response = browser.response_for("http://source.test/live")
+            self.assertEqual(b"".join(response.response), b"video")
+            response.close()
+        record.assert_called_once_with("browser", "The live video source ended after playback started.")
 
     def test_audio_reopens_source_in_same_response_and_releases_all_workers(self):
         app = Flask(__name__)

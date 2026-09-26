@@ -202,6 +202,7 @@ def _spawn(session: HlsSession, target: str) -> subprocess.Popen:
             stdout=subprocess.DEVNULL,
             stderr=stderr_handle,
             bufsize=0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except OSError:
         stderr_handle.close()
