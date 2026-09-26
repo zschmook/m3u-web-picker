@@ -19,10 +19,13 @@ sub runRequest()
     end if
     result = {ok: false, error: "Server did not respond. Check its address and try again.", purpose: m.top.purpose, requestId: m.top.requestId}
     if sent
-        event = wait(45000, port)
+        timeout = 45000
+        if m.top.purpose = "play" then timeout = 65000
+        event = wait(timeout, port)
         if type(event) = "roUrlEvent"
             code = event.getResponseCode()
-            data = ParseJson(event.getString())
+            data = invalid
+            if event.getString() <> "" then data = ParseJson(event.getString())
             if data <> invalid
                 result.data = data
                 if code >= 200 and code < 300

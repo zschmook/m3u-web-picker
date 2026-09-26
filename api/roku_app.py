@@ -18,6 +18,21 @@ from .http import no_cache
 REPO = Path(__file__).resolve().parents[1]
 LIVE_LEASES = {}
 LEASE_LOCK = threading.Lock()
+SPORTS_DELAY_SECONDS = 4
+ENTERTAINMENT_DELAY_SECONDS = 30
+
+
+def is_sports_channel(channel):
+    play_url = str(channel.get('play_url') or '')
+    if play_url.startswith('/guide/play/sports/'):
+        return True
+    # A football documentary or sports movie remains an entertainment stream.
+    if play_url.startswith(('/guide/play/custom/', '/guide/play/movies/')):
+        return False
+    current = channel.get('now') or {}
+    labels = [channel.get('name', ''), channel.get('group', ''), *(current.get('categories') or [])]
+    return bool(re.search(r'\b(sports?|espn\w*|fs[12]|fox sports|nbcsn|mlb|nfl|nba|nhl|tennis|golf|sny|nesn|btn)\b',
+        ' '.join(str(label) for label in labels), re.IGNORECASE))
 
 
 def lease_live(token):
@@ -96,7 +111,8 @@ def guide_payload(channels, now=None, hours=8):
         if logo.split('?', 1)[0].lower().endswith('.svg'):
             logo = '/static/icons/guide-192.png'
         rows.append(dict(number=str(channel.get('number', '')), name=channel.get('name', ''),
-            group=channel.get('group', ''), logo=logo, play_url=channel.get('play_url', ''), programmes=programmes))
+            group=channel.get('group', ''), logo=logo, play_url=channel.get('play_url', ''),
+            is_sports=is_sports_channel(channel), programmes=programmes))
     return dict(server_time=int(now), window_hours=hours, channels=rows)
 
 
@@ -142,7 +158,7 @@ def register_roku_app_routes(app):
                 return jsonify(error='Movie restart link unavailable. Refresh the guide.'), 400
             try:
                 source = movie_restart.resolve(ticket.group(1))
-                session = roku_movie.start(source)
+                session = roku_movie.start(source, timeout=45, buffer_seconds=32)
             except (ValueError, RuntimeError, OSError):
                 return jsonify(error='Movie could not start. Try again or return to live.'), 502
             return no_cache(jsonify(token=session.token, kind='movie', title=source['title'],
@@ -150,6 +166,8 @@ def register_roku_app_routes(app):
         targets, callback = guide._resolve_guide_hls_targets(play_url)
         if not targets:
             return jsonify(error='Channel unavailable.'), 404
+        low_latency = play_url.startswith('/guide/play/sports/') or data.get('low_latency') is True
+        delay = SPORTS_DELAY_SECONDS if low_latency else ENTERTAINMENT_DELAY_SECONDS
         try:
             if play_url == director.PLAY_URL:
                 from .remote import _manual_channel_payload
@@ -159,9 +177,13 @@ def register_roku_app_routes(app):
                 return no_cache(jsonify(token='', kind='live',
                     media_url=request.url_root.rstrip('/') + director.STREAM_PATH))
             session = hls.start_session(targets, on_target=callback)
+            if not hls.wait_for_buffer(session.directory, session.process, delay + 2):
+                hls.stop_session(session.token)
+                raise RuntimeError('Channel did not build a playback buffer.')
         except (ValueError, RuntimeError, OSError):
             return jsonify(error='Channel could not start. Try again.'), 502
         return no_cache(jsonify(token=session.token, lease=lease_live(session.token), kind='live',
+            live_delay_seconds=delay,
             media_url=request.url_root.rstrip('/') + f'/guide/roku/{session.token}/stream.m3u8'))
 
     @app.post('/api/roku/playback/stop')

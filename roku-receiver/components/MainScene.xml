@@ -9,7 +9,7 @@
       <Label id="status" visible="false" translation="[64, 150]" width="1760" height="44" color="0x9eafc8ff" />
       <GuideGrid id="grid" translation="[64, 160]" duration="10800" numRows="9" />
     </Group>
-    <Video id="video" visible="false" width="1920" height="1080" enableUI="false" />
+    <Video id="video" visible="false" width="1920" height="1080" enableUI="false" enableDecoderStats="true" />
     <Label id="playerStatus" visible="false" translation="[64, 980]" width="1760" height="64" color="0xffffffff" />
     <Timer id="refreshTimer" duration="120" repeat="true" />
     <Timer id="heartbeatTimer" duration="30" repeat="true" />

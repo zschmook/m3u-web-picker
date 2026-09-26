@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="GuideGrid" extends="Group">
   <interface>
+    <field id="active" type="boolean" value="true" onChange="onActiveChanged" />
     <field id="content" type="node" onChange="onContentChanged" />
     <field id="contentStartTime" type="integer" />
     <field id="duration" type="integer" value="10800" />

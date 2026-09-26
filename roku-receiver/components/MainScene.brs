@@ -12,6 +12,7 @@ sub init()
     m.currentChannel = invalid
     m.playing = false
     m.movie = false
+    m.liveDelay = 4
     m.guideLoading = false
     m.generation = 0
     m.guideGeneration = 0
@@ -23,6 +24,7 @@ sub init()
         if config.server <> invalid then m.server = config.server
     end if
     m.video.observeField("state", "onVideoState")
+    m.video.observeField("bufferingStatus", "onBufferingStatus")
     m.grid.observeField("programSelected", "onProgramSelected")
     m.grid.observeField("channelInfoSelected", "onChannelSelected")
     m.top.findNode("refreshTimer").observeField("fire", "refreshGuide")
@@ -93,6 +95,8 @@ sub onApiResult(event as Object)
         if result.ok
             m.session = result.data
             m.movie = result.data.kind = "movie"
+            m.liveDelay = 4
+            if result.data.live_delay_seconds <> invalid then m.liveDelay = result.data.live_delay_seconds
             startVideo(result.data.media_url)
         else
             m.playerStatus.text = result.error + " Press Back for the guide."
@@ -101,6 +105,9 @@ sub onApiResult(event as Object)
 end sub
 
 sub renderGuide(serverTime as Integer)
+    ' Keep ContentNode construction and hundreds of UI mutations off the
+    ' render thread while the hidden guide sits underneath full-screen video.
+    if m.playing then return
     root = CreateObject("roSGNode", "ContentNode")
     for each channel in m.channels
         row = root.createChild("ContentNode")
@@ -185,6 +192,7 @@ sub playChannel(channel as Object, restartUrl = "" as String)
     m.currentChannel = channel
     m.movie = restartUrl <> ""
     m.playing = true
+    m.grid.active = false
     m.panel.visible = false
     m.video.visible = false
     m.playerStatus.visible = true
@@ -192,7 +200,9 @@ sub playChannel(channel as Object, restartUrl = "" as String)
     m.top.setFocus(true)
     mode = "live"
     if m.movie then mode = "movie"
-    requestApi("/api/roku/playback", "POST", {play_url: channel.play_url, mode: mode, restart_url: restartUrl}, "play", m.generation)
+    lowLatency = false
+    if channel.is_sports <> invalid then lowLatency = channel.is_sports
+    requestApi("/api/roku/playback", "POST", {play_url: channel.play_url, mode: mode, restart_url: restartUrl, low_latency: lowLatency}, "play", m.generation)
 end sub
 
 sub startVideo(url as String)
@@ -200,7 +210,12 @@ sub startVideo(url as String)
     content.url = url
     content.streamFormat = "hls"
     content.title = "M3U TV"
-    if m.movie then content.playStart = 0
+    if m.movie
+        content.playStart = 0
+    else
+        content.live = true
+        content.playStart = -m.liveDelay
+    end if
     m.video.content = content
     m.video.visible = true
     m.video.control = "play"
@@ -228,7 +243,9 @@ sub playUrl(url as String)
     if not sameSession then releasePlayback()
     m.video.control = "stop"
     m.movie = false
+    m.liveDelay = 4
     m.playing = true
+    m.grid.active = false
     m.currentChannel = invalid
     m.panel.visible = false
     m.playerStatus.visible = true
@@ -246,7 +263,12 @@ sub showGuide()
     m.playerStatus.visible = false
     releasePlayback()
     m.panel.visible = true
-    if m.channels.count() > 0 then m.grid.setFocus(true)
+    m.grid.active = true
+    if m.channels.count() > 0
+        now = CreateObject("roDateTime")
+        renderGuide(now.asSeconds())
+        m.grid.setFocus(true)
+    end if
     refreshGuide()
 end sub
 
@@ -254,10 +276,28 @@ sub keepPlaybackAlive()
     if m.session <> invalid
         if m.session.token <> "" then requestApi("/api/roku/playback/heartbeat", "POST", m.session, "heartbeat")
     end if
+    if m.playing and m.video.state = "playing"
+        stats = m.video.decoderStats
+        counters = {}
+        if stats <> invalid
+            for each key in stats
+                valueType = type(stats[key])
+                if valueType = "Integer" or valueType = "Float" or valueType = "Double" or valueType = "LongInteger" then counters[key] = stats[key]
+            end for
+        end if
+        print "M3U playback position="; m.video.position; " decoder="; FormatJson(counters)
+    end if
+end sub
+
+sub onBufferingStatus()
+    status = m.video.bufferingStatus
+    if not m.playing or status = invalid then return
+    if status.isUnderrun = true then print "M3U playback underrun position="; m.video.position
 end sub
 
 sub onVideoState()
     if not m.playing then return
+    print "M3U playback state="; m.video.state; " position="; m.video.position; " error="; m.video.errorCode
     if m.video.state = "playing"
         m.playerStatus.text = ""
     else if m.video.state = "paused"

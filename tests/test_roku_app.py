@@ -68,13 +68,51 @@ class RokuAppTests(unittest.TestCase):
     def test_live_playback_uses_relay_and_returns_only_local_media(self):
         callback = Mock()
         with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['http://provider/private'], callback)), \
-                patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque')) as start:
+                patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())) as start, \
+                patch.object(roku_app.hls, 'wait_for_buffer', return_value=True) as warm:
             response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/manual/a'))
         self.assertEqual(response.status_code, 200)
         start.assert_called_once_with(['http://provider/private'], on_target=callback)
         self.assertEqual(response.json['media_url'], 'http://localhost/guide/roku/opaque/stream.m3u8')
         self.assertNotIn('provider', response.get_data(as_text=True))
         self.assertIn(response.json['lease'], roku_app.LIVE_LEASES)
+        self.assertEqual(response.json['live_delay_seconds'], 30)
+        self.assertEqual(warm.call_args.args[2], 32)
+
+    def test_sports_guide_detection_keeps_movies_out_of_low_latency(self):
+        cases = [
+            (dict(play_url='/guide/play/sports/3000', name='Brewers @ Phillies'), True),
+            (dict(play_url='/guide/play/manual/a', name='US: ESPN2'), True),
+            (dict(play_url='/guide/play/manual/a', name='Local', now={'categories': ['Sports', 'Baseball']}), True),
+            (dict(play_url='/guide/play/custom/abc', name='Sports Night', group='Comedy'), False),
+            (dict(play_url='/guide/play/movies/drama', name='Drama', now={'categories': ['Sports']}), False),
+            (dict(play_url='/guide/play/manual/a', name='US: NBC Dateline'), False),
+        ]
+        for channel, expected in cases:
+            with self.subTest(channel=channel):
+                row = roku_app.guide_payload([channel], now=100)['channels'][0]
+                self.assertEqual(row['is_sports'], expected)
+
+    def test_sports_playback_does_not_wait_for_entertainment_buffer(self):
+        for play_url, low_latency in (('/guide/play/sports/3000', False), ('/guide/play/manual/a', True)):
+            with self.subTest(play_url=play_url), \
+                    patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['source'], None)), \
+                    patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())), \
+                    patch.object(roku_app.hls, 'wait_for_buffer', return_value=True) as warm:
+                response = self.client.post('/api/roku/playback', json=dict(play_url=play_url, low_latency=low_latency))
+            self.assertEqual(response.json['live_delay_seconds'], 4)
+            self.assertEqual(warm.call_args.args[2], 6)
+
+    def test_buffer_failure_releases_reference_without_leaking_source(self):
+        with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['http://private/password'], None)), \
+                patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())), \
+                patch.object(roku_app.hls, 'wait_for_buffer', return_value=False), \
+                patch.object(roku_app.hls, 'stop_session') as stop:
+            response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/manual/a'))
+        self.assertEqual(response.status_code, 502)
+        stop.assert_called_once_with('opaque')
+        self.assertEqual(roku_app.LIVE_LEASES, {})
+        self.assertNotIn('private', response.get_data(as_text=True))
 
     def test_restart_keeps_plex_auth_on_server(self):
         source = dict(target='http://plex/private', input_headers={'X-Plex-Token': 'secret'}, title='Movie')
@@ -82,7 +120,7 @@ class RokuAppTests(unittest.TestCase):
                 patch.object(roku_movie, 'start', return_value=SimpleNamespace(token='opaque')) as start:
             response = self.client.post('/api/roku/playback', json=dict(mode='movie',
                 restart_url='/guide/play/restart/' + 'a' * 24))
-        start.assert_called_once_with(source)
+        start.assert_called_once_with(source, timeout=45, buffer_seconds=32)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['kind'], 'movie')
         self.assertEqual(response.json['media_url'], 'http://localhost/roku/movie/opaque/stream.m3u8')

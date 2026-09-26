@@ -11,7 +11,7 @@ import time
 
 import media_pipeline
 from .ffmpeg import normalized_live_input_args, terminate
-from .hls import HLS_ROOT
+from .hls import HLS_ROOT, buffered_seconds
 
 ROOT = HLS_ROOT / 'roku-movies'
 LOCK = threading.RLock()
@@ -74,7 +74,7 @@ def media_file(token, filename):
     return path if path.is_file() else None
 
 
-def start(source, timeout=20):
+def start(source, timeout=20, *, buffer_seconds=2):
     pipeline = media_pipeline.acquire_session('roku-movie')
     token = secrets.token_urlsafe(18)
     directory = ROOT / token
@@ -96,8 +96,7 @@ def start(source, timeout=20):
         SESSIONS[token] = session
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        playlist = directory / 'stream.m3u8'
-        if playlist.exists() and '#EXTINF:' in playlist.read_text(errors='replace'):
+        if buffered_seconds(directory) >= buffer_seconds:
             return session
         if process.poll() is not None:
             break

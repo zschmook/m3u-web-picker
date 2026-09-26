@@ -19,6 +19,10 @@ LOGGER = logging.getLogger(__name__)
 HLS_ROOT = SETTINGS.cast_hls_dir
 HLS_ROOT.mkdir(parents=True, exist_ok=True)
 CAST_ROOT = HLS_ROOT
+SEGMENT_SECONDS = 2
+# Enough history for a 30-second entertainment cushion without affecting a
+# sports receiver that explicitly joins four seconds behind the live edge.
+PLAYLIST_SEGMENTS = 40
 
 _LOCK = threading.RLock()
 _SESSIONS: dict[str, "HlsSession"] = {}
@@ -164,6 +168,37 @@ def _playlist_snapshot(directory: Path) -> tuple[int, frozenset[str]]:
     return modified, frozenset(path.name for path in directory.glob("segment_*.ts"))
 
 
+def buffered_seconds(directory: Path) -> float:
+    """Count only completed, locally available media referenced by a playlist."""
+    try:
+        lines = (directory / "stream.m3u8").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0.0
+    total, duration = 0.0, 0.0
+    for line in lines:
+        if line.startswith("#EXTINF:"):
+            try:
+                duration = max(0.0, float(line.partition(":")[2].split(",", 1)[0]))
+            except ValueError:
+                duration = 0.0
+        elif line and not line.startswith("#"):
+            if line.startswith("segment_") and Path(line).name == line and (directory / line).is_file():
+                total += duration
+            duration = 0.0
+    return total
+
+
+def wait_for_buffer(directory: Path, process: subprocess.Popen, seconds: float, *, timeout: float = 40.0) -> bool:
+    """Warm one existing encoder; never open a second source to fill a buffer."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if buffered_seconds(directory) >= seconds:
+            return True
+        if process.poll() is not None or time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
 def _hls_command(target: str, directory: Path) -> list[str]:
     base_command = normalized_live_input_args(
         target,
@@ -184,9 +219,9 @@ def _hls_command(target: str, directory: Path) -> list[str]:
         "-f",
         "hls",
         "-hls_time",
-        "2",
+        str(SEGMENT_SECONDS),
         "-hls_list_size",
-        "8",
+        str(PLAYLIST_SEGMENTS),
         "-hls_delete_threshold",
         "4",
         "-hls_allow_cache",

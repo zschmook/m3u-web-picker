@@ -96,6 +96,32 @@ class SharedMediaSessionTests(unittest.TestCase):
         self.assertEqual(recovered.target, "fallback")
         self.assertEqual(recovered.recovery_count, 1)
 
+    def test_buffer_counts_only_completed_segments_and_waits_for_more(self):
+        import threading
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'segment_000000.ts').write_bytes(b'media')
+            (root / 'stream.m3u8').write_text('#EXTM3U\n#EXTINF:2.0,\nsegment_000000.ts\n#EXTINF:2.0,\nsegment_000001.ts\n')
+            self.assertEqual(hls.buffered_seconds(root), 2)
+            process = Mock()
+            process.poll.return_value = None
+            self.assertFalse(hls.wait_for_buffer(root, process, 4, timeout=0))
+            def publish():
+                time.sleep(.03)
+                (root / 'segment_000001.ts').write_bytes(b'more media')
+            producer = threading.Thread(target=publish)
+            producer.start()
+            self.assertTrue(hls.wait_for_buffer(root, process, 4, timeout=1))
+            producer.join()
+            self.assertEqual(hls.buffered_seconds(root), 4)
+
+    def test_buffer_wait_does_not_hang_on_encoder_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process = Mock()
+            process.poll.return_value = 1
+            self.assertFalse(hls.wait_for_buffer(Path(directory), process, 32))
+
     def test_hls_candidate_sets_share_one_session(self):
         live = Mock()
         live.poll.return_value = None

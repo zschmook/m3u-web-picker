@@ -14,8 +14,19 @@ sub init()
     m.titleFont = makeFont(23)
     m.timeFont = makeFont(19)
     m.smallFont = makeFont(17)
-    m.top.findNode("clock").observeField("fire", "drawGuide")
-    m.top.findNode("clock").control = "start"
+    m.clock = m.top.findNode("clock")
+    m.clock.observeField("fire", "drawGuide")
+    onActiveChanged()
+end sub
+
+sub onActiveChanged()
+    if m.clock = invalid then return
+    if m.top.active
+        m.clock.control = "start"
+        drawGuide()
+    else
+        m.clock.control = "stop"
+    end if
 end sub
 
 function makeFont(size as Integer) as Object
@@ -112,6 +123,7 @@ function timeText(seconds as Integer) as String
 end function
 
 sub drawGuide()
+    if not m.top.active then return
     if m.top.content = invalid then return
     count = m.top.content.getChildCount()
     if count = 0 then return
@@ -154,6 +166,8 @@ sub drawGuide()
             poster.translation = [92, y + 22]
             poster.width = 44
             poster.height = 44
+            poster.loadWidth = 44
+            poster.loadHeight = 44
             poster.loadDisplayMode = "scaleToFit"
             poster.uri = row.logoUrl
         else
@@ -213,7 +227,7 @@ sub drawGuide()
 end sub
 
 function onKeyEvent(key as String, press as Boolean) as Boolean
-    if not press or m.top.content = invalid then return false
+    if not press or not m.top.active or m.top.content = invalid then return false
     count = m.top.content.getChildCount()
     if count = 0 then return false
     if key = "OK"
