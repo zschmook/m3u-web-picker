@@ -370,12 +370,16 @@
     state.selected = detail || null;
     const channel = detail?.channel || {};
     const programme = detail?.programme || {};
+    const isMovie = programme.media_type === "movie";
     el("guideProgrammeTitle").textContent = programme.title || "Program";
     el("guideProgrammeMeta").textContent = [channel.name, rangeText(programme), programme.subtitle].filter(Boolean).join(" • ");
     el("guideProgrammeDescription").textContent = programme.description || "No description is available.";
     el("guideProgrammeMessage").textContent = dvrReady()
       ? "Choose one episode or every matching airing on this channel."
       : "DVR must be enabled under Settings → DVR before recording.";
+    el("guideProgrammeMessage").classList.toggle("d-none", isMovie);
+    el("guideRecordOnce").classList.toggle("d-none", isMovie);
+    el("guideRecordSeries").classList.toggle("d-none", isMovie);
     const now = Date.now();
     const start = new Date(programme.start || "").getTime();
     const stop = new Date(programme.stop || "").getTime();
