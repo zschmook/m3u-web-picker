@@ -12,7 +12,7 @@ The app runs in Docker on Windows, macOS, and Linux. Start with a [packaged inst
 - **DVR:** record a program or series, browse completed recordings, and optionally remove commercials and convert recordings to H.265/MKV.
 - **TV devices:** browse the native Roku guide, send playback from the browser to Roku or Google Cast, or use the virtual HDHomeRun interface with compatible clients.
 - **Plex custom channels — experimental:** create continuous show channels, movie genre channels, and optional nostalgia commercial breaks from your own media.
-- **Movie lighting — experimental:** set playing and paused brightness for a selected Roku and an identified compatible light.
+- **Movie lighting — experimental:** create named rooms, each with one Roku, several compatible lights, and separate playing and paused brightness settings.
 
 ## Install (recommended)
 
@@ -102,19 +102,21 @@ To change providers later, open **Providers → Load Primary**. A local `.m3u`/`
 
 Use the app's **Outputs** controls to copy complete URLs for your host. The main endpoints are:
 
-| Output | Path |
-| --- | --- |
-| Curated M3U lineup | `/playlist/channels.m3u` |
-| Direct-provider M3U fallback | `/playlist/channels.direct.m3u` |
-| Combined XMLTV guide | `/epg/epg.xml` |
-| Sports XMLTV guide | `/epg/sports.xml` |
-| Browser TV Guide | `/guide` |
-| Channel 0.2 phone remote | `/remote` |
-| Current Roku app ZIP | `/roku/app.zip` |
+| Output | Path | Playback / encoding |
+| --- | --- | --- |
+| Curated M3U lineup | `/playlist/channels.m3u` | FFmpeg when enabled; GPU or CPU according to Settings |
+| Unencoded M3U fallback | `/playlist/channels.direct.m3u` | Original provider streams; bypasses Picker's IPTV encoding and GPU processing |
+| Combined XMLTV guide | `/epg/epg.xml` | Guide data |
+| Sports XMLTV guide | `/epg/sports.xml` | Guide data |
+| Browser TV Guide | `/guide` | Browse and play channels |
+| Channel 0.2 phone remote | `/remote` | Control the shared remote channel |
+| Current Roku app ZIP | `/roku/app.zip` | Download the TV app |
 
 For example, a LAN client's combined guide URL is `http://<your-host-IP>:9999/epg/epg.xml`. Provider XMLTV remains authoritative; additional public country feeds fill uncovered guide windows.
 
-**Settings → Encoding** controls application-wide FFmpeg encoding and is disabled by default. When enabled, the normal curated M3U routes IPTV channels through Picker; the direct-provider fallback bypasses that encoding. Enabling encoding runs a hardware check, and CPU fallback requires an explicit performance acknowledgement.
+**Settings → Encoding** controls FFmpeg encoding for provider channels and is disabled by default. When enabled, `/playlist/channels.m3u` routes those channels through Picker's FFmpeg encoder using the selected working GPU encoder or CPU fallback. With encoding disabled, it uses the original provider streams. Enabling encoding runs a hardware check and requires a performance acknowledgement.
+
+`/playlist/channels.direct.m3u` always bypasses that IPTV encoding, even when it is enabled for the normal playlist. Use it when you want provider channels without Picker's encoding or GPU processing. Plex/custom channels are included in both playlists and still use their own playback processing; this URL does not disable FFmpeg throughout the app.
 
 The Docker image includes FFmpeg and Comskip. Browser, Roku, Cast, custom-channel, and DVR features use FFmpeg as needed even when global IPTV encoding is disabled. Browser fragmented MP4, MPEG-TS clients, and HLS clients use separate output sessions, so different client types may consume separate provider connections for the same channel.
 
@@ -124,7 +126,7 @@ The TV Guide provides a scrolling schedule, channel/program search, day navigati
 
 Android phones show **Play on this phone → VLC / Browser**. Install VLC to use the app handoff; for locked-screen audio, enable **Play videos in background** in VLC settings. If it does not open, choose **Browser** and press Play again.
 
-Use **Stream → Roku / Cast** to send a channel to a TV. Multiple Roku devices can be saved, and the Devices page shows device and remote playback status. Receivers must be able to reach the Picker host's advertised LAN address.
+Use **Settings → Devices → Discover Rokus** to find and save playback targets, or **Add by IP address** when automatic discovery is unavailable. Use the TV Guide's **Stream → Roku / Cast** controls to send a channel to a TV. Multiple Roku devices can be saved, and Devices shows their saved count and remote playback status. Receivers must be able to reach the Picker host's advertised LAN address.
 
 The **Remote** page controls virtual channel **0.2**. Tune a browser or Roku to that output once, then use your phone to switch among enabled channels and playable sports feeds. The selector remuxes the chosen feed into a stable HLS output without re-encoding it.
 
@@ -143,19 +145,25 @@ Download the current app from **`http://<your-host-IP>:9999/roku/app.zip`** afte
 
 Roku allows one sideloaded developer application at a time, so this replaces any existing sideloaded app. If remote control is blocked, check Roku's **Control by mobile apps** setting. See the [user guide](docs/USER-GUIDE.md) for further LAN troubleshooting.
 
-## Plex custom channels and movie lighting
+## Plex custom channels
 
-Open **Settings → Custom Channels** to enable the experimental Plex catalog. Refresh reachable, authorized Plex libraries and choose which shows become channels. Show channels can run in episode order or shuffled order, with season limits. Optional commercials use clips imported from your own MP4 collection.
+Open **Settings → Custom Channels** to enable the experimental Plex catalog. If automatic discovery finds no servers, use **Connect a Plex server** to save its URL and Plex token; enabled TV and movie libraries refresh after connecting. Choose which shows become channels. Show channels can run in episode order or shuffled order, with season limits. Optional commercials use clips imported from your own MP4 collection.
 
 Movie channels include genre mixes, Hallmark, Film Noir, and **Just Released**, which uses the five newest movie release dates. They play without commercials and shuffle without repeats until a channel's pool is exhausted. Custom channels join the existing playlists and XMLTV guide. For Plex movies, **Restart Movie**, **Pause Movie**, and **Back to Live** switch between playback from the beginning and the shared channel schedule.
 
-Under **Settings → Movie Lighting**, select the room's Roku and an identified compatible LAN bulb, then set playing brightness, paused brightness, and fade time. During movie playback, that Roku controls only the selected bulb. Pausing or returning to the guide uses the paused brightness. This experimental integration requires previously identified local dimmable bulbs; **Refresh Light Names** updates known bulbs rather than discovering new smart-light platforms.
+## Movie lighting
+
+In **Settings → Movie Lighting**, create a named room, choose its Roku, and check all the lights in that room. **Discover HOs** finds compatible TP-Link Kasa lights on the configured local network; **Refresh Light Names** updates already known lights. Roku discovery also updates the Roku choices immediately. Discovery reads device identities and names; it does not turn lights on or change their brightness. Each Roku and light belongs to one room, preventing overlapping assignments. Existing single-light settings appear as **Room 1**.
+
+Set playing brightness, paused brightness, and fade time separately for each room, then **Save Room**. During movie playback, its Roku controls the selected light group. Pausing or returning to the guide uses paused brightness; exiting restores each light's original state. Light-group changes take effect on the next movie. Install the current ZIP from **Download Roku App** to enable group control; earlier Roku app versions continue controlling the first light. This experimental integration supports identified local dimmable Kasa bulbs.
 
 ## Sports Automation
 
 Follow teams, leagues, conferences, or broad sports. Automation matches provider channels and XMLTV, then publishes temporary event channels with stable league numbering. Saved manual channels remain separate from generated sports feeds.
 
-Ordered fallback providers are tried when the primary provider has no usable sports feed. Optional API-SPORTS adapters provide canonical schedules for MLB, NFL, and NCAA Football; other sports use provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
+Ordered fallback providers are tried when the primary provider has no usable sports feed. Optional [API-SPORTS](https://api-sports.io/) adapters provide canonical schedules for MLB, NFL, and NCAA Football; other sports use provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
+
+Get an API key through the [API-SPORTS signup/dashboard](https://dashboard.api-football.com/).
 
 ## DVR, storage, and backups
 

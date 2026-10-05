@@ -755,6 +755,64 @@ body {
   color: #c8d1df;
   font-size: 0.68rem !important;
   font-weight: 700 !important;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ui-lighting-editor { border: 0; padding: 0; margin: 0; display: grid; gap: 16px; min-width: 0; }
+.ui-lighting-lights { border: 1px solid var(--ui-border); border-radius: 10px; padding: 14px; min-width: 0; }
+.ui-lighting-lights legend { float: none; width: auto; font-size: 13px; font-weight: 700; padding: 0 6px; margin: 0; }
+.ui-lighting-light-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.ui-lighting-light { display: flex; align-items: center; gap: 10px; margin: 0; cursor: pointer; }
+.ui-lighting-light input { width: 18px; height: 18px; flex-shrink: 0; accent-color: #3782f6; }
+.ui-lighting-light:has(input:disabled) { opacity: .6; }
+
+.ui-roku-title-row,
+.ui-roku-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ui-roku-actions {
+  margin-top: 14px;
+}
+
+#uiRokuDiscoveryStatus:empty,
+#uiRokuDiscoveredList[hidden] {
+  display: none;
+}
+
+.ui-roku-manual {
+  margin-top: 14px;
+}
+
+.ui-roku-manual summary {
+  color: var(--ui-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.ui-roku-manual form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ui-roku-manual .ui-settings-field {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ui-roku-discovered-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ui-roku-discovered-row .btn {
+  white-space: nowrap;
 }
 
 .ui-roku-device-list {

@@ -130,15 +130,17 @@ If an update completes with warnings or failures, use the status details view to
 
 Normal client URLs are:
 
-```text
-/playlist/channels.m3u
-/playlist/channels.direct.m3u
-/epg/epg.xml
-```
+| Output | Path | Playback / encoding |
+| --- | --- | --- |
+| Curated M3U lineup | `/playlist/channels.m3u` | FFmpeg when enabled; GPU or CPU according to Settings |
+| Unencoded M3U fallback | `/playlist/channels.direct.m3u` | Original provider streams; bypasses Picker's IPTV encoding and GPU processing |
+| Combined XMLTV guide | `/epg/epg.xml` | Guide data |
 
 Use the Outputs button in the UI to copy fully qualified URLs for the current host.
 
-When application-wide encoding is enabled under **Settings → Encoding**, `/playlist/channels.m3u` uses Picker's FFmpeg path. `/playlist/channels.direct.m3u` is the permanent direct-provider fallback and bypasses encoding.
+When encoding is enabled under **Settings → Encoding**, `/playlist/channels.m3u` routes provider channels through Picker's FFmpeg encoder using the selected working GPU encoder or CPU fallback. With encoding disabled, it uses the original provider streams.
+
+`/playlist/channels.direct.m3u` always bypasses that IPTV encoding, even when it is enabled for the normal playlist. Use it when you want provider channels without Picker's encoding or GPU processing. Plex/custom channels are included in both playlists and still use their own playback processing; this URL does not disable FFmpeg throughout the app.
 
 Encoding is disabled by default. Enabling it runs a functional hardware check. Supported Docker acceleration can use NVIDIA NVENC, Intel QSV, or VA-API when passed through successfully; otherwise CPU `libx264` fallback requires an explicit performance-risk acknowledgement. Browser fragmented MP4, shared MPEG-TS, and shared HLS are separate sessions, so different client types can open separate FFmpeg processes for the same channel.
 

@@ -7,7 +7,7 @@
   let bulkSelection=null,bulkRemoval=null,bulkMode='add';
   const choices=new Map();
   const text=(tag,value,className='')=>{const n=document.createElement(tag);n.textContent=value;n.className=className;return n;};
-  const status=(message,error=false)=>{el('ccStatus').textContent=message;el('ccStatus').className='ui-settings-status'+(error?' is-error':'');};
+  const status=(message,error=false)=>{el('ccStatus').textContent=message;el('ccStatus').className='ui-settings-status'+(error?' is-error':'');if(error)el('ccStatusPanel').open=true;};
   async function api(path='',method='GET',body){
     const response=await fetch('/api/custom-channels'+path,{method,cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
     const data=await response.json();if(!response.ok)throw Error(data.error||'Request failed');return data;
@@ -17,7 +17,7 @@
     el('ccImportChoose').disabled=busy||importBusy||!state;
     el('ccImportInput').disabled=el('ccImportChoose').disabled;
     el('ccDiscover').disabled=busy||(!state?.settings.enabled&&!state?.settings.movies_enabled)||state?.job.running;
-    if(el('ccConnect'))el('ccConnect').disabled=busy;
+    if(el('ccConnect'))el('ccConnect').disabled=busy||!state||state.job.running;
     el('ccAddAll').disabled=busy||!state||!state.settings.enabled||Number(el('ccAddAll').dataset.count||0)===0;
     el('ccRemoveAll').disabled=busy||!state||Number(el('ccRemoveAll').dataset.count||0)===0;
     for(const id of ['ccEditSave','ccDeleteConfirm'])el(id).disabled=busy;
@@ -143,6 +143,7 @@
     }
   }
   async function load(fields=true){state=await api();if(fields)renderSettings();renderCatalog();renderChannels();renderMovieChannels();renderImports();locks();
+    if(!state.servers.length)el('ccConnectionPanel').open=true;
     const observed=state.catalog.updated_at?new Date(state.catalog.updated_at*1000).toLocaleString():'';
     el('ccLastChecked').textContent=observed?`Catalog snapshot from ${observed}. Unavailable servers contribute zero series.`:'No Plex catalog snapshot yet.';
     el('ccServers').replaceChildren(...state.servers.map(s=>{const result=state.catalog.servers?.find(v=>v.id===s.id);let value;if(!result)value=s.name+' (not checked)';else if(result.status==='unavailable')value=s.name+' (scan unavailable, 0 current series)';else value=s.name+` (${result.shows} series${result.unavailable_files?`, ${result.unavailable_files} unavailable files`:''})`;return text('div',value,'cc-server-status');}));
@@ -165,7 +166,21 @@
   el('ccPreroll').addEventListener('change',()=>action(()=>persist({preroll:el('ccPreroll').checked})));
   el('ccInterval').addEventListener('change',()=>{if(el('ccInterval').reportValidity())void action(()=>persist({[el('ccAdMode').value==='minutes'?'commercial_minutes':'commercial_episodes']:Number(el('ccInterval').value)}));});
   el('ccDiscover').addEventListener('click',()=>action(async()=>{await api('/discover','POST',{});await load(false);}));
-  el('ccConnect')?.addEventListener('click',()=>action(async()=>{await api('/servers','POST',{url:el('ccServerUrl').value,token:el('ccToken').value});el('ccToken').value='';await load(false);status('Connected. Discover Plex to load its TV library.');}));
+  el('ccConnectForm').addEventListener('submit',event=>{
+    event.preventDefault();
+    if(busy||!state||state.job.running)return;
+    void action(async()=>{
+      el('ccStatusPanel').open=true;
+      status('Connecting to Plex…');
+      state=await api('/servers','POST',{url:el('ccServerUrl').value.trim(),token:el('ccToken').value.trim()});
+      el('ccToken').value='';el('ccConnectionPanel').open=false;
+      if(state.settings.enabled||state.settings.movies_enabled){
+        try{await api('/discover','POST',{});}
+        catch(error){await load(false);status('Plex connected, but the library refresh failed. '+error.message,true);return;}
+        await load(false);
+      }else{await load(false);status('Plex connected. Enable TV show or movie channels to scan its libraries.');}
+    });
+  });
   ['ccSearch','ccSort','ccShowAll'].forEach(id=>el(id).addEventListener(id==='ccSearch'?'input':'change',()=>{if(state){renderCatalog();locks();}}));
   el('ccAddAll').addEventListener('click',()=>{
     if(!bulkSelection?.showIds.length)return;

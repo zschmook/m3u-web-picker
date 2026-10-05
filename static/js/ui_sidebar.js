@@ -183,9 +183,12 @@
         <div id="uiHdhrDeviceSlot"></div>
       </section>
       <section class="ui-modern-card">
-        <div class="ui-card-heading"><div><span>Roku</span><small>Saved targets are identified by stable Roku identity, not IP address.</small></div><span class="ui-count-badge" id="uiRokuDeviceCount">0 saved</span></div>
+        <div class="ui-card-heading"><div><div class="ui-roku-title-row"><span>Roku</span><span class="ui-count-badge" id="uiRokuDeviceCount">0 saved</span></div><small>Find Roku devices on your network and save them for playback.</small></div></div>
         <div id="uiRokuDeviceList" class="ui-roku-device-list"><div class="ui-empty-state">Loading saved devices…</div></div>
-        <a class="btn ui-btn-secondary ui-inline-action" href="/guide">Open TV Guide</a>
+        <div class="ui-roku-actions"><button class="btn ui-btn-primary" id="uiRokuDiscover" type="button">Discover Rokus</button><a class="btn ui-btn-secondary" href="/guide">Open TV Guide</a></div>
+        <div id="uiRokuDiscoveryStatus" class="ui-settings-status" role="status" aria-live="polite"></div>
+        <div id="uiRokuDiscoveredList" class="ui-roku-device-list" hidden></div>
+        <details class="ui-roku-manual"><summary>Add by IP address</summary><form id="uiRokuAddForm"><label class="ui-settings-field" for="uiRokuHost"><span>Roku IP address</span><input id="uiRokuHost" class="form-control" placeholder="192.168.1.50" autocomplete="off" inputmode="decimal" required></label><button class="btn ui-btn-secondary" id="uiRokuAdd" type="submit">Add Roku</button></form></details>
       </section>
       <section class="ui-modern-card">
         <div class="ui-card-heading"><div><span>Remote Playback</span><small>Live HLS relays currently serving Roku or Cast receivers.</small></div></div>
@@ -294,18 +297,25 @@
           </div>
         </section>
         <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="lighting" aria-labelledby="uiLightingTitle">
-          <div class="ui-card-heading"><div><span id="uiLightingTitle">Movie Lighting</span><small>Set the room's brightness for watching and pausing a movie.</small></div></div>
+          <div class="ui-card-heading"><div><span id="uiLightingTitle">Movie Lighting</span><small>Create rooms with one Roku and a group of lights.</small></div></div>
           <form id="uiLightingForm" class="ui-settings-form">
-            <label class="ui-settings-toggle" for="uiLightingEnabled"><input id="uiLightingEnabled" type="checkbox" role="switch"><span><strong>Enable movie lighting</strong><small>Change the selected light automatically during movie playback.</small></span></label>
-            <label class="ui-settings-field" for="uiLightingRoku"><span>Roku in this room</span><select id="uiLightingRoku" class="form-control" required><option value="">Choose a Roku</option></select></label>
-            <label class="ui-settings-field" for="uiLightingLight"><span>Light in this room</span><select id="uiLightingLight" class="form-control" required><option value="">Choose a light</option></select></label>
-            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiLightingRefresh" type="button">Refresh Light Names</button></div>
-            <div class="ui-settings-runtime">Only the selected light responds to this Roku. Other lights stay unchanged.</div>
+            <label class="ui-settings-field" for="uiLightingRoom"><span>Room</span><select id="uiLightingRoom" class="form-control"><option value="">Loading rooms…</option></select></label>
+            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiLightingAddRoom" type="button">Add Room</button><button class="btn ui-btn-secondary" id="uiLightingDeleteRoom" type="button">Delete Room</button></div>
+            <fieldset id="uiLightingEditor" class="ui-lighting-editor">
+            <label class="ui-settings-field" for="uiLightingRoomName"><span>Room name</span><input id="uiLightingRoomName" class="form-control" maxlength="80" placeholder="Living room" required></label>
+            <label class="ui-settings-toggle" for="uiLightingEnabled"><input id="uiLightingEnabled" type="checkbox" role="switch"><span><strong>Enable movie lighting in this room</strong><small>Change this room's lights automatically during movie playback.</small></span></label>
+            <label class="ui-settings-field" for="uiLightingRoku"><span>Roku in this room</span><select id="uiLightingRoku" class="form-control"><option value="">Choose a Roku</option></select></label>
+            <fieldset class="ui-lighting-lights"><legend>Lights in this room</legend><div id="uiLightingLights" class="ui-lighting-light-list"></div></fieldset>
+            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiLightingDiscover" type="button" title="Discover home automation devices">Discover HOs</button><button class="btn ui-btn-secondary" id="uiLightingRefresh" type="button">Refresh Light Names</button></div>
+            <div class="small-muted">Home automation discovery finds compatible TP-Link Kasa lights on your local network. Select all the lights that belong to this room.</div>
+            <div class="ui-settings-runtime">This Roku controls the selected lights together. Each room has its own brightness settings.</div>
             <label class="ui-settings-field" for="uiLightingPlaying"><span>Playing brightness (%)</span><input id="uiLightingPlaying" class="form-control" type="number" min="1" max="100" step="1" required></label>
             <label class="ui-settings-field" for="uiLightingPaused"><span>Paused brightness (%)</span><input id="uiLightingPaused" class="form-control" type="number" min="1" max="100" step="1" required></label>
             <label class="ui-settings-field" for="uiLightingFade"><span>Fade time (seconds)</span><input id="uiLightingFade" class="form-control" type="number" min="0" max="5" step="0.1" required></label>
             <div class="ui-settings-runtime">Playing uses the playing brightness. Pausing or returning to the guide uses the paused brightness.</div>
-            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiLightingSave" type="submit">Save Lighting Settings</button></div>
+            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiLightingSave" type="submit">Save Room</button></div>
+            </fieldset>
+            <div class="small-muted">To control several lights, install the current <a href="/roku/app.zip">Roku app</a> on your TV. Earlier app versions control the first light.</div>
             <div class="ui-settings-status" id="uiLightingStatus" role="status" aria-live="polite"></div>
           </form>
         </section>
@@ -488,7 +498,7 @@
     if (el("uiRokuDeviceCount")) el("uiRokuDeviceCount").textContent = `${rows.length} saved`;
     if (!list) return;
     if (!rows.length) {
-      list.innerHTML = '<div class="ui-empty-state">No Roku devices saved yet. Discover and add them from TV Guide.</div>';
+      list.innerHTML = '<div class="ui-empty-state">No Roku devices saved yet. Discover nearby Rokus or add one by IP address below.</div>';
       return;
     }
     list.innerHTML = rows.map(device => `
@@ -613,6 +623,10 @@
   }
 
   function bindActions() {
+    window.addEventListener("ui:roku-devices-changed", event => {
+      renderRokuDevices(event.detail?.devices);
+      void refreshStatus();
+    });
     el("uiOutputsBtn")?.addEventListener("click", openOutputsModal);
     el("uiUpdateDetailsBtn")?.addEventListener("click", openUpdateDetails);
     el("uiUpdateNowBtn")?.addEventListener("click", () => {

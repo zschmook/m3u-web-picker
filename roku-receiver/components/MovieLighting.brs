@@ -48,16 +48,20 @@ sub onMovieLightingConfig(result as Object)
         return
     end if
     if settings.roku_host <> m.movieLightRokuHost then return
-    if type(settings.target) <> "roAssociativeArray" then return
-    if settings.target.ip = invalid or settings.target.name = invalid or settings.target.model = invalid or settings.target.device_id = invalid then return
+    if type(settings.targets) <> "roArray" then settings.targets = [settings.target]
+    if settings.targets.count() = 0 or settings.targets.count() > 32 then return
+    for each target in settings.targets
+        if type(target) <> "roAssociativeArray" then return
+        if target.ip = invalid or target.name = invalid or target.model = invalid or target.device_id = invalid then return
+    end for
     if settings.brightness = invalid or settings.paused_brightness = invalid or settings.transition_ms = invalid then return
     if settings.brightness < 1 or settings.brightness > 100 then return
     if settings.paused_brightness < 1 or settings.paused_brightness > 100 then return
     if settings.transition_ms < 0 or settings.transition_ms > 5000 then return
-    ' A different bulb waits until this movie ends. Keep pause/restore bound
-    ' to the original device, even if the web selection changes mid-movie.
+    ' A different group waits until this movie ends. Original states remain
+    ' bound to device identities, even if the web selection changes.
     if m.movieLightSnapshot <> invalid and m.movieLightOriginalSettings <> invalid
-        if settings.target.device_id <> m.movieLightOriginalSettings.target.device_id
+        if not movieLightingSameGroup(settings, m.movieLightOriginalSettings)
             runMovieLighting()
             return
         end if
@@ -70,6 +74,18 @@ sub onMovieLightingConfig(result as Object)
     m.movieLighting = settings
     runMovieLighting()
 end sub
+
+function movieLightingSameGroup(first as Object, second as Object) as Boolean
+    if first.targets.count() <> second.targets.count() then return false
+    identities = {}
+    for each target in first.targets
+        identities[target.device_id] = true
+    end for
+    for each target in second.targets
+        if not identities.doesExist(target.device_id) then return false
+    end for
+    return true
+end function
 
 function movieLightingPlayback() as Boolean
     if m.movie then return true
@@ -116,7 +132,7 @@ sub runMovieLighting()
     if action = "restore" or action = "guide"
         task.settings = m.movieLightOriginalSettings
         if action = "guide" and m.movieLighting <> invalid
-            if m.movieLighting.target.device_id = m.movieLightOriginalSettings.target.device_id then task.settings = m.movieLighting
+            if movieLightingSameGroup(m.movieLighting, m.movieLightOriginalSettings) then task.settings = m.movieLighting
         end if
     else
         task.settings = m.movieLighting
@@ -137,20 +153,23 @@ sub onMovieLightingDone(event as Object)
     if result.action = "dim" or result.action = "pause"
         ' Retain the original state even if acknowledgement was lost after
         ' sending: returning to the guide still resets the same light.
-        if m.movieLightSnapshot = invalid and result.command_sent = true and result.snapshot <> invalid
+        if result.command_sent = true and result.snapshot <> invalid
             m.movieLightSnapshot = result.snapshot
             m.movieLightOriginalSettings = task.settings
             if m.movieLighting <> invalid
-                if m.movieLighting.target.device_id <> task.settings.target.device_id
+                if not movieLightingSameGroup(m.movieLighting, task.settings)
                     m.movieLighting = task.settings
                     m.movieLightRevision = task.settings.revision
                 end if
             end if
         end if
-    else if (result.action = "restore" or result.action = "guide") and result.ok
-        m.movieLightSnapshot = invalid
-        m.movieLightOriginalSettings = invalid
-        if m.movieLightDesired = "dim" or m.movieLightDesired = "pause" then refreshMovieLighting()
+    else if result.action = "restore" or result.action = "guide"
+        if result.remaining_snapshots <> invalid then m.movieLightSnapshot = result.remaining_snapshots
+        if result.ok or (m.movieLightSnapshot <> invalid and m.movieLightSnapshot.count() = 0)
+            m.movieLightSnapshot = invalid
+            m.movieLightOriginalSettings = invalid
+            if m.movieLightDesired = "dim" or m.movieLightDesired = "pause" then refreshMovieLighting()
+        end if
     end if
     if result.ok
         if result.action = "restore" or result.action = "guide" or task.settings.revision = m.movieLightRevision
