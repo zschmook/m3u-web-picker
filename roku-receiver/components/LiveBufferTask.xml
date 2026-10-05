@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LiveBufferTask" extends="Task">
+  <interface>
+    <field id="url" type="string" />
+    <field id="seconds" type="float" />
+    <field id="requestId" type="integer" />
+    <field id="result" type="assocarray" alwaysNotify="true" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/LiveBufferTask.brs" />
+</component>

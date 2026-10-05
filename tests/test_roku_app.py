@@ -18,6 +18,11 @@ class RokuAppTests(unittest.TestCase):
         roku_app.register_roku_app_routes(self.app)
         self.client = self.app.test_client()
         roku_app.LIVE_LEASES.clear()
+        self.channel_metadata = SimpleNamespace(saved_manual_guide_channels=Mock(return_value=[]),
+            channel_key=Mock(return_value='manual:a'))
+        metadata = patch.object(roku_app.guide, 'core', self.channel_metadata, create=True)
+        metadata.start()
+        self.addCleanup(metadata.stop)
 
     def tearDown(self):
         roku_app.LIVE_LEASES.clear()
@@ -72,12 +77,12 @@ class RokuAppTests(unittest.TestCase):
                 patch.object(roku_app.hls, 'wait_for_buffer', return_value=True) as warm:
             response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/manual/a'))
         self.assertEqual(response.status_code, 200)
-        start.assert_called_once_with(['http://provider/private'], on_target=callback)
+        start.assert_called_once_with(['http://provider/private'], on_target=callback, read_ahead=True)
         self.assertEqual(response.json['media_url'], 'http://localhost/guide/roku/opaque/stream.m3u8')
         self.assertNotIn('provider', response.get_data(as_text=True))
         self.assertIn(response.json['lease'], roku_app.LIVE_LEASES)
         self.assertEqual(response.json['live_delay_seconds'], 30)
-        self.assertEqual(warm.call_args.args[2], 32)
+        self.assertEqual(warm.call_args.args[2], 6)
         self.assertFalse(response.json['can_pause'])
 
     def test_live_movie_channel_retains_pause_history_without_restarting(self):
@@ -96,6 +101,72 @@ class RokuAppTests(unittest.TestCase):
         self.assertEqual(response.json['live_delay_seconds'], 0)
         self.assertNotIn('stream/movies', response.get_data(as_text=True))
         self.assertEqual(response.json['media_url'], 'http://localhost/roku/movie/opaque/stream.m3u8')
+
+    def test_provider_movie_uses_retained_recoverable_relay_and_live_lease(self):
+        self.channel_metadata.saved_manual_guide_channels.return_value = [
+            dict(name='US: HBO HITS (EAST)', group='PREMIUM MOVIES')]
+        callback = Mock()
+        with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['source', 'fallback'], callback)), \
+                patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())) as start, \
+                patch.object(roku_app.hls, 'wait_for_buffer', return_value=True):
+            response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/manual/a', low_latency=True))
+        self.assertEqual(response.status_code, 200)
+        start.assert_called_once_with(['source', 'fallback'], on_target=callback, read_ahead=True, retain_history=True)
+        self.assertTrue(response.json['can_pause'])
+        self.assertEqual(response.json['kind'], 'live')
+        self.assertEqual(response.json['live_delay_seconds'], 0)
+        self.assertIn(response.json['lease'], roku_app.LIVE_LEASES)
+        self.assertNotIn('fallback', response.get_data(as_text=True))
+
+    def test_client_cannot_change_sports_into_a_retained_movie(self):
+        with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['source'], None)), \
+                patch.object(roku_app.hls, 'start_session', return_value=SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())) as start, \
+                patch.object(roku_app.hls, 'wait_for_buffer', return_value=True):
+            response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/sports/3000', is_movie=True, can_pause=True))
+        self.assertFalse(response.json['can_pause'])
+        self.assertEqual(response.json['live_delay_seconds'], 4)
+        start.assert_called_once_with(['source'], on_target=None, read_ahead=False)
+        self.channel_metadata.saved_manual_guide_channels.assert_not_called()
+
+    def test_paused_provider_movie_lease_keeps_retained_session_alive(self):
+        with patch.object(roku_app.time, 'monotonic', return_value=100):
+            lease = roku_app.lease_live('retained')
+        data = dict(kind='live', token='retained', lease=lease, can_pause=True)
+        with patch.object(roku_app.hls, 'touch_session', return_value=object()) as touch, \
+                patch.object(roku_app.hls, 'stop_session', return_value=True) as stop:
+            for instant in (130, 280, 430, 580):
+                with patch.object(roku_app.time, 'monotonic', return_value=instant):
+                    self.assertTrue(self.client.post('/api/roku/playback/heartbeat', json=data).json['active'])
+                    roku_app.expire_live_leases()
+            stop.assert_not_called()
+            self.assertEqual(touch.call_count, 4)
+            self.assertTrue(self.client.post('/api/roku/playback/stop', json=data).json['stopped'])
+            stop.assert_called_once_with('retained')
+
+    def test_movie_metadata_matches_movies_tab_and_ignores_programme_genre(self):
+        cases = [
+            (dict(play_url='/guide/play/movies/action', name='Action'), True),
+            (dict(play_url='/guide/play/manual/a', name='HBO', group='PREMIUM MOVIES'), True),
+            (dict(play_url='/guide/play/manual/a', name='Cinema One'), True),
+            (dict(play_url='/guide/play/sports/3000', name='Movie Night'), False),
+            (dict(play_url='/guide/play/custom/a', name='Movie Night'), False),
+            (dict(play_url='/guide/play/manual/a', name='FOX', now={'categories': ['Movie']}), False),
+        ]
+        for channel, expected in cases:
+            with self.subTest(channel=channel):
+                self.assertEqual(roku_app.is_movie_channel(channel), expected)
+                row = roku_app.guide_payload([channel], now=100)['channels'][0]
+                self.assertEqual(row['is_movie'], expected)
+                if expected:
+                    self.assertFalse(row['is_sports'])
+
+    def test_movie_classification_uses_only_matching_saved_channel(self):
+        self.channel_metadata.saved_manual_guide_channels.return_value = [
+            dict(name='HBO', group='PREMIUM MOVIES')]
+        self.channel_metadata.channel_key.return_value = 'manual:another'
+        self.assertFalse(roku_app.provider_movie_channel('/guide/play/manual/a'))
+        self.channel_metadata.channel_key.return_value = 'manual:a'
+        self.assertTrue(roku_app.provider_movie_channel('/guide/play/manual/a'))
 
     def test_paused_live_movie_heartbeat_and_stop_use_private_session(self):
         with patch.object(roku_movie, 'touch', return_value=object()) as touch, \

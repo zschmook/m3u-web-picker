@@ -20,6 +20,7 @@ sub runRequest()
     result = {ok: false, error: "Server did not respond. Check its address and try again.", purpose: m.top.purpose, requestId: m.top.requestId}
     if sent
         timeout = 45000
+        if m.top.purpose = "movie_lighting" then timeout = 5000
         if m.top.purpose = "play" then timeout = 65000
         event = wait(timeout, port)
         if type(event) = "roUrlEvent"

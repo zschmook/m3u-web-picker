@@ -477,7 +477,7 @@
           <div class="guide-station-group">${escapeHtml(channel.group || "")}</div>
         </div>
         <button type="button" class="btn ${isPlaying ? "btn-outline-light" : "btn-success"} btn-sm guide-station-play"
-          ${disabled} data-guide-play-url="${escapeHtml(channel.play_url)}">${isPlaying ? "Playing" : "Play"}</button>
+          ${disabled} data-guide-play-url="${escapeHtml(channel.play_url)}">${guidePlayLabel(isPlaying)}</button>
         <button type="button" class="btn ${isListening ? "btn-danger" : "btn-outline-info"} btn-sm guide-station-listen"
           ${disabled} data-guide-play-url="${escapeHtml(channel.play_url)}" data-guide-listen="true"
           data-guide-listen-action="${isListening ? "stop" : "start"}">${isListening ? "Stop" : "Listen"}</button>

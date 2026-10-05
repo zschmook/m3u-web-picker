@@ -2,7 +2,7 @@
   "use strict";
 
   const PAGE_IDS = ["overview", "providers", "channels", "sports", "settings"];
-  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "jellyfin", "epg", "devices", "custom-channels"];
+  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "lighting", "jellyfin", "epg", "devices", "custom-channels"];
   const state = {
     status: null,
     activePage: "overview",
@@ -199,6 +199,7 @@
         <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="dvr">DVR</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="lighting">Movie Lighting</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="devices">Devices</button>
@@ -291,6 +292,22 @@
             <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiNetworkSave" type="button">Save Network Setting</button></div>
             <div class="ui-settings-status" id="uiNetworkStatus" role="status" aria-live="polite"></div>
           </div>
+        </section>
+        <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="lighting" aria-labelledby="uiLightingTitle">
+          <div class="ui-card-heading"><div><span id="uiLightingTitle">Movie Lighting</span><small>Set the room's brightness for watching and pausing a movie.</small></div></div>
+          <form id="uiLightingForm" class="ui-settings-form">
+            <label class="ui-settings-toggle" for="uiLightingEnabled"><input id="uiLightingEnabled" type="checkbox" role="switch"><span><strong>Enable movie lighting</strong><small>Change the selected light automatically during movie playback.</small></span></label>
+            <label class="ui-settings-field" for="uiLightingRoku"><span>Roku in this room</span><select id="uiLightingRoku" class="form-control" required><option value="">Choose a Roku</option></select></label>
+            <label class="ui-settings-field" for="uiLightingLight"><span>Light in this room</span><select id="uiLightingLight" class="form-control" required><option value="">Choose a light</option></select></label>
+            <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiLightingRefresh" type="button">Refresh Light Names</button></div>
+            <div class="ui-settings-runtime">Only the selected light responds to this Roku. Other lights stay unchanged.</div>
+            <label class="ui-settings-field" for="uiLightingPlaying"><span>Playing brightness (%)</span><input id="uiLightingPlaying" class="form-control" type="number" min="1" max="100" step="1" required></label>
+            <label class="ui-settings-field" for="uiLightingPaused"><span>Paused brightness (%)</span><input id="uiLightingPaused" class="form-control" type="number" min="1" max="100" step="1" required></label>
+            <label class="ui-settings-field" for="uiLightingFade"><span>Fade time (seconds)</span><input id="uiLightingFade" class="form-control" type="number" min="0" max="5" step="0.1" required></label>
+            <div class="ui-settings-runtime">Playing uses the playing brightness. Pausing or returning to the guide uses the paused brightness.</div>
+            <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiLightingSave" type="submit">Save Lighting Settings</button></div>
+            <div class="ui-settings-status" id="uiLightingStatus" role="status" aria-live="polite"></div>
+          </form>
         </section>
         <section class="ui-modern-card ui-jellyfin-settings-card ui-settings-panel" data-settings-panel-content="jellyfin" aria-labelledby="uiJellyfinSettingsTitle">
           <div class="ui-card-heading">

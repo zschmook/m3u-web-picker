@@ -22,12 +22,34 @@ SPORTS_DELAY_SECONDS = 4
 ENTERTAINMENT_DELAY_SECONDS = 30
 
 
+def is_movie_channel(channel):
+    play_url = str(channel.get('play_url') or '')
+    if play_url.startswith('/guide/play/movies/'):
+        return True
+    if play_url.startswith(('/guide/play/custom/', '/guide/play/sports/')):
+        return False
+    labels = ' '.join(str(channel.get(key) or '') for key in ('name', 'group'))
+    return bool(re.search(r'\b(movies?|cinema|films?)\b', labels, re.IGNORECASE))
+
+
+def provider_movie_channel(play_url):
+    """Use saved channel metadata, never a client-supplied pause/category flag."""
+    manual = re.fullmatch(r'/guide/play/manual/([^/]+)', str(play_url or ''))
+    if not manual:
+        return False
+    key = 'manual:' + manual.group(1)
+    for channel in guide.core.saved_manual_guide_channels():
+        if guide.core.channel_key(channel) == key:
+            return is_movie_channel(dict(name=channel.get('name'), group=channel.get('group'), play_url=play_url))
+    return False
+
+
 def is_sports_channel(channel):
     play_url = str(channel.get('play_url') or '')
     if play_url.startswith('/guide/play/sports/'):
         return True
     # A football documentary or sports movie remains an entertainment stream.
-    if play_url.startswith(('/guide/play/custom/', '/guide/play/movies/')):
+    if play_url.startswith('/guide/play/custom/') or is_movie_channel(channel):
         return False
     current = channel.get('now') or {}
     labels = [channel.get('name', ''), channel.get('group', ''), *(current.get('categories') or [])]
@@ -112,7 +134,7 @@ def guide_payload(channels, now=None, hours=8):
             logo = '/static/icons/guide-192.png'
         rows.append(dict(number=str(channel.get('number', '')), name=channel.get('name', ''),
             group=channel.get('group', ''), logo=logo, play_url=channel.get('play_url', ''),
-            is_sports=is_sports_channel(channel), programmes=programmes))
+            is_sports=is_sports_channel(channel), is_movie=is_movie_channel(channel), programmes=programmes))
     return dict(server_time=int(now), window_hours=hours, channels=rows)
 
 
@@ -178,7 +200,8 @@ def register_roku_app_routes(app):
             return no_cache(jsonify(token=session.token, kind='movie', is_live=True, can_pause=True,
                 live_delay_seconds=0,
                 media_url=request.url_root.rstrip('/') + f'/roku/movie/{session.token}/stream.m3u8'))
-        low_latency = play_url.startswith('/guide/play/sports/') or data.get('low_latency') is True
+        pausable_movie = provider_movie_channel(play_url)
+        low_latency = not pausable_movie and (play_url.startswith('/guide/play/sports/') or data.get('low_latency') is True)
         delay = SPORTS_DELAY_SECONDS if low_latency else ENTERTAINMENT_DELAY_SECONDS
         try:
             if play_url == director.PLAY_URL:
@@ -188,14 +211,17 @@ def register_roku_app_routes(app):
                     raise RuntimeError('Channel is warming up.')
                 return no_cache(jsonify(token='', kind='live',
                     media_url=request.url_root.rstrip('/') + director.STREAM_PATH))
-            session = hls.start_session(targets, on_target=callback)
-            if not hls.wait_for_buffer(session.directory, session.process, delay + 2):
+            options = dict(on_target=callback, read_ahead=not low_latency)
+            if pausable_movie:
+                options['retain_history'] = True
+            session = hls.start_session(targets, **options)
+            if not hls.wait_for_buffer(session.directory, session.process, 6):
                 hls.stop_session(session.token)
                 raise RuntimeError('Channel did not build a playback buffer.')
         except (ValueError, RuntimeError, OSError):
             return jsonify(error='Channel could not start. Try again.'), 502
-        return no_cache(jsonify(token=session.token, lease=lease_live(session.token), kind='live', can_pause=False,
-            live_delay_seconds=delay,
+        return no_cache(jsonify(token=session.token, lease=lease_live(session.token), kind='live', can_pause=pausable_movie,
+            live_delay_seconds=0 if pausable_movie else delay,
             media_url=request.url_root.rstrip('/') + f'/guide/roku/{session.token}/stream.m3u8'))
 
     @app.post('/api/roku/playback/stop')

@@ -37,6 +37,17 @@
       </div>
     </header>
 
+    <section id="guidePhonePlayerControls" class="d-none mb-3">
+      <div class="d-flex gap-2 align-items-center">
+        <label for="guidePhonePlayer">Play on this phone</label>
+        <select id="guidePhonePlayer" class="form-select form-select-sm w-auto">
+          <option value="vlc">VLC</option>
+          <option value="browser">Browser</option>
+        </select>
+      </div>
+      <div id="guidePhonePlayerHelp" class="small-muted mt-1" role="status">Opens the VLC app. For locked-screen audio, enable Play videos in background in VLC settings.</div>
+    </section>
+
     <section id="guidePlayerPanel" class="guide-player-panel d-none mb-3" aria-live="polite">
       <div class="guide-player-heading">
         <div class="guide-player-copy">
@@ -174,7 +185,8 @@
     </div>
   </dialog>
 
-  <script src="{{ url_for('static', filename='js/guide.js', v='movie-channels-1') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide_vlc.js', v='android-vlc-1') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide.js', v='android-vlc-1') }}"></script>
   <script>
     (() => {
       const castButton = document.getElementById("guideCastBtn");
@@ -469,7 +481,7 @@
       attachCastDisconnectHandoff(0);
     })();
   </script>
-  <script src="{{ url_for('static', filename='js/guide_multi_roku.js', v='multi-roku-v1') }}"></script>
+  <script src="{{ url_for('static', filename='js/guide_multi_roku.js', v='stop-playback-scope-1') }}"></script>
   <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 </body>
 </html>

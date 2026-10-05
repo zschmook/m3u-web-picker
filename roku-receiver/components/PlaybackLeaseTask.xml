@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PlaybackLeaseTask" extends="Task">
+  <interface>
+    <field id="url" type="string" />
+    <field id="body" type="string" />
+    <field id="diagnostics" type="boolean" value="false" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/PlaybackLeaseTask.brs" />
+</component>

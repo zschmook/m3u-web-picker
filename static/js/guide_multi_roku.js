@@ -267,10 +267,11 @@
   };
 
   window.stopRokuPlayback = async function({sendHome = true, deviceKey = ""} = {}) {
-    const selected = selectedSession();
-    const host = selected?.host || selectedHost();
-    const key = String(deviceKey || multiRoku.sessionKeyByHost.get(host) || selected?.deviceKey || selectedDeviceKey() || "");
-    const session = multiRoku.sessions.get(key) || selected || null;
+    const session = deviceKey ? multiRoku.sessions.get(deviceKey) : selectedSession();
+    // Discovery and saved-device selection never authorize stopping a TV app.
+    if (!session) return;
+    const host = session.host;
+    const key = session.deviceKey;
     const token = session?.token || "";
     const saved = multiRoku.savedByKey.get(key) || multiRoku.savedByHost.get(host) || null;
 

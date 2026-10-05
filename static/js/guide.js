@@ -137,7 +137,7 @@ function renderGuide() {
             data-play-url="${escapeHtml(channel.play_url)}"
             data-channel-name="${escapeHtml(channel.name)}"
             data-channel-group="${escapeHtml(channel.group || "")}" 
-            data-channel-logo="${escapeHtml(channel.logo || "")}">${isCurrent ? "Playing" : "Play"}</button>
+            data-channel-logo="${escapeHtml(channel.logo || "")}">${guidePlayLabel(isCurrent)}</button>
         </td>
       </tr>`;
   }).join("");
@@ -315,6 +315,8 @@ async function testRoku() {
 
 async function stopRokuPlayback({sendHome = true} = {}) {
   const token = guideState.roku.relayToken;
+  // A remembered TV address is not a playback session owned by the guide.
+  if (!guideState.roku.active && !token) return;
   const host = guideState.roku.host || configuredRokuHost();
   guideState.roku.relayToken = "";
   guideState.roku.active = false;
@@ -583,11 +585,15 @@ async function stopRemoteMedia() {
 }
 
 async function stopPlayback() {
+  const mode = guideState.mode;
   stopLocalStream({hidePanel: false});
   stopListenStream();
-  await stopRemoteMedia();
-  await stopCastRelay();
-  await stopRokuPlayback({sendHome: true});
+  if (mode === "cast") {
+    await stopRemoteMedia();
+    await stopCastRelay();
+  } else if (mode === "roku") {
+    await stopRokuPlayback({sendHome: true});
+  }
   clearRestartPlayback();
   guideState.currentChannel = null;
   guideEls.playerPanel.classList.add("d-none");
@@ -943,6 +949,10 @@ async function castChannel(channel) {
 
 async function playChannel(channel) {
   if (channel?.available === false) return;
+  if (guidePrefersVlc()) {
+    playGuideInVlc(channel);
+    return;
+  }
   if (guideState.roku.active) {
     try {
       await startRokuChannel(channel);

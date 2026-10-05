@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component name="MainScene" extends="Scene">
-  <interface><function name="playUrl" /></interface>
+  <interface><function name="playUrl" /><function name="scanNetwork" /></interface>
   <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+  <script type="text/brightscript" uri="pkg:/components/GuideCategories.brs" />
+  <script type="text/brightscript" uri="pkg:/components/GuideDetails.brs" />
+  <script type="text/brightscript" uri="pkg:/components/PlaybackDiagnostics.brs" />
+  <script type="text/brightscript" uri="pkg:/components/MovieLighting.brs" />
   <children>
     <Group id="guidePanel">
       <Poster uri="pkg:/images/icon.png" translation="[64, 44]" width="72" height="72" />
-      <Label text="TV Guide" translation="[156, 52]" width="1600" height="60" font="font:LargeBoldSystemFont" />
-      <Label id="status" visible="false" translation="[64, 150]" width="1760" height="44" color="0x9eafc8ff" />
-      <GuideGrid id="grid" translation="[64, 160]" duration="10800" numRows="9" />
+      <Label text="TV Guide" translation="[156, 44]" width="1600" height="72" vertAlign="center" font="font:LargeBoldSystemFont" />
+      <Label id="status" visible="false" translation="[64, 236]" width="1760" height="44" color="0x9eafc8ff" />
+      <GuideTabs id="tabs" translation="[64, 136]" />
+      <GuideGrid id="grid" translation="[64, 216]" duration="10800" numRows="9" />
     </Group>
-    <Video id="video" visible="false" width="1920" height="1080" enableUI="false" enableDecoderStats="true" />
+    <Video id="video" visible="false" width="1920" height="1080" enableUI="false" />
     <Label id="playerStatus" visible="false" translation="[64, 980]" width="1760" height="64" color="0xffffffff" />
     <Timer id="refreshTimer" duration="120" repeat="true" />
-    <Timer id="heartbeatTimer" duration="30" repeat="true" />
   </children>
 </component>

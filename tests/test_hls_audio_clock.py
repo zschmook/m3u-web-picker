@@ -124,10 +124,9 @@ class HlsAudioClockTests(unittest.TestCase):
             self.assertFalse(session.producer.reader.is_alive())
             self.assertFalse(session.directory.exists())
 
-    def test_provider_clock_reset_keeps_audio_monotonic_and_cues_aligned(self):
-        # A reconnect can replace the TS source with an encoder whose clock
-        # starts over. The resampler must trim overlap rather than emit the
-        # first four seconds of padding a second time.
+    def test_replayed_provider_window_is_not_encoded_as_new_footage(self):
+        # The same source packets arrive again after reconnect. Monotonic output
+        # alone is insufficient: retiming that window makes it visibly replay.
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             clip=root/'clip.ts'
@@ -157,8 +156,8 @@ class HlsAudioClockTests(unittest.TestCase):
             audio=array.array('h',subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
                 '-i',str(combined),'-map','0:a:0','-ac','1','-ar','48000','-f','s16le','pipe:1'],
                 capture_output=True,check=True,timeout=10).stdout)
-            self.assertAlmostEqual(len(audio)/48000,8,delta=.15,
-                msg='A reconnect must not duplicate several seconds of audio or silence.')
+            self.assertAlmostEqual(len(audio)/48000,4,delta=.15,
+                msg='A replayed source window must be discarded instead of retimed forward.')
             video=subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
                 '-i',str(combined),'-map','0:v:0','-pix_fmt','gray','-fps_mode','passthrough',
                 '-f','rawvideo','pipe:1'],capture_output=True,check=True,timeout=10).stdout
@@ -166,10 +165,45 @@ class HlsAudioClockTests(unittest.TestCase):
                 if sum(video[i*160*90:(i+1)*160*90])/(160*90)>128]
             tones=[tracks[1][0]+i/48000 for i in range(0,len(audio)-960,960)
                 if sum(abs(s) for s in audio[i:i+960])/960>500]
-            for lower,upper in ((3,4),(7,8)):
+            for lower,upper in ((3,4),):
                 flash=next(t for t in flashes if lower<t<upper)
                 tone=next(t for t in tones if lower<t<upper)
                 self.assertAlmostEqual(flash,tone,delta=.1)
+
+    def test_long_reconnect_overlap_does_not_replay_old_video(self):
+        # Cross the default ten-second timestamp-correction threshold, with
+        # an unambiguous increasing visual cue rather than only packet clocks.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', "nullsrc=s=64x36:r=10:d=36,geq=lum='16+N*0.45':cb=128:cr=128",
+                '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=36',
+                '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '0', '-g', '20',
+                '-c:a', 'aac', '-f', 'segment', '-segment_time', '2', '-segment_format', 'mpegts',
+                '-reset_timestamps', '0', str(root / 'source_%03d.ts')],
+                capture_output=True, check=True, timeout=15)
+            segments = sorted(root.glob('source_*.ts'))
+            source = root / 'overlap.ts'
+            source.write_bytes(b''.join(p.read_bytes() for p in segments[:13] + segments[6:]))
+            output = root / 'relay'
+            output.mkdir()
+            with patch('media.ffmpeg.media_pipeline.active_encoder', return_value='libx264'):
+                subprocess.run(hls._hls_command(str(source), output),
+                    capture_output=True, check=True, timeout=55)
+            combined = root / 'output.ts'
+            combined.write_bytes(b''.join(p.read_bytes() for p in sorted(output.glob('segment_*.ts'))))
+            video = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-i', str(combined), '-map', '0:v:0', '-pix_fmt', 'gray', '-fps_mode', 'passthrough',
+                '-f', 'rawvideo', 'pipe:1'], capture_output=True, check=True, timeout=10).stdout
+            means = [sum(video[i:i+64*36])/(64*36) for i in range(0, len(video), 64*36)]
+            self.assertAlmostEqual(len(means)/10, 36, delta=.3,
+                msg='The fourteen-second old window must not extend the unique footage.')
+            self.assertFalse(any(b < a-5 for a, b in zip(means, means[1:])),
+                'An increasing source visual cue must not jump backward after reconnect.')
+            audio = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-i', str(combined), '-map', '0:a:0', '-ac', '1', '-ar', '48000',
+                '-f', 's16le', 'pipe:1'], capture_output=True, check=True, timeout=10).stdout
+            self.assertAlmostEqual(len(audio)/2/48000, 36, delta=.3)
 
     def test_missing_audio_samples_preserve_timeline_and_live_pacing(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -10,6 +10,7 @@
     <field id="programFocused" type="integer" value="0" />
     <field id="programSelected" type="integer" alwaysNotify="true" />
     <field id="channelInfoSelected" type="integer" alwaysNotify="true" />
+    <field id="tabsRequested" type="boolean" alwaysNotify="true" />
     <field id="jumpToChannel" type="integer" alwaysNotify="true" onChange="onJumpChannel" />
     <field id="jumpToTime" type="string" alwaysNotify="true" onChange="onJumpTime" />
   </interface>
@@ -17,5 +18,6 @@
   <children>
     <Group id="canvas" clippingRect="[0,0,1760,838]" />
     <Timer id="clock" duration="30" repeat="true" />
+    <Timer id="keyRepeat" duration="0.12" repeat="true" />
   </children>
 </component>
