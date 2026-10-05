@@ -1,364 +1,234 @@
 # M3U Web Picker
 
-M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide and DVR, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
+Turn a large IPTV catalog into the channels you actually watch. M3U Web Picker combines a curated M3U/XMLTV lineup, sports event channels, a browser TV guide, DVR, and Roku/Cast playback. It can also build continuous TV and movie channels from an accessible Plex library.
 
-Docker is the supported runtime. Every push to `main` reserves the next numbered release (`v32`, `v33`, ...), builds its Docker image, and publishes the release when image checks succeed. Retrying a workflow reuses the same version. Existing installer packaging runs separately afterward.
+The app runs in Docker on Windows, macOS, and Linux. Start with a [packaged installer](#install-recommended) or the [published Compose configuration](#install-with-docker-compose). Git and a local image build are only needed for development.
 
-## Run the published Docker image
+## What it does
 
-The image is **`ghcr.io/zschmook/m3u-web-picker:latest`**. `latest` follows the newest completed main release; use a version such as `:v32` to keep a specific release. Images support Linux AMD64 and ARM64, including Docker Desktop on Windows and Intel/Apple Silicon Macs. No GitHub sign-in is needed to pull the public image.
+- **Channels and guide:** load an M3U URL/file or Xtream provider, choose and reorder channels, and combine provider XMLTV with optional public guide sources.
+- **Sports Automation:** follow teams and leagues, generate temporary event channels, and try ordered fallback providers when the primary provider has no usable feed.
+- **Browser playback:** watch live TV, use Picture-in-Picture, or listen to an audio-only stream. Android phones can hand playback to VLC.
+- **DVR:** record a program or series, browse completed recordings, and optionally remove commercials and convert recordings to H.265/MKV.
+- **TV devices:** browse the native Roku guide, send playback from the browser to Roku or Google Cast, or use the virtual HDHomeRun interface with compatible clients.
+- **Plex custom channels — experimental:** create continuous show channels, movie genre channels, and optional nostalgia commercial breaks from your own media.
+- **Movie lighting — experimental:** set playing and paused brightness for a selected Roku and an identified compatible light.
 
-For a new installation, download [docker-compose.release.yml](https://github.com/zschmook/m3u-web-picker/releases/latest/download/docker-compose.release.yml) into an empty folder. Open a terminal in that folder and run:
+## Install (recommended)
 
-```text
+1. Install and start **Docker Desktop** on Windows/macOS, or **Docker Engine with Compose v2** on Linux. Docker Desktop must use Linux containers.
+2. Download the installer for your computer from the [latest release](https://github.com/zschmook/m3u-web-picker/releases/latest):
+
+   | System | Download |
+   | --- | --- |
+   | Windows | [M3U-Web-Picker-Windows-Setup.exe](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe) |
+   | macOS | [M3U-Web-Picker-macOS.dmg](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) |
+   | Linux | [M3U-Web-Picker-Linux.tar.gz](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz) |
+
+3. Run the installer. On macOS, open the DMG and Control-click **Install M3U Web Picker → Open**; the package is unsigned. On Linux, extract the archive and run the executable from a terminal; a Python fallback is included.
+4. Open [http://localhost:9999](http://localhost:9999) and complete first-run setup.
+
+The installer downloads a published release and pulls its matching Docker image. It detects the host's LAN address, configures persistent storage, and opens setup. You do not need Git, Python, a GitHub login, or a separate host FFmpeg installation. Docker itself must already be installed and running.
+
+For an existing installation, choose **UPGRADE (UP)** to keep settings and recordings. **CLEAN (CL)** requires typing `CLEAN` before deleting saved application data; the separate DVR recording folder is retained. See the [installer documentation](installer/docker/README.md) for install locations and platform details.
+
+## Install with Docker Compose
+
+For a new installation, save [docker-compose.release.yml](https://github.com/zschmook/m3u-web-picker/releases/latest/download/docker-compose.release.yml) in an empty folder. Open a terminal in that folder and run:
+
+```sh
 docker compose -f docker-compose.release.yml up -d
 ```
 
-Open **http://localhost:9999**. This downloads the image and preserves settings in a named Docker volume; it does not build the application locally. For an existing source install, use this file from the existing install folder so the same project and runtime paths are retained.
+Open [http://localhost:9999](http://localhost:9999). Compose pulls the image and creates persistent storage automatically.
 
-In Docker Desktop you can also pull the full image name above, then use **Run → Optional settings** to map host port `9999` to container port `9999` and mount persistent storage at `/app/data`. The Compose file or packaged installer also configures DVR and backup storage, and is the recommended path. Docker Desktop's Docker Hub search does not list this GitHub-hosted image; use the full `ghcr.io/...` name.
+The public image is **`ghcr.io/zschmook/m3u-web-picker:latest`**. It supports Linux AMD64 and ARM64, including Docker Desktop on Windows and Intel/Apple Silicon Macs. `latest` follows the newest successfully published main release. To pin a release, set `M3U_IMAGE=ghcr.io/zschmook/m3u-web-picker:v33` in `.env`, using the version you want from [Releases](https://github.com/zschmook/m3u-web-picker/releases).
 
-For Roku/Cast/LAN clients, save `M3U_LAN_HOST=<your computer's private IPv4 address>` in a `.env` file beside the Compose file. Download `docker-compose.gpu.yml` from the same release to optionally enable NVIDIA passthrough on supported Windows/Linux hosts. Port 80 is optional: use `docker-compose.discovery.yml` only for HDHomeRun clients that require bare-IP HTTP discovery and when port 80 is free.
+### Docker Desktop
 
-To update a manual image installation, keep the same folder and volumes, then run:
+Docker Desktop's Docker Hub search does not list this GitHub-hosted image. A GitHub repository URL cannot be used as an image name. Pull the full registry name from a terminal:
 
-```text
+```sh
+docker pull ghcr.io/zschmook/m3u-web-picker:latest
+```
+
+The image then appears under **Images → Local**. To run it there, choose **Run → Optional settings**, map host port `9999` to container port `9999`, and mount persistent storage at `/app/data`. The installer or Compose configuration is recommended because it also configures DVR and backup storage.
+
+### Network, recording paths, and GPU
+
+For manual Compose installs, create `.env` beside the Compose file before starting. You can download the [environment template](https://github.com/zschmook/m3u-web-picker/releases/latest/download/default.env.example) and save it as `.env`, or add only the settings you need:
+
+```dotenv
+M3U_LAN_HOST=192.168.1.25
+M3U_DVR_DIR=C:/Users/YourName/Videos/M3U-Web-Picker-DVR
+```
+
+Replace the sample address and path with your own. On macOS/Linux, use an absolute recording path such as `/home/yourname/Videos/M3U-Web-Picker-DVR`. The packaged installer sets these values for you.
+
+| Setting | Purpose |
+| --- | --- |
+| `M3U_LAN_HOST` | Docker host's private IPv4 address, required for advertised Roku/Cast/HDHomeRun media URLs. |
+| `M3U_HOST_PORT` / `M3U_EXTERNAL_PORT` | Host port and advertised URL port; both default to `9999` and should match. |
+| `M3U_DVR_DIR` | Host recording folder; manual Compose defaults to `./runtime/recordings`. |
+| `M3U_BACKUP_DIR` | Host backup folder; defaults to `./runtime/backups`. |
+| `M3U_IMAGE` | Published image/version; manual Compose defaults to `latest`, while the installer pins its release. |
+
+Reach the app from another LAN device at `http://<your-host-IP>:9999`. Changing the advertised address in **Settings → Network** does not change Docker's port mapping; port or environment changes require recreating the container and interrupt playback.
+
+For NVIDIA acceleration on a supported Windows/Linux host, download [docker-compose.gpu.yml](https://github.com/zschmook/m3u-web-picker/releases/latest/download/docker-compose.gpu.yml) beside the release Compose file, then use both files:
+
+```sh
+docker compose -f docker-compose.release.yml -f docker-compose.gpu.yml up -d
+```
+
+The installer requests NVIDIA passthrough when `nvidia-smi` is available. Docker GPU passthrough is not supported on macOS; FFmpeg uses CPU fallback there.
+
+Port `80` is optional. Only add [docker-compose.discovery.yml](https://github.com/zschmook/m3u-web-picker/releases/latest/download/docker-compose.discovery.yml) if an HDHomeRun client requires bare-IP HTTP discovery and that port is free. Normal setup and browser access use port `9999`.
+
+## First-run setup
+
+A fresh application-data volume opens the setup wizard. Existing configured installations keep their saved state and skip it.
+
+1. **Choose a provider:** enter a direct M3U URL or an Xtream base URL with its username and password. The built-in free public demo lets you try the app without an IPTV subscription.
+2. **Choose channels:** search/filter the catalog, select channels to keep, arrange their order, and save. **Hide SD / Low Bandwidth Channels** can reduce the catalog.
+3. **Choose optional sports rules:** select teams/leagues and, if wanted, API-SPORTS schedule support.
+4. **Set the Master Update schedule:** this refreshes provider, guide, and sports data automatically. **Update Now** on Overview runs it immediately.
+
+For Xtream, use the server/base address, such as `https://provider.example:8080`, and put credentials in their separate fields. The app constructs the API, playlist, and XMLTV endpoints. It imports live TV rather than the provider's VOD/series library.
+
+To change providers later, open **Providers → Load Primary**. A local `.m3u`/`.m3u8` file can also be used through **Use File as Primary**. Sports fallback providers are configured separately and do not populate the normal Channels catalog. Provider credentials and saved settings live in persistent runtime storage.
+
+## Playlists and guide URLs
+
+Use the app's **Outputs** controls to copy complete URLs for your host. The main endpoints are:
+
+| Output | Path |
+| --- | --- |
+| Curated M3U lineup | `/playlist/channels.m3u` |
+| Direct-provider M3U fallback | `/playlist/channels.direct.m3u` |
+| Combined XMLTV guide | `/epg/epg.xml` |
+| Sports XMLTV guide | `/epg/sports.xml` |
+| Browser TV Guide | `/guide` |
+| Channel 0.2 phone remote | `/remote` |
+| Current Roku app ZIP | `/roku/app.zip` |
+
+For example, a LAN client's combined guide URL is `http://<your-host-IP>:9999/epg/epg.xml`. Provider XMLTV remains authoritative; additional public country feeds fill uncovered guide windows.
+
+**Settings → Encoding** controls application-wide FFmpeg encoding and is disabled by default. When enabled, the normal curated M3U routes IPTV channels through Picker; the direct-provider fallback bypasses that encoding. Enabling encoding runs a hardware check, and CPU fallback requires an explicit performance acknowledgement.
+
+The Docker image includes FFmpeg and Comskip. Browser, Roku, Cast, custom-channel, and DVR features use FFmpeg as needed even when global IPTV encoding is disabled. Browser fragmented MP4, MPEG-TS clients, and HLS clients use separate output sessions, so different client types may consume separate provider connections for the same channel.
+
+## TV Guide, phones, and devices
+
+The TV Guide provides a scrolling schedule, channel/program search, day navigation, playback, and DVR controls. Current programs offer **Play now** or **Listen**; future programs can be scheduled for recording. Listen mode requires FFmpeg, which is included in the Docker image; it removes video on the server and sends audio to the browser. **Pop out** uses Picture-in-Picture where supported.
+
+Android phones show **Play on this phone → VLC / Browser**. Install VLC to use the app handoff; for locked-screen audio, enable **Play videos in background** in VLC settings. If it does not open, choose **Browser** and press Play again.
+
+Use **Stream → Roku / Cast** to send a channel to a TV. Multiple Roku devices can be saved, and the Devices page shows device and remote playback status. Receivers must be able to reach the Picker host's advertised LAN address.
+
+The **Remote** page controls virtual channel **0.2**. Tune a browser or Roku to that output once, then use your phone to switch among enabled channels and playable sports feeds. The selector remuxes the chosen feed into a stable HLS output without re-encoding it.
+
+Remote phone access currently requires Tailscale. The Guide and Remote can be installed as separate PWAs from their HTTPS addresses. Do not expose M3U Web Picker directly to the internet: it does not provide a hardened public login boundary. A remote phone sending playback to a Roku acts as the controller; the Roku receives video from Picker on the home network.
+
+## Roku app
+
+The included Roku developer app has a TV guide with category tabs, program details, direct playback, and movie pause/resume controls. It can browse IPTV, sports, and Plex custom channels; it also remains compatible with playback sent from the web guide.
+
+Download the current app from **`http://<your-host-IP>:9999/roku/app.zip`** after configuring `M3U_LAN_HOST`. The ZIP is generated from the installed app and includes your server address. It is sideloaded through Roku developer mode, rather than installed from the Roku Channel Store.
+
+1. From Roku's home screen, press **Home ×3, Up ×2, Right, Left, Right, Left, Right**.
+2. Choose **Enable installer and restart**, accept the developer agreement, and set a developer password.
+3. From a computer on the same LAN, open the Roku's IP address in a browser. Sign in as `rokudev` with that password.
+4. Upload the downloaded ZIP through the Development Application Installer. **Do not extract it.**
+
+Roku allows one sideloaded developer application at a time, so this replaces any existing sideloaded app. If remote control is blocked, check Roku's **Control by mobile apps** setting. See the [user guide](docs/USER-GUIDE.md) for further LAN troubleshooting.
+
+## Plex custom channels and movie lighting
+
+Open **Settings → Custom Channels** to enable the experimental Plex catalog. Refresh reachable, authorized Plex libraries and choose which shows become channels. Show channels can run in episode order or shuffled order, with season limits. Optional commercials use clips imported from your own MP4 collection.
+
+Movie channels include genre mixes, Hallmark, Film Noir, and **Just Released**, which uses the five newest movie release dates. They play without commercials and shuffle without repeats until a channel's pool is exhausted. Custom channels join the existing playlists and XMLTV guide. For Plex movies, **Restart Movie**, **Pause Movie**, and **Back to Live** switch between playback from the beginning and the shared channel schedule.
+
+Under **Settings → Movie Lighting**, select the room's Roku and an identified compatible LAN bulb, then set playing brightness, paused brightness, and fade time. During movie playback, that Roku controls only the selected bulb. Pausing or returning to the guide uses the paused brightness. This experimental integration requires previously identified local dimmable bulbs; **Refresh Light Names** updates known bulbs rather than discovering new smart-light platforms.
+
+## Sports Automation
+
+Follow teams, leagues, conferences, or broad sports. Automation matches provider channels and XMLTV, then publishes temporary event channels with stable league numbering. Saved manual channels remain separate from generated sports feeds.
+
+Ordered fallback providers are tried when the primary provider has no usable sports feed. Optional API-SPORTS adapters provide canonical schedules for MLB, NFL, and NCAA Football; other sports use provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
+
+## DVR, storage, and backups
+
+Open **DVR** in the guide for **Upcoming & Status** or the completed-recording **Library**. Record individual programs or series, then play saved recordings through the browser. The red DVR badge counts recordings in progress.
+
+**Settings → DVR** controls when completed recordings are processed: immediately, during application updates, or manually with **Process Recordings Now**. Optional Comskip detection runs before H.265/MKV conversion. Failed detection/cutting keeps the recording uncut; failed conversion preserves the original capture. Processing prefers NVIDIA NVENC where available and can retry with CPU encoding.
+
+The optional **Plex folder** exports converted recordings into show/season folders with episode names. These are ordinary MKVs usable by other media servers too. In Docker, the destination must be inside the mounted DVR folder, such as `C:/Users/YourName/Videos/M3U-Web-Picker-DVR/PLEX`.
+
+| Storage | Container location | Default host location |
+| --- | --- | --- |
+| Settings, providers, channel selections, schedules | `/app/data` | Persistent `m3u-picker-data` volume in Compose project `m3u-picker` |
+| DVR captures and converted recordings | `/recordings` | Installer: user's Videos/M3U-Web-Picker-DVR folder (Movies on macOS); manual Compose: `./runtime/recordings` |
+| Backups | `/backups` | `./runtime/backups`, or `M3U_BACKUP_DIR` |
+| Imported commercial clips | `/commercials` | Persistent `m3u-picker-commercials` volume |
+
+Container replacement preserves these mounts. `docker compose down` retains named volumes; **`down -v` deletes them** and must not be used for a normal update.
+
+Optional **Jellyfin cache cleanup** runs only after a successful Master Update. It requires an explicit `M3U_JELLYFIN_CACHE_DIR` mount and acknowledgement in Settings. The configured path is trusted: verify that it is only Jellyfin's cache, because a wrong path/mount can recursively delete unrelated files.
+
+## Updating
+
+**Installer users:** run the installer again and choose **UPGRADE (UP)**. It downloads the latest release and pulls its matching image before stopping the existing installation.
+
+**Manual Compose users:** run these commands from the same installation folder:
+
+```sh
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 ```
 
-An update replaces the running app container and briefly interrupts playback. Avoid `down -v` during updates: it deletes saved application data.
+Keep any GPU/discovery override files in both commands. If `.env` pins `M3U_IMAGE` to a numbered version, change it to the desired release first; pulling does not change a pinned version.
 
-## Packaged installers
+An update replaces the running container and briefly interrupts playback/recording sessions. Keep the same project, `.env`, volumes, and recording paths. For an existing source install, use the release Compose file from the existing checkout directory to retain its project and relative runtime paths.
 
-Install and start Docker Desktop (Windows/macOS) or Docker Engine with Compose v2 (Linux), then use the installer for the host:
+For logs with the release configuration:
 
-- [Windows EXE](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Windows-Setup.exe)
-- [macOS DMG](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — unsigned
-- [Linux archive](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz)
-
-The three packages use one installer implementation. They download the latest release's configuration without Git and pull its matching versioned Docker image before stopping an existing installation. They install production on port `9999`, preserve saved setup during `UPGRADE (UP)`, and require a separate `CLEAN` confirmation before deleting Docker application data. DVR recordings remain in their separately mounted host folder.
-
-## Docker quick start from source
-
-The existing source-based setup remains available. On Windows, install Git for Windows and run this in Git Bash. On macOS or Linux, run it in Terminal after installing Git:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/zschmook/m3u-web-picker/main/scripts/docker-setup.sh | sh
+```sh
+docker compose -f docker-compose.release.yml logs --tail 100
 ```
 
-The script verifies Docker is running, downloads or updates M3U Web Picker in `~/m3u-web-picker`, detects the computer's LAN IPv4 address, saves it in `.env`, and builds and starts the container. Existing application data is preserved. Set `M3U_PICKER_DIR` before running it to choose a different checkout location.
+Every push to `main` reserves the next numbered tag and draft release, builds AMD64/ARM64 images, runs container tests, and verifies anonymous image access. Successful runs publish the release and update `latest` when their commit is still the current main head. Windows/macOS/Linux installer packaging then runs against that exact tag. Retrying a release workflow reuses its tag; installer downloads may appear shortly after the image and Compose files.
 
-On Linux and Windows, the installers automatically request NVIDIA GPU passthrough when `nvidia-smi` is available. GPU passthrough is not supported yet for Docker installs on macOS, so FFmpeg uses CPU fallback there.
+## Development and source builds
 
-Open `http://localhost:9999`.
+Use a source checkout when changing the app. The root `docker-compose.yml` builds locally; `docker-compose.release.yml` pulls the published image.
 
-A fresh data volume opens the first-run setup wizard. Existing configured installs skip the wizard and keep their persisted state.
+```sh
+git clone https://github.com/zschmook/m3u-web-picker.git
+cd m3u-web-picker
+```
 
-The standalone setup flow is also available as an isolated test stack on port `9998`. It does not modify or restart the normal port `9999` installation.
+Copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell, or `cp .env.example .env` on macOS/Linux), set the host address and storage paths, then build:
 
-## Running the application
-
-The packaged installer is the recommended path. The source script remains useful for development checkouts and manual installations.
-
-To install manually from a fresh Windows PowerShell session after Docker Desktop is installed and running:
-
-```powershell
-Set-Location C:\
-git clone https://github.com/zschmook/m3u-web-picker.git C:\m3u-web-picker
-Set-Location C:\m3u-web-picker
-Copy-Item .env.example .env
-notepad .env
+```sh
 docker compose up -d --build
 ```
 
-Before starting, set `M3U_LAN_HOST` in `.env` to the Windows computer's private IPv4 address if Roku, Cast, or HDHomeRun clients will be used. A new Windows installation can also set `M3U_DVR_DIR` to a dedicated recording folder before the first start. The Windows setup script defaults to `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` and creates it automatically.
+For source updates, run `git pull --ff-only origin main` followed by the same build command. Preserve GPU/discovery overrides and application data. Source setup helpers remain available in [scripts/docker-setup.sh](scripts/docker-setup.sh) and [scripts/docker-windows.sh](scripts/docker-windows.sh); they update/build the checkout rather than install the published image.
 
-For an NVIDIA-equipped Windows or Linux host with Docker GPU support, start with both Compose files:
+The isolated setup stacks use port `9998` and separate data volumes; see [standalone wizard development](docs/STANDALONE-SETUP-WIZARD.md). They are separate from the normal port-`9999` installation.
 
-```powershell
-Set-Location C:\m3u-web-picker
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+Run the Python suite inside a development image, which includes the required dependencies and FFmpeg tools:
+
+```sh
+docker build -t m3u-web-picker-tests .
+docker run --rm --entrypoint python m3u-web-picker-tests -m unittest discover -s tests
 ```
 
-On macOS or Linux, the equivalent manual installation is:
+For the guide's JavaScript behavior checks, with Node installed:
 
-```bash
-git clone https://github.com/zschmook/m3u-web-picker.git ~/m3u-web-picker
-cd ~/m3u-web-picker
-cp .env.example .env
-./scripts/detect-lan-host.sh --write-env
-docker compose up -d --build
+```sh
+node --test tests/guide_stop_playback.test.cjs tests/guide_vlc.test.cjs
 ```
 
-Once installed, open `http://localhost:9999` on the Docker host or `http://<M3U_LAN_HOST>:9999` from another device on the same LAN.
-
-Common lifecycle commands must be run from the repository directory:
-
-```powershell
-Set-Location C:\m3u-web-picker
-docker compose start
-docker compose stop
-docker compose logs --tail 100
-```
-
-`docker compose start` starts the existing container with the same GPU/device configuration used when it was created. `docker compose stop` stops the app without removing its container or data. `docker compose down` removes the container and network but preserves the named application-data volume. Do not use `docker compose down -v` for a normal stop, restart, or upgrade because `-v` deletes that volume.
-
-## Adding your own providers
-
-A provider supplies the live-channel catalog. M3U Web Picker supports one primary provider in the normal channel manager, plus optional ordered fallback providers used only by Sports Automation.
-
-On a new installation, the first-run wizard offers two paths:
-
-- **Your own provider:** enter either a direct M3U playlist URL or an Xtream server/base URL with a username and password.
-- **Free public demo:** use the included community playlists to test the normal guide/playback pipeline before paying for or configuring a provider.
-
-For Xtream service, enter only the base server address—such as `https://provider.example:8080`—in the provider URL field. Put the username and password in their separate fields. Do not paste a generated `get.php` URL when separate Xtream credentials are available. Picker validates `player_api.php`, requests the live-stream catalog without importing VOD/series libraries, and constructs the playlist and XMLTV endpoints internally.
-
-To add or replace a provider after setup:
-
-1. Open **Providers** from the sidebar.
-2. Enter a friendly **Primary name**.
-3. Enter the direct M3U URL, or enter the Xtream base URL plus username and password.
-4. Select **Load Primary** and wait for validation and channel loading to finish.
-5. Open **Channels**, search or filter the catalog, add the channels to keep, arrange their order, and save it.
-6. Run **Update Now** from Overview to publish the refreshed curated M3U and guide data immediately instead of waiting for the next Master Update.
-
-A local `.m3u` or `.m3u8` file can be selected under **M3U File** and installed with **Use File as Primary**. To change credentials or switch services, load a replacement primary provider; provider credentials remain in the persistent runtime data and are not written to the repository or exposed in generated browser URLs.
-
-Sports fallback providers are configured separately at the bottom of **Providers**. Enter the fallback name and either its M3U URL or Xtream login, then select **Add Fallback**. Fallbacks are tried in the displayed priority order only when Sports Automation cannot find a usable feed from the primary provider. They do not populate the normal Channels catalog.
-
-Provider XMLTV data remains authoritative. Additional public country guide sources can be enabled on the Providers/EPG controls to fill uncovered programs; they do not replace valid provider listings.
-
-## First-run setup
-
-The setup flow can configure:
-
-- a primary M3U or Xtream provider, or the built-in free public M3U demo option for testing without an IPTV service;
-- manual channels to keep in the curated lineup;
-- Sports Automation and team/league rules;
-- optional API-SPORTS schedule support for supported leagues;
-- the automatic Master Update schedule;
-- optional Jellyfin cache cleanup (**use with extreme care: the configured cleanup path is not safety-checked, so an incorrect path or mount can delete data outside the Jellyfin cache**).
-
-Provider credentials and application state are stored in the runtime data directory, not in the repository.
-
-## Main outputs
-
-The two normal client-facing outputs are:
-
-- M3U: `/playlist/channels.m3u`
-- Combined XMLTV: `/epg/epg.xml`
-
-When application-wide FFmpeg encoding is enabled under **Settings → Encoding**, the normal M3U routes every curated channel through Picker. The permanent fallback `/playlist/channels.direct.m3u` always bypasses Picker encoding. Enabling encoding runs a functional hardware test; when acceleration is unavailable, CPU fallback requires an explicit performance-risk acknowledgment.
-
-### FFmpeg playback path
-
-```text
-IPTV PROVIDER
-|
-+-- FFmpeg disabled
-|   `-- Direct provider stream
-|       `-- /playlist/channels.direct.m3u
-|
-`-- FFmpeg enabled
-    |
-    +-- Run encoder check
-    |   +-- Hardware works -> NVENC / QSV / VAAPI
-    |   `-- Hardware unavailable -> warning -> CPU libx264
-    |
-    `-- Client requests channel
-        |
-        +-- Browser / TV Guide
-        |   `-- FFmpeg -> fragmented MP4 -> browser player
-        |
-        +-- Jellyfin / HDHomeRun / encoded M3U client
-        |   `-- Same channel already encoded as MPEG-TS?
-        |       +-- Yes -> join shared stream
-        |       `-- No  -> provider -> FFmpeg -> shared MPEG-TS
-        |
-        `-- Roku / Chromecast
-            `-- Same channel already encoded as HLS?
-                +-- Yes -> reuse shared HLS session
-                `-- No  -> provider -> FFmpeg -> shared HLS
-
-SESSION CLEANUP
-|
-+-- Another viewer remains -> keep FFmpeg/provider connection alive
-`-- Last viewer disconnects -> stop FFmpeg and close provider connection
-```
-
-Browser fragmented MP4, shared MPEG-TS, and shared HLS are separate output sessions. Clients using different output formats can therefore still open separate FFmpeg processes and provider connections for the same channel.
-
-Sports-only output and additional diagnostic/status endpoints are also exposed by the application.
-
-## Sports Automation
-
-Sports Automation scans provider channels and XMLTV data, matches configured teams/leagues, and publishes temporary event channels. Optional API-SPORTS schedule data can provide canonical schedules for MLB, NFL, and NCAA Football selections.
-
-Manual channels and generated sports channels are separate namespaces. A generated sports feed must not remove or replace a saved manual channel even when both point to the same underlying stream.
-
-Sports channel numbers are organized into stable league blocks. Generated channel identity is independent of the reusable numeric slot so guide clients do not confuse a new event with an older event that previously occupied the same number.
-
-## TV Guide and devices
-
-The built-in TV Guide uses the curated lineup and Combined XMLTV output. It provides a compact scrolling schedule, day navigation, program search, one-click local playback, recording controls, and remote playback destinations without replacing the normal guide with a separate multiview or sports-only interface.
-
-Guide search matches channel metadata and individual program titles. Matching programs are highlighted in the timeline, which makes searches such as `news hour` useful even when several stations carry the same show at different times. The day buttons retain the compact current-time window for **Now** and provide full-day navigation for future dates.
-
-Selecting a current program offers **Play now** or **Listen**. Listen mode requires FFmpeg: it removes video server-side and sends a compact 128 kbps MP3 stream to the browser, which is useful for headphones or mobile playback. Selecting a future program offers DVR scheduling when the recorder is enabled. The local browser player normalizes provider video to H.264/AAC fragmented MP4, and **Pop out** uses the standard Picture-in-Picture API with a WebKit presentation-mode fallback. Closing Picture-in-Picture returns playback cleanly to the guide when the browser supports that transition.
-
-Do not expose M3U Web Picker directly to the public internet. Remote phone access currently requires Tailscale. The TV Guide and Channel 0.2 Remote are separate PWAs. Install the Guide from `/guide` at its Tailscale HTTPS address; reopening that Guide app then focuses the existing Guide window instead of replacing an active Listen session. A plain LAN HTTP home-screen shortcut may reload the page and interrupt audio because it is only a browser shortcut.
-
-The **Stream** menu keeps Roku and Google Cast controls together. The Devices page includes virtual HDHomeRun status, saved Roku targets, and active remote playback sessions.
-
-The guide also includes **Remote**, a phone-sized controller for virtual channel **0.2**. Open channel 0.2 once on the browser or Roku, then use `/remote` to switch that single output among enabled TV channels or currently playable generated sports feeds. The selector uses an on-demand FFmpeg stream copy to remux the chosen provider feed into one stable HLS channel, even when the optional global media pipeline is disabled; selected video and audio are not re-encoded. It does not expose the experimental LAN inventory, ACR, or microphone tools.
-
-Opening **DVR** switches the page from guide browsing to a dedicated recorder view; the search controls and channel grid return when DVR is closed. The top DVR button shows an active state while this mode is open. DVR contains two tabs:
-
-- **Upcoming & Status** shows the selected day's scheduled, active, queued, failed, and ready recordings. Series rules appear as compact accordions with their next episode; expanding a rule reveals its state and cancellation control and filters the recording list to that series.
-- **Library** shows only playable completed recordings. Shows are grouped into expandable title rows, groups are ordered by their newest recording, and episodes inside each group are newest first. Library playback uses the same browser-safe FFmpeg path as live TV, so saved H.265/MKV files do not need native HEVC browser support.
-
-The red DVR badge in the header and sidebar counts recordings currently in progress; it is not a count of scheduled or saved programs.
-
-For LAN discovery and Roku/Google Cast playback, `M3U_LAN_HOST` must contain the Docker host computer's LAN IPv4 address.
-
-Remote access should use a trusted private network such as Tailscale rather than forwarding the Picker port to the public internet. The application does not currently provide a hardened public login boundary. When a phone reaches Picker through Tailscale and sends a channel to a Roku at home, the phone acts only as the remote control: the Picker server contacts the Roku and the Roku pulls the media over the home LAN. The video does not travel through the phone's mobile-data connection. Roku and Cast receivers still need network reachability to the Picker host and its advertised `M3U_LAN_HOST` media URLs.
-
-From an existing checkout, Windows users can also open Git Bash and run:
-
-```bash
-cd /c/git/m3u-web-picker
-./scripts/docker-windows.sh
-```
-
-The helper uses the same all-in-one setup flow while keeping that checkout location. It detects the active Windows LAN address, writes it to `.env`, updates the checkout, rebuilds and recreates the normal container, and then shows its status. It preserves the application data volume.
-
-On macOS or Linux, `scripts/detect-lan-host.sh --write-env` updates `.env`; recreate the container afterward so it receives the new value.
-
-## Roku receiver
-
-M3U Web Picker includes its own Roku developer receiver so channels from the built-in TV Guide can be sent directly to a Roku on the same LAN. Multiple Roku devices can be discovered and saved, and saved devices are reconciled by stable device identity when their DHCP address changes.
-
-The sideloadable receiver is included in the repository at:
-
-```text
-roku-receiver/dist/m3u-web-picker-roku-receiver.zip
-```
-
-Do **not** extract that ZIP before installing it on the Roku.
-
-To enable Roku developer mode, from the Roku home screen press:
-
-```text
-Home
-Home
-Home
-Up
-Up
-Right
-Left
-Right
-Left
-Right
-```
-
-Choose **Enable installer and restart**, accept the developer agreement, set a developer password, and let the Roku restart. If necessary, also allow local-network control under Roku's **Control by mobile apps** setting.
-
-From a computer on the same LAN, open the Roku's IP address in a browser, sign in to the Development Application Installer with username `rokudev` and the developer-mode password, choose **Install with zip**, and upload `m3u-web-picker-roku-receiver.zip`.
-
-Roku permits only one sideloaded developer application at a time, so installing this receiver replaces any other sideloaded developer channel.
-
-After installation, use the M3U Web Picker TV Guide/Devices controls to discover or save the Roku and send a channel to it. Roku playback uses the Picker's LAN HLS relay, so `M3U_LAN_HOST` must point to the Picker host's actual LAN IPv4 address.
-
-More detailed Roku troubleshooting is in the [user guide](docs/USER-GUIDE.md).
-
-## Jellyfin cache integration
-
-Jellyfin cache cleanup is optional. If enabled, M3U Web Picker can clear the configured Jellyfin cache **only after a successful Master Update** to reduce stale Live TV logos/metadata.
-
-**WARNING: the Jellyfin cleanup path is trusted exactly as configured. There is currently no path-safety validation to prove that it points only at a Jellyfin cache directory. A wrong host path, container mount, or configuration could cause recursive deletion of unrelated data — in the worst case, potentially an entire mounted drive/filesystem. Use this feature only after manually verifying the path and mount.**
-
-For Docker, the cache directory must be explicitly mounted into the container with `M3U_JELLYFIN_CACHE_DIR`. The wizard requires an acknowledgement before enabling deletion because clearing Jellyfin cache data may also affect cached information for downloaded movies, downloaded TV shows, and DVR recordings.
-
-## Persistent data and backups
-
-The normal Compose project is `m3u-picker` and stores application state in the `m3u-picker-data` Docker volume. `docker compose down` preserves the volume. `docker compose down -v` deletes it.
-
-Docker backups are written through the `/backups` bind mount. Override the host directory with `M3U_BACKUP_DIR` in `.env`.
-
-In-app DVR recordings use a dedicated `/recordings` bind mount. New Windows Docker setups create and use `%USERPROFILE%/Videos/M3U-Web-Picker-DVR` by default; an existing custom `M3U_DVR_DIR` is preserved. Raw transport-stream captures remain in the DVR folder, while successful H.265/MKV conversions are written under `converted/` by default.
-
-**Settings → DVR** controls whether completed recordings are processed immediately, during scheduled or manual application updates, or only through the **Process Recordings Now** action in **Upcoming & Status**. Immediate processing is serialized so only one conversion runs at a time. Comskip commercial detection runs before conversion when enabled. Implausible cut lists are rejected, and a detection or cutting failure produces an uncut MKV rather than discarding the recording. A failed conversion preserves the original transport stream.
-
-The optional media-server library folder (currently labeled **Plex folder** in Settings) moves successful conversions into show and season folders with episode names such as `The Wall.S06E10.mkv`. The files are ordinary MKVs and are not tied to a particular media server. For the current Docker setup, the destination must be inside the mounted DVR folder—for example, `%USERPROFILE%/Videos/M3U-Web-Picker-DVR/PLEX`—because Docker cannot write to an arbitrary host path that was not mounted when the container started.
-
-DVR conversion automatically prefers NVIDIA NVENC when the GPU Compose override is active, targets 3 Mbps with 4.5 Mbps peak headroom for 1080p recordings, and safely retries with CPU `libx265` if hardware encoding is unavailable. Comskip, temporary conversion files, final recordings, and media-server library files all remain on host-mounted storage; recording data is never written into the container layer. Database rows retain the relative path to each completed file so Library playback can resolve it without accepting arbitrary filesystem paths from the browser.
-
-## Clean first-run testing
-
-Two isolated Compose projects are available for setup testing. Run all commands from the repository directory.
-
-To test the standalone setup flow on port `9998` from Windows PowerShell:
-
-```powershell
-Set-Location C:\m3u-web-picker
-docker compose -f docker-compose.setup.yml down -v
-docker compose -f docker-compose.setup.yml up -d --build setup
-```
-
-The standalone stack uses its own application, output, recording, Jellyfin-cache, and backup volumes. It never receives the Docker socket or mounts live application data. Using `-v` here intentionally erases only that isolated test state.
-
-The older in-app onboarding flow also has a separate development stack:
-
-```powershell
-Set-Location C:\m3u-web-picker
-docker compose -f docker-compose.dev.yml down -v
-docker compose -f docker-compose.dev.yml up -d --build
-```
-
-That stack uses host port `9998` and a separate `m3u-picker-dev-data` volume. Using `-v` is intentional for this isolated wizard test because the point is to start from a genuinely blank database.
-
-## Updating
-
-For a normal Docker/source checkout on Windows:
-
-```powershell
-Set-Location C:\m3u-web-picker
-git pull --ff-only origin main
-docker compose up -d --build
-```
-
-For a Windows host configured for NVIDIA GPU passthrough, keep the GPU override active during the rebuild:
-
-```powershell
-Set-Location C:\m3u-web-picker
-git pull --ff-only origin main
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
-```
-
-On macOS or Linux, run the equivalent commands from the checkout directory using `cd` instead of `Set-Location`.
-
-Do not remove the data volume during a normal update.
-
-## Tests
-
-The repository uses Python `unittest` tests and JavaScript syntax checks can be run with Node when available:
-
-```bash
-python -m unittest discover -s tests
-python -m compileall -q .
-find static -name '*.js' -print0 | xargs -0 -n1 node --check
-```
-
-## Current known cleanup items
-
-Three non-blocking issues are still being tracked:
-
-- update-state indicators can visibly finish a fraction of a cycle apart because the sidebar/status layer and Master Update lifecycle layer still have overlapping rendering responsibilities;
-- provider events that lose a recognized league classification can fall into generic `football`/`sports` numbering blocks, producing very high sports channel numbers and occasional duplicate event rows.
-- background update queue warnings can briefly spike and emit repetitive depth logs, especially when several guide tabs are open; tune Waitress/threading and UI polling during scheduled runs before considering it a production signal.
-
-These are functional cleanup items rather than data-loss problems.
-
-See the [user guide](docs/USER-GUIDE.md) for operator-oriented setup and troubleshooting notes.
+More documentation: [User guide](docs/USER-GUIDE.md), [installer packaging](installer/docker/README.md), and [project documentation](docs/README.md).
