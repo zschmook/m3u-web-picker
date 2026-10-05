@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -17,7 +19,8 @@ from pathlib import Path, PurePosixPath
 
 
 REPOSITORY = "zschmook/m3u-web-picker"
-SOURCE_REF = "main"
+SOURCE_REF = "latest"
+IMAGE = "ghcr.io/zschmook/m3u-web-picker"
 WEB_URL = "http://localhost:9999"
 UPGRADE = "UP"
 CLEAN = "CL"
@@ -180,13 +183,14 @@ def detect_lan_ipv4() -> str:
     return ""
 
 
-def prepare_install_environment(staging: Path) -> None:
+def prepare_install_environment(staging: Path, image_tag: str = "latest") -> None:
     env_path = staging / ".env"
     example = staging / ".env.example"
     if example.is_file() and not env_path.exists():
         shutil.copy2(example, env_path)
     set_dotenv_value(env_path, "M3U_HOST_PORT", "9999")
     set_dotenv_value(env_path, "M3U_EXTERNAL_PORT", "9999")
+    set_dotenv_value(env_path, "M3U_IMAGE", f"{IMAGE}:{image_tag}")
     lan_host = detect_lan_ipv4()
     if lan_host:
         set_dotenv_value(env_path, "M3U_LAN_HOST", lan_host)
@@ -247,7 +251,7 @@ def production_container_status(docker: str) -> str:
 
 
 def compose_command(docker: str, install_dir: Path) -> list[str]:
-    command = [docker, "compose", "-f", str(install_dir / "docker-compose.yml")]
+    command = [docker, "compose", "-f", str(install_dir / "docker-compose.release.yml")]
     if host_system() != "Darwin" and (shutil.which("nvidia-smi") or shutil.which("nvidia-smi.exe")):
         command.extend(["-f", str(install_dir / "docker-compose.gpu.yml")])
         print("NVIDIA GPU detected; requesting Docker GPU passthrough.")
@@ -272,6 +276,21 @@ def wait_for_setup_page(seconds: int = 120) -> None:
     raise RuntimeError("Docker started, but the setup page did not become available within two minutes.")
 
 
+def resolve_source(source_ref: str) -> tuple[str, str]:
+    if source_ref == "latest":
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{REPOSITORY}/releases/latest",
+            headers={"User-Agent": "M3U-Web-Picker-Installer"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            source_ref = json.load(response)["tag_name"]
+        if not re.fullmatch(r"v\d+", source_ref):
+            raise RuntimeError("The latest release does not have a supported version tag.")
+    is_release = bool(re.fullmatch(r"v\d+", source_ref))
+    kind = "tags" if is_release else "heads"
+    return (f"https://codeload.github.com/{REPOSITORY}/zip/refs/{kind}/{source_ref}",
+            source_ref if is_release else "latest")
+
+
 def install(install_dir: Path, source_ref: str, mode: str) -> None:
     install_dir = safe_install_dir(install_dir)
     validate_existing_install(install_dir)
@@ -289,7 +308,7 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
     transaction = uuid.uuid4().hex
     staging = install_dir.with_name(f".{install_dir.name}.staging-{transaction}")
     previous = install_dir.with_name(f".{install_dir.name}.previous-{transaction}")
-    archive_url = f"https://codeload.github.com/{REPOSITORY}/zip/refs/heads/{source_ref}"
+    archive_url, image_tag = resolve_source(source_ref)
 
     with tempfile.TemporaryDirectory(prefix="m3u-web-picker-install-") as temporary:
         temporary_dir = Path(temporary)
@@ -299,14 +318,16 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
         print(f"Downloading M3U Web Picker ({source_ref})...")
         download(archive_url, archive)
         extract_github_archive(archive, extracted)
-        if not (extracted / "docker-compose.yml").is_file():
+        if not (extracted / "docker-compose.release.yml").is_file():
             raise RuntimeError("The downloaded ZIP does not contain the expected M3U Web Picker files.")
 
         shutil.move(str(extracted), str(staging))
         if existing_install and mode == UPGRADE:
             preserve(".env", install_dir, staging)
             preserve("runtime", install_dir, staging)
-        prepare_install_environment(staging)
+        prepare_install_environment(staging, image_tag)
+        # A failed image download must leave an existing installation running.
+        run_compose(compose_command(docker, staging), staging, "pull")
         if existing_install:
             install_dir.replace(previous)
         try:
@@ -319,7 +340,7 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
     compose = compose_command(docker, install_dir)
     try:
         run_compose(compose, install_dir, "down", "-v" if mode == CLEAN else "--remove-orphans")
-        run_compose(compose, install_dir, "up", "-d", "--build")
+        run_compose(compose, install_dir, "up", "-d", "--no-build")
         run_compose(compose, install_dir, "ps")
         print("Waiting for the setup guide...")
         wait_for_setup_page()

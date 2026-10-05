@@ -1,0 +1,73 @@
+# Prebuilt release image; no Git or local image build is needed.
+#
+# Runtime state lives in the persistent m3u-picker-data Docker volume at
+# /app/data. `docker compose down` keeps that volume; only `down -v` removes it.
+# A genuinely fresh volume launches the first-run setup wizard.
+#
+# M3U_BACKUP_DIR controls the host directory mapped to /backups.
+# This project uses a dedicated runtime path by default.
+# M3U_JELLYFIN_CACHE_DIR optionally maps a Jellyfin cache directory for the
+# experimental post-update cache cleanup integration.
+# M3U_DVR_DIR maps a host folder where both in-progress captures and completed
+# recordings live. DVR media is never written into the container layer.
+
+name: m3u-picker
+
+services:
+  m3u-picker:
+    image: ${M3U_IMAGE:-ghcr.io/zschmook/m3u-web-picker:latest}
+    pull_policy: always
+
+    container_name: m3u-picker
+
+    ports:
+      - "${M3U_HOST_PORT:-9999}:9999"
+
+    environment:
+      PYTHONUNBUFFERED: "1"
+      M3U_ONBOARDING_ENABLED: "true"
+      M3U_BACKUP_ENABLED: "true"
+      M3U_DATA_DIR: /app/data
+      M3U_LAN_HOST: "${M3U_LAN_HOST:-}"
+      M3U_EXTERNAL_PORT: "${M3U_EXTERNAL_PORT:-9999}"
+      M3U_REMOTE_URL: "${M3U_REMOTE_URL:-}"
+      M3U_MAX_PROVIDER_CHANNELS: "${M3U_MAX_PROVIDER_CHANNELS:-50000}"
+      M3U_PROVIDER_CHANNEL_WARNING: "${M3U_PROVIDER_CHANNEL_WARNING:-20000}"
+      M3U_MAX_PROVIDER_PLAYLIST_BYTES: "${M3U_MAX_PROVIDER_PLAYLIST_BYTES:-100663296}"
+      M3U_MAX_PROVIDER_JSON_BYTES: "${M3U_MAX_PROVIDER_JSON_BYTES:-100663296}"
+      M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES: "${M3U_MAX_PUBLIC_EPG_COMPRESSED_BYTES:-268435456}"
+      M3U_BACKUP_CONTAINER_DIR: /backups
+      M3U_JELLYFIN_CACHE_HOST_DIR: "${M3U_JELLYFIN_CACHE_DIR:-}"
+      M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache
+      M3U_DVR_HOST_DIR: "${M3U_DVR_DIR:-./runtime/recordings}"
+      M3U_DVR_CONTAINER_DIR: /recordings
+      M3U_COMMERCIALS_ROOT: /commercials
+      M3U_DVR_HEVC_ENCODER: "${M3U_DVR_HEVC_ENCODER:-auto}"
+      BACKUP_TIME: "03:15"
+      BACKUP_TIMEZONE: "America/New_York"
+      BACKUP_RETENTION_DAYS: "30"
+      MASTER_REFRESH_HOUR: "3"
+      MASTER_REFRESH_MINUTE: "0"
+
+    volumes:
+      - type: bind
+        source: "${M3U_BACKUP_DIR:-./runtime/backups}"
+        target: /backups
+      - type: bind
+        source: "${M3U_JELLYFIN_CACHE_DIR:-./runtime/jellyfin-cache-disabled}"
+        target: /jellyfin-cache
+      - type: bind
+        source: "${M3U_DVR_DIR:-./runtime/recordings}"
+        target: /recordings
+      - type: volume
+        source: m3u-picker-data
+        target: /app/data
+      - type: volume
+        source: m3u-picker-commercials
+        target: /commercials
+
+    restart: unless-stopped
+
+volumes:
+  m3u-picker-data:
+  m3u-picker-commercials:

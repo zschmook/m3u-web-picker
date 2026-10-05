@@ -10,6 +10,8 @@ Packaged Docker installers are produced by `.github/workflows/package-installers
 
 These URLs point at installer assets on the current latest GitHub Release.
 
+Every push to `main` starts **Release main**. The workflow publishes the versioned public image (`ghcr.io/zschmook/m3u-web-picker:vN`) and updates `latest`, then dispatches installer packaging for that tag. Installers can take a few additional minutes to appear. Releases also include `docker-compose.release.yml`, GPU/discovery overrides, and `.env.example` for running without an installer.
+
 ## Build or publish
 
 Open **Actions → Package installers → Run workflow**.

@@ -5,7 +5,8 @@
 All three installers:
 
 - require an installed and running Docker-compatible Linux container engine with Docker Compose v2;
-- download the `main` source archive without requiring Git;
+- download the latest published release's configuration without requiring Git;
+- pull its matching `ghcr.io/zschmook/m3u-web-picker:vN` image before stopping an existing installation, without a local build or registry login;
 - install production on port `9999`;
 - preserve `.env`, runtime folders, the Docker application-data volume, and DVR recordings during `UPGRADE (UP)`;
 - require the full word `CLEAN` before deleting an existing Docker application-data volume;
@@ -35,3 +36,7 @@ python installer/docker/build.py
 ```
 
 PyInstaller cannot cross-compile. The release workflow builds each artifact on its corresponding operating system. The macOS executable is built as `universal2` and placed in an unsigned DMG.
+
+Every push to `main` runs **Release main**, reserves the next numbered tag, and publishes the image and release after smoke tests and an anonymous image check. Existing installer packaging is then dispatched separately against that exact release tag. Retrying **Release main** reuses its existing tag.
+
+GHCR initially creates private packages. For the first image publication, set the `m3u-web-picker` container package to **Public** under **Package settings → Change visibility**, then rerun **Release main**. Future versions inherit that visibility. Releases remain drafts until the anonymous check passes.

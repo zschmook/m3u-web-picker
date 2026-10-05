@@ -1,0 +1,6 @@
+# Optional port-80 HTTP support for HDHomeRun clients that require it.
+# Use only when port 80 is available on the host.
+services:
+  m3u-picker:
+    ports:
+      - "80:9999"

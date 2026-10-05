@@ -1,6 +1,6 @@
 # M3U Web Picker — User Guide
 
-This guide describes the current v31 application. Docker is the supported runtime.
+This guide describes the current application. Docker is the supported runtime.
 
 ## 1. Start the application
 
@@ -11,6 +11,10 @@ Install and start Docker Desktop on Windows/macOS, or Docker Engine with Compose
 - `M3U-Web-Picker-Linux.tar.gz`
 
 All three packages use the same installer logic and run production on port `9999`. An upgrade preserves saved setup; a clean reinstall explicitly warns before deleting the Docker application-data volume and retains the separate DVR folder.
+
+For a new installation using the published image, download `docker-compose.release.yml` from the latest GitHub release into a folder and run `docker compose -f docker-compose.release.yml up -d` there. This pulls the public `latest` image and keeps application data in the same named volume as the source edition. Docker Desktop's Docker Hub search does not list GitHub-hosted images: use the full image name `ghcr.io/zschmook/m3u-web-picker:latest`. A GitHub source URL is not a Docker image name.
+
+To update, run `docker compose -f docker-compose.release.yml pull` followed by `docker compose -f docker-compose.release.yml up -d` from the same folder. Expect a brief playback interruption while the container is replaced. Never delete the data volume during an upgrade.
 
 For a source-based installation, install Git and run:
 

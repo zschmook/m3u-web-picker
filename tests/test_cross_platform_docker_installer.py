@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 import os
 import shutil
 import tempfile
@@ -134,6 +136,7 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
             source_archive = root / "source.zip"
             with zipfile.ZipFile(source_archive, "w") as output:
                 output.writestr("m3u-web-picker-main/docker-compose.yml", "services: {}\n")
+                output.writestr("m3u-web-picker-main/docker-compose.release.yml", "services: {}\n")
                 output.writestr("m3u-web-picker-main/docker-compose.gpu.yml", "services: {}\n")
                 output.writestr(
                     "m3u-web-picker-main/.env.example",
@@ -164,7 +167,7 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
             self.assertIn(f"M3U_DVR_DIR={dvr.as_posix()}", env)
             self.assertEqual(
                 [call.args[2:] for call in run_compose.call_args_list],
-                [("down", "-v"), ("up", "-d", "--build"), ("ps",)],
+                [("pull",), ("down", "-v"), ("up", "-d", "--no-build"), ("ps",)],
             )
 
     def test_clean_does_not_carry_saved_app_data_into_new_source(self):
@@ -180,6 +183,7 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
             source_archive = root / "source.zip"
             with zipfile.ZipFile(source_archive, "w") as output:
                 output.writestr("m3u-web-picker-main/docker-compose.yml", "services: {}\n")
+                output.writestr("m3u-web-picker-main/docker-compose.release.yml", "services: {}\n")
                 output.writestr("m3u-web-picker-main/src/app.py", "new\n")
                 output.writestr(
                     "m3u-web-picker-main/.env.example",
@@ -205,6 +209,42 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
 
             self.assertNotIn("SAVED_SETTING=yes", (install_dir / ".env").read_text(encoding="utf-8"))
             self.assertFalse((install_dir / "runtime" / "saved.json").exists())
+
+    def test_latest_release_pins_configuration_and_image_to_same_tag(self):
+        response = io.BytesIO(json.dumps({"tag_name": "v32"}).encode())
+        with patch.object(installer.urllib.request, "urlopen", return_value=response):
+            url, tag = installer.resolve_source("latest")
+        self.assertTrue(url.endswith("/zip/refs/tags/v32"))
+        self.assertEqual(tag, "v32")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(installer, "detect_lan_ipv4", return_value=""), \
+                    patch.object(installer, "default_dvr_dir", return_value=root / "recordings"):
+                installer.prepare_install_environment(root, tag)
+            self.assertIn("M3U_IMAGE=ghcr.io/zschmook/m3u-web-picker:v32", (root / ".env").read_text())
+
+    def test_failed_pull_preserves_existing_source_and_never_stops_container(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current = root / "install"
+            (current / "src").mkdir(parents=True)
+            (current / "src/app.py").write_text("original")
+            (current / "docker-compose.yml").write_text("services: {}")
+            archive = root / "source.zip"
+            with zipfile.ZipFile(archive, "w") as output:
+                output.writestr("repo/docker-compose.release.yml", "services: {}")
+            def download(_url, destination):
+                shutil.copy2(archive, destination)
+            with patch.object(installer, "require_docker", return_value="docker"), \
+                    patch.object(installer, "production_container_status", return_value="running"), \
+                    patch.object(installer, "download", side_effect=download), \
+                    patch.object(installer, "prepare_install_environment"), \
+                    patch.object(installer, "compose_command", return_value=["docker", "compose"]), \
+                    patch.object(installer, "run_compose", side_effect=RuntimeError("pull failed")) as compose:
+                with self.assertRaisesRegex(RuntimeError, "pull failed"):
+                    installer.install(current, "v32", installer.UPGRADE)
+            self.assertEqual((current / "src/app.py").read_text(), "original")
+            self.assertEqual([call.args[2:] for call in compose.call_args_list], [("pull",)])
 
     def test_release_workflow_builds_all_three_from_common_source(self):
         workflow = (ROOT / ".github" / "workflows" / "package-installers.yml").read_text(encoding="utf-8")

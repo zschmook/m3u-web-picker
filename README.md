@@ -2,7 +2,32 @@
 
 M3U Web Picker turns a large IPTV provider catalog into a small, curated M3U/XMLTV lineup, with optional sports automation, a browser TV guide and DVR, Roku/Cast playback helpers, and a virtual HDHomeRun surface for compatible clients.
 
-The current main line is **v31**. Docker is the supported runtime.
+Docker is the supported runtime. Every push to `main` reserves the next numbered release (`v32`, `v33`, ...), builds its Docker image, and publishes the release when image checks succeed. Retrying a workflow reuses the same version. Existing installer packaging runs separately afterward.
+
+## Run the published Docker image
+
+The image is **`ghcr.io/zschmook/m3u-web-picker:latest`**. `latest` follows the newest completed main release; use a version such as `:v32` to keep a specific release. Images support Linux AMD64 and ARM64, including Docker Desktop on Windows and Intel/Apple Silicon Macs. No GitHub sign-in is needed to pull the public image.
+
+For a new installation, download [docker-compose.release.yml](https://github.com/zschmook/m3u-web-picker/releases/latest/download/docker-compose.release.yml) into an empty folder. Open a terminal in that folder and run:
+
+```text
+docker compose -f docker-compose.release.yml up -d
+```
+
+Open **http://localhost:9999**. This downloads the image and preserves settings in a named Docker volume; it does not build the application locally. For an existing source install, use this file from the existing install folder so the same project and runtime paths are retained.
+
+In Docker Desktop you can also pull the full image name above, then use **Run → Optional settings** to map host port `9999` to container port `9999` and mount persistent storage at `/app/data`. The Compose file or packaged installer also configures DVR and backup storage, and is the recommended path. Docker Desktop's Docker Hub search does not list this GitHub-hosted image; use the full `ghcr.io/...` name.
+
+For Roku/Cast/LAN clients, save `M3U_LAN_HOST=<your computer's private IPv4 address>` in a `.env` file beside the Compose file. Download `docker-compose.gpu.yml` from the same release to optionally enable NVIDIA passthrough on supported Windows/Linux hosts. Port 80 is optional: use `docker-compose.discovery.yml` only for HDHomeRun clients that require bare-IP HTTP discovery and when port 80 is free.
+
+To update a manual image installation, keep the same folder and volumes, then run:
+
+```text
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+An update replaces the running app container and briefly interrupts playback. Avoid `down -v` during updates: it deletes saved application data.
 
 ## Packaged installers
 
@@ -12,7 +37,7 @@ Install and start Docker Desktop (Windows/macOS) or Docker Engine with Compose v
 - [macOS DMG](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-macOS.dmg) — unsigned
 - [Linux archive](https://github.com/zschmook/m3u-web-picker/releases/latest/download/M3U-Web-Picker-Linux.tar.gz)
 
-The three packages use one installer implementation. They download the application without Git, install production on port `9999`, preserve saved setup during `UPGRADE (UP)`, and require a separate `CLEAN` confirmation before deleting Docker application data. DVR recordings remain in their separately mounted host folder.
+The three packages use one installer implementation. They download the latest release's configuration without Git and pull its matching versioned Docker image before stopping an existing installation. They install production on port `9999`, preserve saved setup during `UPGRADE (UP)`, and require a separate `CLEAN` confirmation before deleting Docker application data. DVR recordings remain in their separately mounted host folder.
 
 ## Docker quick start from source
 

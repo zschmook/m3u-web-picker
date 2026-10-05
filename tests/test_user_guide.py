@@ -25,7 +25,7 @@ class UserGuideContractTests(unittest.TestCase):
         guide = (ROOT / "docs" / "USER-GUIDE.md").read_text(encoding="utf-8")
 
         for current_detail in (
-            "current v31 application",
+            "current application",
             "scripts/docker-setup.sh",
             "built-in free public M3U demo",
             "Hide SD / Low Bandwidth Channels",
