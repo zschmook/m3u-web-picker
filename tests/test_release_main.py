@@ -4,7 +4,7 @@ import unittest
 from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 
-from scripts.release_main import prepare, reserve_tag, publish, verify_public_image
+from scripts.release_main import prepare, reserve_tag, publish, verify_public_image, find_release
 
 
 def ref(number, sha, kind="commit"):
@@ -39,7 +39,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_prepare_creates_draft_and_retry_preserves_it(self):
         api = Mock()
-        api.request.side_effect = [[ref(32, "new")], HTTPError("", 404, "missing", {}, None), {}]
+        api.request.side_effect = [[ref(32, "new")], HTTPError("", 404, "missing", {}, None), [], {}]
         self.assertEqual(prepare(api, "new"), "v32")
         self.assertTrue(api.request.call_args.args[1]["draft"])
         api.request.side_effect = [[ref(32, "new")], {"id": 123}]
@@ -51,6 +51,21 @@ class ReleaseTests(unittest.TestCase):
             api.request.side_effect = [ref(32, "new"), {"id": 123}, {"commit": {"sha": head}}, {}]
             publish(api, "v32", "new")
             self.assertEqual(api.request.call_args.args[1], {"draft": False, "make_latest": expected})
+
+    def test_draft_lookup_pages_through_authenticated_release_list(self):
+        api = Mock()
+        draft = {"id": 123, "tag_name": "v32", "draft": True}
+        api.request.side_effect = [HTTPError("", 404, "draft hidden", {}, None),
+            [{"tag_name": "unrelated"}] * 100, [draft]]
+        self.assertEqual(find_release(api, "v32"), draft)
+        self.assertEqual(api.request.call_args.args, ("releases?per_page=100&page=2",))
+
+    def test_retry_finds_hidden_draft_without_creating_another_release(self):
+        api = Mock()
+        api.request.side_effect = [[ref(32, "new")], HTTPError("", 404, "draft hidden", {}, None),
+            [{"id": 123, "tag_name": "v32", "draft": True}]]
+        self.assertEqual(prepare(api, "new"), "v32")
+        self.assertEqual(api.request.call_count, 3)
 
     def test_wrong_release_commit_is_refused(self):
         api = Mock()

@@ -79,8 +79,7 @@ jobs:
           IMAGE: ${{ needs.prepare.outputs.image }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          # GHCR initially creates private packages. The first publication
-          # requires setting this package to Public in its GitHub settings.
+          # A private package needs its visibility changed to Public first.
           # Never advertise a release that anonymous users cannot pull.
           python scripts/release_main.py verify
       - name: Promote current main image to latest

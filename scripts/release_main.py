@@ -56,13 +56,28 @@ def reserve_tag(api, sha):
     raise RuntimeError("Could not reserve a release number after concurrent pushes.")
 
 
-def prepare(api, sha):
-    tag = reserve_tag(api, sha)
+def find_release(api, tag):
     try:
-        api.request(f"releases/tags/{tag}")
+        return api.request(f"releases/tags/{tag}")
     except HTTPError as error:
         if error.code != 404:
             raise
+    # The release-by-tag endpoint excludes drafts. The authenticated list
+    # includes them, so failed runs can find and resume their draft release.
+    page = 1
+    while True:
+        releases = api.request(f"releases?per_page=100&page={page}")
+        for release in releases:
+            if release["tag_name"] == tag:
+                return release
+        if len(releases) < 100:
+            return None
+        page += 1
+
+
+def prepare(api, sha):
+    tag = reserve_tag(api, sha)
+    if find_release(api, tag) is None:
         api.request("releases", {"tag_name": tag, "target_commitish": sha,
             "name": tag, "draft": True, "generate_release_notes": True})
     return tag
@@ -72,7 +87,9 @@ def publish(api, tag, sha):
     ref = api.request(f"git/ref/tags/{tag}")
     if ref["object"]["sha"] != sha:
         raise RuntimeError("Release tag does not match the workflow commit.")
-    release = api.request(f"releases/tags/{tag}")
+    release = find_release(api, tag)
+    if release is None:
+        raise RuntimeError("The reserved release was not found.")
     current = api.request("branches/main")["commit"]["sha"] == sha
     api.request(f"releases/{release['id']}", {"draft": False,
         "make_latest": "true" if current else "false"}, method="PATCH")

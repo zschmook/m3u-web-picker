@@ -3,10 +3,6 @@
 # container; Compose controls the host-facing port.
 FROM python:3.12-slim-bookworm
 
-ARG APP_VERSION=development
-LABEL org.opencontainers.image.source="https://github.com/zschmook/m3u-web-picker" \
-    org.opencontainers.image.version="${APP_VERSION}"
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
@@ -27,6 +23,10 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
+
+ARG APP_VERSION=development
+LABEL org.opencontainers.image.source="https://github.com/zschmook/m3u-web-picker" \
+    org.opencontainers.image.version="${APP_VERSION}"
 
 RUN if [ "$APP_VERSION" != development ]; then printf '%s\n' "$APP_VERSION" > VERSION.txt; fi
 
