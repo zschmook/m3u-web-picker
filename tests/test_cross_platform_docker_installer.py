@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+from types import SimpleNamespace
 import unittest
 import zipfile
 from pathlib import Path
@@ -21,6 +22,15 @@ SPEC.loader.exec_module(installer)
 
 
 class CrossPlatformDockerInstallerTests(unittest.TestCase):
+    def compose_config(self, _command, *, cwd, **_kwargs):
+        volumes = [
+            dict(type="bind", source=str(cwd / "runtime" / "backups"), target="/backups"),
+            dict(type="bind", source=str(cwd / "runtime" / "jellyfin-cache-disabled"), target="/jellyfin-cache"),
+            dict(type="bind", source=installer.dotenv_value(cwd / ".env", "M3U_DVR_DIR"), target="/recordings"),
+            dict(type="volume", source="m3u-picker-data", target="/app/data"),
+        ]
+        return SimpleNamespace(stdout=json.dumps({"services": {"m3u-picker": {"volumes": volumes}}}))
+
     def test_package_names_are_selected_from_the_build_host(self):
         build_path = ROOT / "installer" / "docker" / "build.py"
         build_spec = importlib.util.spec_from_file_location("docker_installer_build", build_path)
@@ -147,6 +157,10 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
                 shutil.copy2(source_archive, destination)
 
             dvr = root / "recordings"
+            def check_folders(_command, directory, *_arguments):
+                self.assertTrue((directory / "runtime" / "backups").is_dir())
+                self.assertTrue((directory / "runtime" / "jellyfin-cache-disabled").is_dir())
+                self.assertTrue(dvr.is_dir())
             with (
                 patch.object(installer, "require_docker", return_value="docker"),
                 patch.object(installer, "production_container_status", return_value=""),
@@ -154,7 +168,8 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
                 patch.object(installer, "detect_lan_ipv4", return_value="10.0.0.8"),
                 patch.object(installer, "default_dvr_dir", return_value=dvr),
                 patch.object(installer, "compose_command", return_value=["docker", "compose"]),
-                patch.object(installer, "run_compose") as run_compose,
+                patch.object(installer.subprocess, "run", side_effect=self.compose_config),
+                patch.object(installer, "run_compose", side_effect=check_folders) as run_compose,
                 patch.object(installer, "wait_for_setup_page"),
                 patch.object(installer.webbrowser, "open"),
             ):
@@ -201,6 +216,7 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
                 patch.object(installer, "detect_lan_ipv4", return_value=""),
                 patch.object(installer, "default_dvr_dir", return_value=root / "recordings"),
                 patch.object(installer, "compose_command", return_value=["docker", "compose"]),
+                patch.object(installer.subprocess, "run", side_effect=self.compose_config),
                 patch.object(installer, "run_compose"),
                 patch.object(installer, "wait_for_setup_page"),
                 patch.object(installer.webbrowser, "open"),
@@ -239,12 +255,72 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
                     patch.object(installer, "production_container_status", return_value="running"), \
                     patch.object(installer, "download", side_effect=download), \
                     patch.object(installer, "prepare_install_environment"), \
+                    patch.object(installer, "prepare_bind_mount_directories"), \
                     patch.object(installer, "compose_command", return_value=["docker", "compose"]), \
                     patch.object(installer, "run_compose", side_effect=RuntimeError("pull failed")) as compose:
                 with self.assertRaisesRegex(RuntimeError, "pull failed"):
                     installer.install(current, "v32", installer.UPGRADE)
             self.assertEqual((current / "src/app.py").read_text(), "original")
             self.assertEqual([call.args[2:] for call in compose.call_args_list], [("pull",)])
+
+    def test_bind_folders_use_resolved_compose_paths_and_keep_existing_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = root / "AppData" / "m3u-web-picker"
+            install.mkdir(parents=True)
+            external = root / "Backup Folder"
+            external.mkdir()
+            (external / "saved.zip").write_bytes(b"keep")
+            config = {"services": {"m3u-picker": {"volumes": [
+                dict(type="bind", source=str(external), target="/backups"),
+                dict(type="bind", source="runtime/jellyfin-cache-disabled", target="/jellyfin-cache"),
+                dict(type="volume", source="m3u-picker-data", target="/app/data"),
+            ]}, "other": {"volumes": [dict(type="bind", source=str(root / "other"), target="/other")]}}}
+            with patch.object(installer.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(config))) as compose:
+                installer.prepare_bind_mount_directories(["docker", "compose"], install)
+            self.assertTrue((install / "runtime" / "jellyfin-cache-disabled").is_dir())
+            self.assertEqual((external / "saved.zip").read_bytes(), b"keep")
+            self.assertFalse((install / "m3u-picker-data").exists())
+            self.assertFalse((root / "other").exists())
+            self.assertEqual(compose.call_args.args[0], ["docker", "compose", "config", "--format", "json"])
+
+    def test_invalid_mount_folder_is_reported_with_its_role_and_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            blocked = root / "backups"
+            blocked.write_text("existing file")
+            config = {"services": {"m3u-picker": {"volumes": [
+                dict(type="bind", source=str(blocked), target="/backups"),
+            ]}}}
+            with patch.object(installer.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(config))):
+                with self.assertRaisesRegex(RuntimeError, r"host folder for /backups") as failure:
+                    installer.prepare_bind_mount_directories(["docker", "compose"], root)
+            self.assertIn(str(blocked), str(failure.exception))
+            self.assertEqual(blocked.read_text(), "existing file")
+
+    def test_mount_preparation_failure_leaves_running_installation_and_source_in_place(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current = root / "install"
+            (current / "src").mkdir(parents=True)
+            (current / "src/app.py").write_text("original")
+            (current / "docker-compose.yml").write_text("services: {}")
+            archive = root / "source.zip"
+            with zipfile.ZipFile(archive, "w") as output:
+                output.writestr("repo/docker-compose.release.yml", "services: {}")
+            def download(_url, destination):
+                shutil.copy2(archive, destination)
+            with patch.object(installer, "require_docker", return_value="docker"), \
+                    patch.object(installer, "production_container_status", return_value="running"), \
+                    patch.object(installer, "download", side_effect=download), \
+                    patch.object(installer, "prepare_install_environment"), \
+                    patch.object(installer, "prepare_bind_mount_directories", side_effect=RuntimeError("host folder denied")), \
+                    patch.object(installer, "compose_command", return_value=["docker", "compose"]), \
+                    patch.object(installer, "run_compose") as compose:
+                with self.assertRaisesRegex(RuntimeError, "host folder denied"):
+                    installer.install(current, "v32", installer.UPGRADE)
+            self.assertEqual((current / "src/app.py").read_text(), "original")
+            compose.assert_not_called()
 
     def test_release_workflow_builds_all_three_from_common_source(self):
         workflow = (ROOT / ".github" / "workflows" / "package-installers.yml").read_text(encoding="utf-8")

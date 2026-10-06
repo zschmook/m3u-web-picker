@@ -264,6 +264,30 @@ def run_compose(command: list[str], install_dir: Path, *arguments: str) -> None:
     subprocess.run([*command, *arguments], cwd=install_dir, check=True)
 
 
+def prepare_bind_mount_directories(command: list[str], install_dir: Path) -> None:
+    result = subprocess.run(
+        [*command, "config", "--format", "json"], cwd=install_dir,
+        capture_output=True, text=True, check=True, **command_flags(),
+    )
+    # Compose resolves quoted values, environment interpolation, and relative
+    # paths. Keep its complete configuration in memory: it may contain secrets.
+    config = json.loads(result.stdout)
+    volumes = config.get("services", {}).get("m3u-picker", {}).get("volumes", [])
+    for volume in volumes:
+        if volume.get("type") != "bind":
+            continue
+        source = Path(volume["source"]).expanduser()
+        if not source.is_absolute():
+            source = install_dir / source
+        try:
+            source.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not create the host folder for {volume['target']}: {source}. "
+                "Check that this location is a writable folder, then retry UPGRADE (UP)."
+            ) from exc
+
+
 def wait_for_setup_page(seconds: int = 120) -> None:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -326,8 +350,10 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
             preserve(".env", install_dir, staging)
             preserve("runtime", install_dir, staging)
         prepare_install_environment(staging, image_tag)
+        staging_compose = compose_command(docker, staging)
+        prepare_bind_mount_directories(staging_compose, staging)
         # A failed image download must leave an existing installation running.
-        run_compose(compose_command(docker, staging), staging, "pull")
+        run_compose(staging_compose, staging, "pull")
         if existing_install:
             install_dir.replace(previous)
         try:
