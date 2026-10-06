@@ -147,7 +147,7 @@ Roku allows one sideloaded developer application at a time, so this replaces any
 
 ## Plex custom channels
 
-Open **Settings → Custom Channels** to enable the experimental Plex catalog. If automatic discovery finds no servers, use **Connect a Plex server** to save its URL and Plex token; enabled TV and movie libraries refresh after connecting. Choose which shows become channels. Show channels can run in episode order or shuffled order, with season limits. Optional commercials use clips imported from your own MP4 collection.
+Open **Settings → Custom Channels**, click **Sign in with Plex**, and complete sign-in in the Plex window. Choose an authorized server and click **Connect server**. Picker saves the connection without asking you to copy a token. Signing in and listing servers work before either channel option is enabled; they do not scan libraries or create channels. **Discover Plex Servers** and **Manual Plex connection** remain available as a URL/token fallback. Enable the experimental TV or movie catalog to refresh those libraries and choose which shows become channels. Show channels can run in episode order or shuffled order, with season limits. Optional commercials use clips imported from your own MP4 collection.
 
 Movie channels include genre mixes, Hallmark, Film Noir, and **Just Released**, which uses the five newest movie release dates. They play without commercials and shuffle without repeats until a channel's pool is exhausted. Custom channels join the existing playlists and XMLTV guide. For Plex movies, **Restart Movie**, **Pause Movie**, and **Back to Live** switch between playback from the beginning and the shared channel schedule.
 
@@ -160,6 +160,10 @@ Set playing brightness, paused brightness, and fade time separately for each roo
 ## Sports Automation
 
 Follow teams, leagues, conferences, or broad sports. Automation matches provider channels and XMLTV, then publishes temporary event channels with stable league numbering. Saved manual channels remain separate from generated sports feeds.
+
+Hockey includes **AHL, ECHL, SPHL, and FPHL** league and team subscriptions, with official 2026–27 team names and bundled logos. FloSports labels containing two known teams can identify a league even without its abbreviation. These leagues use provider/XMLTV matching; no additional schedule API key is required.
+
+League artwork is bundled for the major leagues and many named competitions, including shared NCAA and Olympic marks. The picker displays these icons without fetching images from outside services; entries without verified artwork keep their letter fallback.
 
 Ordered fallback providers are tried when the primary provider has no usable sports feed. Optional [API-SPORTS](https://api-sports.io/) adapters provide canonical schedules for MLB, NFL, and NCAA Football; other sports use provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
 

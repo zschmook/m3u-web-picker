@@ -2,6 +2,17 @@
 <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="custom-channels" aria-labelledby="uiCustomTitle">
   <div class="ui-card-heading"><div><span id="uiCustomTitle">Custom Channels</span><small>Build live TV and movie channels from your Plex library.</small></div><span class="ui-count-badge">Experimental</span></div>
   <div class="ui-settings-form">
+    <div class="cc-plex-account">
+      <strong>Connect your Plex library</strong>
+      <p class="small-muted">Sign in with Plex, then choose a server. Your connection is saved for future updates.</p>
+      <div class="ui-settings-actions cc-plex-actions"><button id="ccPlexSignIn" class="btn ui-btn-primary" type="button">Sign in with Plex</button><a id="ccPlexSignInLink" class="btn ui-btn-secondary" target="_blank" rel="noopener noreferrer" hidden>Open Plex sign-in</a><button id="ccPlexCancel" class="btn ui-btn-secondary" type="button" hidden>Cancel sign-in</button></div>
+      <div id="ccPlexStatus" class="ui-settings-status" role="status" aria-live="polite"></div>
+      <div id="ccPlexServersField" hidden>
+        <label class="ui-settings-field"><span>Plex servers</span><select id="ccPlexServer" class="form-select"><option value="">Choose a server</option></select></label>
+        <div class="ui-settings-actions cc-plex-actions"><button id="ccPlexRefresh" class="btn ui-btn-secondary" type="button">Refresh server list</button><button id="ccPlexConnect" class="btn ui-btn-primary" type="button">Connect server</button></div>
+      </div>
+    </div>
+    <div class="cc-server-discovery"><button id="ccDiscoverServers" class="btn ui-btn-secondary" type="button">Discover Plex Servers</button><div id="ccDiscoveryStatus" class="ui-settings-status" role="status" aria-live="polite">You can also discover nearby servers for a manual connection.</div></div>
     <label class="ui-settings-toggle"><input id="ccEnabled" type="checkbox" role="switch"><span><strong>Enable Plex TV show channels</strong><small>Include the TV catalog in manual and scheduled updates. Channel creation is always a separate step.</small></span></label>
     <label class="ui-settings-toggle"><input id="ccMoviesEnabled" type="checkbox" role="switch"><span><strong>Enable Plex movie channels</strong><small>Commercial-free genre channels, Hallmark, Film Noir, and the five newest releases. Restart a movie in the guide to pause and resume it.</small></span></label>
     <details id="ccStatusPanel" class="ui-settings-details cc-status-panel">
@@ -17,9 +28,10 @@
       <div class="cc-minimum-heading"><span>Minimum available episodes per series</span><label><input id="ccShowAll" type="checkbox"> Include series below the episode minimum</label></div>
       <input id="ccMinimum" class="form-control" type="number" min="1" max="10000" value="30" aria-label="Minimum available episodes per series">
     </div>
-    <details id="ccConnectionPanel" class="ui-settings-details"><summary>Connect a Plex server</summary><div class="ui-settings-details-body">
-      <p class="small-muted">If automatic discovery doesn't find your server, enter its address and Plex token. The connection is saved for future updates.</p>
+    <details id="ccConnectionPanel" class="ui-settings-details"><summary>Manual Plex connection</summary><div class="ui-settings-details-body">
+      <p class="small-muted">Use this fallback if Plex sign-in is unavailable. Choose a discovered server or enter its address, then add a Plex token.</p>
       <form id="ccConnectForm" class="ui-settings-form">
+        <div id="ccDiscoveredServerField" hidden><label class="ui-settings-field"><span>Discovered Plex servers</span><select id="ccDiscoveredServer" class="form-select"><option value="">Choose a server</option></select></label></div>
         <label class="ui-settings-field"><span>Plex server URL</span><input id="ccServerUrl" type="url" class="form-control" placeholder="http://192.168.1.10:32400" required></label>
         <label class="ui-settings-field"><span>Plex token</span><input id="ccToken" type="password" class="form-control" autocomplete="new-password"></label>
         <div class="ui-settings-actions"><button id="ccConnect" class="btn ui-btn-secondary" type="submit">Connect</button></div>

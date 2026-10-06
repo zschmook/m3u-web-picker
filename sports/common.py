@@ -21,7 +21,7 @@ ESTIMATED_EVENT_HOURS = {
     "ncaaf-d3": 4, "naia-football": 4, "njcaa-football": 4,
     "high-school-football": 4, "nba": 3, "wnba": 3, "nba-g-league": 3,
     "ncaab-men": 3, "ncaab-women": 3, "international-basketball": 3,
-    "nhl": 3, "ahl": 3, "ncaa-hockey": 3, "international-hockey": 3,
+    "nhl": 3, "ahl": 3, "echl": 3, "sphl": 3, "fphl": 3, "ncaa-hockey": 3, "international-hockey": 3,
     "mls": 3, "nwsl": 3, "premier-league": 3, "la-liga": 3,
     "uefa-champions-league": 3, "international-soccer": 3,
     "cricket-test": 8, "cricket-odi": 8, "cricket-t20": 5,

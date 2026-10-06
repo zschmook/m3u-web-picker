@@ -5,6 +5,7 @@ from xml.etree import ElementTree as ET
 from flask import Response,has_request_context,jsonify,request,stream_with_context
 import core
 import custom_channels as service
+import plex_auth
 from media import browser
 from media.scheduled_channel import segments_at
 from settings import load_settings
@@ -88,6 +89,40 @@ def merge_epg(root,items=None):
 
 
 def register_custom_channel_routes(app):
+    def plex_action(action):
+        if not request.is_json:
+            return jsonify(error='Send a JSON request.'),415
+        data=request.get_json(silent=True)
+        if not isinstance(data,dict): return jsonify(error='Send a JSON object.'),400
+        try: result=action(data)
+        except plex_auth.PlexAuthError as exc: return jsonify(error=str(exc)),400
+        except OSError: return jsonify(error='Could not save the Plex connection. Try again.'),503
+        response=jsonify(result);response.headers['Cache-Control']='no-store';return response
+
+    @app.post('/api/custom-channels/plex/sign-in')
+    def plex_sign_in():
+        return plex_action(lambda data: plex_auth.start_sign_in())
+
+    @app.post('/api/custom-channels/plex/sign-in/status')
+    def plex_sign_in_status():
+        return plex_action(lambda data: plex_auth.check_sign_in(data.get('flow_id','')))
+
+    @app.post('/api/custom-channels/plex/sign-in/cancel')
+    def plex_sign_in_cancel():
+        def cancel(data):
+            plex_auth.cancel_sign_in(data.get('flow_id',''));return dict(ok=True)
+        return plex_action(cancel)
+
+    @app.post('/api/custom-channels/plex/servers')
+    def plex_servers():
+        return plex_action(lambda data: dict(servers=plex_auth.account_servers(),account=plex_auth.public_account()))
+
+    @app.post('/api/custom-channels/plex/connect')
+    def plex_connect():
+        def connect(data):
+            plex_auth.connect_server(data.get('server_id',''));return service.payload()
+        return plex_action(connect)
+
     @app.get('/api/custom-channels/folders')
     def custom_folders():
         try: result=service.browse_folders(request.args.get('path',''))
@@ -137,6 +172,15 @@ def register_custom_channel_routes(app):
         try: service.connect_server(str(data.get('url','')).strip(),str(data.get('token','')).strip())
         except ValueError as exc: return jsonify(error=str(exc)),400
         return jsonify(service.payload())
+
+    @app.post('/api/custom-channels/servers/discover')
+    def custom_server_discovery():
+        try: found=service.find_servers()
+        except ValueError as exc: return jsonify(error=str(exc)),409
+        except OSError: return jsonify(error='Plex discovery could not finish. Try again or enter a server address.'),503
+        response=jsonify(**service.payload(),discovery_count=len(found))
+        response.headers['Cache-Control']='no-store'
+        return response
 
     @app.post('/api/custom-channels')
     def custom_create():

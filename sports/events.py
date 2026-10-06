@@ -331,6 +331,20 @@ def _infer_baseball_league(
     return resolved[0] if len(resolved) == 1 else ""
 
 
+def _infer_minor_hockey_league(left: str, right: str, teams: list[dict], team_lookup: dict | None = None) -> str:
+    # A dated FloSports feed may identify both clubs without naming their league.
+    # Require two known participants; youth teams and cross-league fixtures stay unclassified.
+    if re.search(r"\b(?:u\d{2}|\d{2}u|prep|aaa|aa)\b", left + " " + right, re.I):
+        return ""
+    resolved = []
+    for candidate in ("ahl", "echl", "sphl", "fphl"):
+        away_id, _ = _find_team_id(left, candidate, teams, team_lookup)
+        home_id, _ = _find_team_id(right, candidate, teams, team_lookup)
+        if away_id and home_id:
+            resolved.append(candidate)
+    return resolved[0] if len(resolved) == 1 else ""
+
+
 def _event_from_text(
     db_path: Path | str,
     channel: dict,
@@ -392,7 +406,11 @@ def _event_from_text(
     start = forced_start or parsed_start
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" |:-")
 
-    match = _s.MATCHUP_RE.search(cleaned)
+    matchup_text = re.sub(
+        r"\s*\((?:home|away|[^()]*\b(?:broadcast|feed|vs\.?)\b[^()]*)\)\s*$",
+        "", cleaned, flags=re.I,
+    ).replace("_", " ")
+    match = _s.MATCHUP_RE.search(matchup_text)
     if league_id in _s.TEAM_MATCHUP_LEAGUES and not match:
         return None
     teams = (
@@ -412,6 +430,12 @@ def _event_from_text(
                 teams,
                 team_lookup,
             )
+        if not league_id and sport_id in ("", "hockey"):
+            league_id = _infer_minor_hockey_league(left, right, teams, team_lookup)
+            if league_id:
+                sport_id = "hockey"
+                if "hockey" not in sport_tags:
+                    sport_tags.insert(0, "hockey")
         # A title can identify a sport without identifying a supported league
         # (for example, "Baseball • Detroit Lions at Philadelphia Eagles").
         # In that case a global team lookup would incorrectly borrow NFL team

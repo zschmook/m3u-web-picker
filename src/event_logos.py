@@ -89,8 +89,22 @@ def _signature_path(digest: str) -> Path:
     return event_dir / f"{digest}.sig"
 
 
+def _bundled_sports_logo(url: str) -> Path | None:
+    if not re.fullmatch(r'/static/icons/(?:hockey|leagues)/[a-z0-9/-]+\.png', url):
+        return None
+    root = (Path(__file__).resolve().parent.parent / 'static/icons').resolve()
+    path = (root / url.removeprefix('/static/icons/')).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
 def _clean_http_url(value: object) -> str:
     url = str(value or "").strip()
+    if _bundled_sports_logo(url):
+        return url
     try:
         parsed = urllib.parse.urlsplit(url)
     except ValueError:
@@ -232,6 +246,12 @@ def _sniff_image_type(payload: bytes, header_type: str = "") -> str:
 
 
 def _fetch_logo(url: str) -> tuple[bytes, str]:
+    bundled = _bundled_sports_logo(url)
+    if bundled:
+        payload = bundled.read_bytes()
+        if not payload or len(payload) > MAX_LOGO_BYTES:
+            raise ValueError('Invalid bundled sports logo.')
+        return payload, _sniff_image_type(payload)
     request = urllib.request.Request(
         url,
         headers={

@@ -6,6 +6,9 @@
   let editingChannel=null,deletingChannel=null;
   let bulkSelection=null,bulkRemoval=null,bulkMode='add';
   const choices=new Map();
+  let plexServers=[],plexServersLoaded=false;
+  const plexSignIn={flow:null,timer:null,popup:null,deadline:0};
+  const plexStatus=(message,error=false)=>{el('ccPlexStatus').textContent=message;el('ccPlexStatus').className='ui-settings-status'+(error?' is-error':'');};
   const text=(tag,value,className='')=>{const n=document.createElement(tag);n.textContent=value;n.className=className;return n;};
   const status=(message,error=false)=>{el('ccStatus').textContent=message;el('ccStatus').className='ui-settings-status'+(error?' is-error':'');if(error)el('ccStatusPanel').open=true;};
   async function api(path='',method='GET',body){
@@ -13,11 +16,17 @@
     const data=await response.json();if(!response.ok)throw Error(data.error||'Request failed');return data;
   }
   function locks(){
+    el('ccPlexSignIn').disabled=busy||!state||Boolean(plexSignIn.flow);
+    el('ccPlexRefresh').disabled=busy||!state||Boolean(plexSignIn.flow)||!state.plex_account?.signed_in;
+    el('ccPlexServer').disabled=busy||Boolean(plexSignIn.flow);
+    el('ccPlexConnect').disabled=busy||!state||state.job.running||Boolean(plexSignIn.flow)||!el('ccPlexServer').value;
     for(const id of ['ccEnabled','ccMoviesEnabled','ccMinimum','ccAds'])el(id).disabled=busy||!state;
     el('ccImportChoose').disabled=busy||importBusy||!state;
     el('ccImportInput').disabled=el('ccImportChoose').disabled;
     el('ccDiscover').disabled=busy||(!state?.settings.enabled&&!state?.settings.movies_enabled)||state?.job.running;
+    el('ccDiscoverServers').disabled=busy||!state||state.job.running;
     if(el('ccConnect'))el('ccConnect').disabled=busy||!state||state.job.running;
+    for(const id of ['ccServerUrl','ccToken','ccDiscoveredServer'])el(id).disabled=busy||!state||state.job.running;
     el('ccAddAll').disabled=busy||!state||!state.settings.enabled||Number(el('ccAddAll').dataset.count||0)===0;
     el('ccRemoveAll').disabled=busy||!state||Number(el('ccRemoveAll').dataset.count||0)===0;
     for(const id of ['ccEditSave','ccDeleteConfirm'])el(id).disabled=busy;
@@ -143,7 +152,9 @@
     }
   }
   async function load(fields=true){state=await api();if(fields)renderSettings();renderCatalog();renderChannels();renderMovieChannels();renderImports();locks();
-    if(!state.servers.length)el('ccConnectionPanel').open=true;
+    renderDiscoveredServers();
+    renderPlexAccount();
+    if(!state.servers.length&&(!state.plex_account||state.discovered_servers?.length))el('ccConnectionPanel').open=true;
     const observed=state.catalog.updated_at?new Date(state.catalog.updated_at*1000).toLocaleString():'';
     el('ccLastChecked').textContent=observed?`Catalog snapshot from ${observed}. Unavailable servers contribute zero series.`:'No Plex catalog snapshot yet.';
     el('ccServers').replaceChildren(...state.servers.map(s=>{const result=state.catalog.servers?.find(v=>v.id===s.id);let value;if(!result)value=s.name+' (not checked)';else if(result.status==='unavailable')value=s.name+' (scan unavailable, 0 current series)';else value=s.name+` (${result.shows} series${result.unavailable_files?`, ${result.unavailable_files} unavailable files`:''})`;return text('div',value,'cc-server-status');}));
@@ -152,7 +163,103 @@
     if(!state.job.running&&state.catalog.warnings?.length)status(state.catalog.warnings.join(' '),true);
     if(state.job.running){status(state.job.message);if(!poller)poller=setTimeout(async()=>{poller=null;try{await load(false);if(!state.job.running)status([state.job.message,...(state.catalog.warnings||[])].join(' '),Boolean(state.catalog.warnings?.length));}catch(e){status(e.message,true);}},1500);}
     if((state.commercial_imports||[]).some(item=>item.status==='processing')&&!commercialPoller)commercialPoller=setTimeout(async()=>{commercialPoller=null;try{await load(false);}catch(e){status(e.message,true);}},1500);
+    if(state.plex_account?.signed_in&&!plexServersLoaded&&!plexSignIn.flow)await refreshPlexServers();
   }
+  function renderPlexAccount(){
+    const account=state.plex_account||{};
+    el('ccPlexSignIn').textContent=account.signed_in?'Use another Plex account':'Sign in with Plex';
+    el('ccPlexServersField').hidden=!account.signed_in;
+    if(!plexSignIn.flow&&account.signed_in&&!plexServersLoaded)plexStatus(`Signed in as ${account.name||'your Plex account'}. Loading servers…`);
+  }
+  async function refreshPlexServers(){
+    plexServersLoaded=true;
+    try{
+      const result=await api('/plex/servers','POST',{});
+      plexServers=result.servers;state.plex_account=result.account;
+      const select=el('ccPlexServer'),previous=select.value;
+      select.replaceChildren(new Option('Choose a server',''),...plexServers.map(server=>new Option(server.name,server.id)));
+      if(plexServers.some(server=>server.id===previous))select.value=previous;
+      plexStatus(plexServers.length?`Signed in as ${result.account.name||'your Plex account'}. Choose a server to connect.`:'Signed in, but Plex returned no available servers. Check access to your libraries or refresh the list.');
+      renderPlexAccount();locks();
+    }catch(error){plexStatus(error.message,true);state=await api();renderPlexAccount();locks();}
+  }
+  function stopPlexSignIn(){
+    if(plexSignIn.timer)clearTimeout(plexSignIn.timer);
+    plexSignIn.timer=null;plexSignIn.flow=null;
+    if(plexSignIn.popup&&!plexSignIn.popup.closed)plexSignIn.popup.close();
+    plexSignIn.popup=null;el('ccPlexSignInLink').hidden=true;el('ccPlexCancel').hidden=true;locks();
+  }
+  async function pollPlexSignIn(){
+    plexSignIn.timer=null;
+    const flow=plexSignIn.flow;if(!flow)return;
+    if(Date.now()>=plexSignIn.deadline){stopPlexSignIn();plexStatus('Plex sign-in expired. Try signing in again.',true);return;}
+    try{
+      const result=await api('/plex/sign-in/status','POST',{flow_id:flow});
+      if(plexSignIn.flow!==flow)return;
+      if(result.status==='complete'){
+        stopPlexSignIn();plexServersLoaded=false;await load(false);return;
+      }
+      if(result.status==='expired'){stopPlexSignIn();plexStatus('Plex sign-in expired. Try signing in again.',true);return;}
+      plexStatus('Complete sign-in in the Plex window. This page will show your servers when you return.');
+    }catch(error){if(plexSignIn.flow!==flow)return;plexStatus(error.message+' You can retry while this sign-in is open.',true);}
+    if(plexSignIn.flow===flow)plexSignIn.timer=setTimeout(pollPlexSignIn,3000);
+  }
+  el('ccPlexSignIn').addEventListener('click',()=>{
+    if(busy||!state||plexSignIn.flow)return;
+    // Open synchronously so browsers can allow the user-initiated sign-in window.
+    plexSignIn.popup=window.open('about:blank','m3u-plex-sign-in','popup,width=720,height=760');
+    if(plexSignIn.popup)plexSignIn.popup.opener=null;
+    return action(async()=>{
+      plexStatus('Opening Plex sign-in…');
+      try{
+        const result=await api('/plex/sign-in','POST',{}),url=new URL(result.auth_url);
+        if(url.origin!=='https://app.plex.tv'||url.pathname!=='/auth')throw Error('Plex returned an invalid sign-in address.');
+        plexSignIn.flow=result.flow_id;plexSignIn.deadline=Date.now()+result.expires_in*1000;
+        const link=el('ccPlexSignInLink');link.href=result.auth_url;link.hidden=false;el('ccPlexCancel').hidden=false;
+        if(plexSignIn.popup&&!plexSignIn.popup.closed)plexSignIn.popup.location=result.auth_url;
+        plexStatus('Complete sign-in in Plex. If the window did not open, use Open Plex sign-in.');
+        plexSignIn.timer=setTimeout(pollPlexSignIn,3000);
+      }catch(error){stopPlexSignIn();plexStatus(error.message,true);throw error;}
+    });
+  });
+  el('ccPlexCancel').addEventListener('click',async()=>{
+    const flow=plexSignIn.flow;stopPlexSignIn();plexStatus('Sign-in canceled. Your existing connections are unchanged.');
+    if(flow)try{await api('/plex/sign-in/cancel','POST',{flow_id:flow});}catch(error){plexStatus(error.message,true);}
+  });
+  el('ccPlexServer').addEventListener('change',locks);
+  el('ccPlexRefresh').addEventListener('click',()=>action(refreshPlexServers));
+  el('ccPlexConnect').addEventListener('click',()=>action(async()=>{
+    const identity=el('ccPlexServer').value;if(!identity)return;
+    plexStatus('Connecting to your Plex server…');
+    try{
+      state=await api('/plex/connect','POST',{server_id:identity});await load(false);
+      plexStatus('Plex connected.');
+      if(state.settings.enabled||state.settings.movies_enabled){await api('/discover','POST',{});await load(false);}
+      else status('Plex connected. Enable TV show or movie channels to scan its libraries.');
+    }catch(error){plexStatus(error.message,true);throw error;}
+  }));
+  function renderDiscoveredServers(){
+    const select=el('ccDiscoveredServer'),previous=select.value,servers=state.discovered_servers||[];
+    el('ccDiscoveredServerField').hidden=!servers.length;
+    select.replaceChildren(new Option('Choose a server',''),...servers.map(server=>new Option(`${server.name} · ${server.url}`,server.url)));
+    if(servers.some(server=>server.url===previous))select.value=previous;
+    el('ccDiscover').textContent='Refresh Custom Channels';
+  }
+  el('ccDiscoverServers').addEventListener('click',()=>action(async()=>{
+    const button=el('ccDiscoverServers'),message=el('ccDiscoveryStatus');
+    button.textContent='Discovering…';message.textContent='Looking for Plex servers on your network…';message.className='ui-settings-status';
+    try{
+      const result=await api('/servers/discover','POST',{});await load(false);
+      el('ccConnectionPanel').open=true;
+      const count=result.discovery_count;
+      message.textContent=count?`Found ${count} Plex server${count===1?'':'s'}. ${state.discovered_servers?.length?'Choose a server below to connect.':'Your saved connections are listed in Status.'}`:'No Plex servers found. You can enter a server address below.';
+      status(message.textContent);
+    }catch(error){message.textContent=error.message;message.className='ui-settings-status is-error';throw error;}
+    finally{button.textContent='Discover Plex Servers';}
+  }));
+  el('ccDiscoveredServer').addEventListener('change',()=>{
+    if(el('ccDiscoveredServer').value){el('ccServerUrl').value=el('ccDiscoveredServer').value;el('ccToken').focus();}
+  });
   async function persist(values){
     status('Saving…');state=await api('/settings','PATCH',values);renderSettings();renderCatalog();renderChannels();status('Saved automatically.');
   }

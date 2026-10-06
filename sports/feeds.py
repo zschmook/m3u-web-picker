@@ -45,6 +45,10 @@ def _feed_type(channel: dict, event: dict, team_id: str = "") -> str:
         return "away"
     if team_id and team_id == event.get("home_team_id"):
         return "home"
+    if event.get("league_id") in {"ahl", "echl", "sphl", "fphl"}:
+        broadcast = re.search(r"\((home|away)(?:\s+(?:broadcast|feed))?\)", text, re.I)
+        if broadcast:
+            return broadcast.group(1).lower()
     if any(word in text for word in _s.NETWORK_WORDS):
         return "national"
     return "event"
@@ -77,6 +81,8 @@ def _espn_team_logo(event: dict, *, team_name: str) -> str:
     if not team_name:
         return ""
     league_id = event.get("league_id") or _s._classification_id(event)
+    if league_id in {"ahl", "echl", "sphl", "fphl"}:
+        return ""  # These clubs have verified bundled marks, independent of ESPN's NHL catalog.
     try:
         logo = espn_team_logos.espn_full_default_url(
             league_id,
@@ -182,6 +188,8 @@ def _build_feeds(
         if not url:
             return
         kind = _feed_type(channel, event, team_id)
+        if not team_id and event.get("league_id") in {"ahl", "echl", "sphl", "fphl"} and kind in {"home", "away"}:
+            team_id = str(event.get(kind + "_team_id") or "")
         candidate = {
             "channel": channel,
             "feed_type": kind,

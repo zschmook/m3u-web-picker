@@ -1,0 +1,501 @@
+{
+  "verified_on": "2026-10-05",
+  "assets": [
+    {
+      "id": "mlb",
+      "league_ids": [
+        "mlb"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500-dark/mlb.png&w=500&h=500&transparent=true",
+      "logo_url": "/static/icons/leagues/mlb.png"
+    },
+    {
+      "id": "nhl",
+      "league_ids": [
+        "nhl"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/teamlogos/leagues/500-dark/nhl.png",
+      "logo_url": "/static/icons/leagues/nhl.png"
+    },
+    {
+      "id": "nba",
+      "league_ids": [
+        "nba"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500-dark/nba.png&w=500&h=500&transparent=true",
+      "logo_url": "/static/icons/leagues/nba.png"
+    },
+    {
+      "id": "nfl",
+      "league_ids": [
+        "nfl"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/teamlogos/leagues/500-dark/nfl.png",
+      "logo_url": "/static/icons/leagues/nfl.png"
+    },
+    {
+      "id": "wnba",
+      "league_ids": [
+        "wnba"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/teamlogos/leagues/500-dark/wnba.png",
+      "logo_url": "/static/icons/leagues/wnba.png"
+    },
+    {
+      "id": "nba-g-league",
+      "league_ids": [
+        "nba-g-league"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba-development/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500/nba_gleague.png",
+      "logo_url": "/static/icons/leagues/nba-g-league.png"
+    },
+    {
+      "id": "mls",
+      "league_ids": [
+        "mls"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/19.png",
+      "logo_url": "/static/icons/leagues/mls.png"
+    },
+    {
+      "id": "nwsl",
+      "league_ids": [
+        "nwsl"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.nwsl/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/2323.png",
+      "logo_url": "/static/icons/leagues/nwsl.png"
+    },
+    {
+      "id": "premier-league",
+      "league_ids": [
+        "premier-league"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/23.png",
+      "logo_url": "/static/icons/leagues/premier-league.png"
+    },
+    {
+      "id": "la-liga",
+      "league_ids": [
+        "la-liga"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/soccer/esp.1/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/15.png",
+      "logo_url": "/static/icons/leagues/la-liga.png"
+    },
+    {
+      "id": "uefa-champions-league",
+      "league_ids": [
+        "uefa-champions-league"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/2.png",
+      "logo_url": "/static/icons/leagues/uefa-champions-league.png"
+    },
+    {
+      "id": "pga-tour",
+      "league_ids": [
+        "pga-tour"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500-dark/pgatour.png",
+      "logo_url": "/static/icons/leagues/pga-tour.png"
+    },
+    {
+      "id": "lpga-tour",
+      "league_ids": [
+        "lpga-tour"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/golf/lpga/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500-dark/lpga.png",
+      "logo_url": "/static/icons/leagues/lpga-tour.png"
+    },
+    {
+      "id": "formula-1",
+      "league_ids": [
+        "formula-1"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/racing/f1/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500/f1.png",
+      "logo_url": "/static/icons/leagues/formula-1.png"
+    },
+    {
+      "id": "indycar",
+      "league_ids": [
+        "indycar"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/racing/irl/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/combiner/i?img=/i/espn/teamlogos/500/indycar_series.png",
+      "logo_url": "/static/icons/leagues/indycar.png"
+    },
+    {
+      "id": "ufc",
+      "league_ids": [
+        "ufc"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/teamlogos/leagues/500/ufc.png",
+      "logo_url": "/static/icons/leagues/ufc.png"
+    },
+    {
+      "id": "cricket-ipl",
+      "league_ids": [
+        "cricket-ipl"
+      ],
+      "source_page": "https://site.api.espn.com/apis/site/v2/sports/cricket/8048/scoreboard?limit=1",
+      "source_logo": "https://a.espncdn.com/i/leaguelogos/cricket/500/8048.png",
+      "logo_url": "/static/icons/leagues/cricket-ipl.png"
+    },
+    {
+      "id": "milb",
+      "league_ids": [
+        "milb"
+      ],
+      "source_page": "https://www.milb.com/",
+      "source_logo": "https://www.mlbstatic.com/team-logos/league-on-dark/milb-alt.svg",
+      "logo_url": "/static/icons/leagues/milb.png"
+    },
+    {
+      "id": "ncaa",
+      "league_ids": [
+        "ncaaf-fbs",
+        "ncaaf-fcs",
+        "ncaaf-d2",
+        "ncaaf-d3",
+        "ncaab-men",
+        "ncaab-women",
+        "ncaa-baseball",
+        "ncaa-hockey",
+        "ncaa-golf",
+        "ncaa-track-field",
+        "ncaa-swimming",
+        "ncaa-gymnastics",
+        "ncaa-wrestling",
+        "ncaa-tennis",
+        "ncaa-volleyball",
+        "ncaa-softball",
+        "ncaa-lacrosse",
+        "ncaa-diving",
+        "ncaa-water-polo",
+        "ncaa-rowing",
+        "ncaa-field-hockey",
+        "ncaa-fencing",
+        "ncaa-bowling"
+      ],
+      "source_page": "https://www.ncaa.com/",
+      "source_logo": "https://www.ncaa.com/favicon.svg",
+      "logo_url": "/static/icons/leagues/ncaa.png"
+    },
+    {
+      "id": "naia",
+      "league_ids": [
+        "naia-football"
+      ],
+      "source_page": "https://www.naia.org/",
+      "source_logo": "https://www.naia.org/wp-content/uploads/2026/04/naia-bridge-logo.png",
+      "logo_url": "/static/icons/leagues/naia.png"
+    },
+    {
+      "id": "njcaa",
+      "league_ids": [
+        "njcaa-football"
+      ],
+      "source_page": "https://www.njcaa.org/",
+      "source_logo": "https://www.njcaa.org/media/7ecde19bd7-d7d922d2dd334eae9ad99567c91f492d-site-logo.png",
+      "logo_url": "/static/icons/leagues/njcaa.png"
+    },
+    {
+      "id": "wta-tennis",
+      "league_ids": [
+        "wta-tennis"
+      ],
+      "source_page": "https://www.wtatennis.com/",
+      "source_logo": "https://www.wtatennis.com/resources/v7.53.2/favicon-96x96.png",
+      "logo_url": "/static/icons/leagues/wta-tennis.png"
+    },
+    {
+      "id": "formula-e",
+      "league_ids": [
+        "formula-e"
+      ],
+      "source_page": "https://www.fiaformulae.com/",
+      "source_logo": "https://www.fiaformulae.com/images/icons/favicon.svg",
+      "logo_url": "/static/icons/leagues/formula-e.png"
+    },
+    {
+      "id": "wec",
+      "league_ids": [
+        "wec"
+      ],
+      "source_page": "https://www.fiawec.com/",
+      "source_logo": "https://www.fiawec.com/uploads/wec-logo-69d50a53ddfee895249122.png",
+      "logo_url": "/static/icons/leagues/wec.png"
+    },
+    {
+      "id": "motogp",
+      "league_ids": [
+        "motogp"
+      ],
+      "source_page": "https://www.motogp.com/",
+      "source_logo": "https://static.dorna.com/assets/logos/mgp/brand/mgp-favicon-on-dark-180x180.png",
+      "logo_url": "/static/icons/leagues/motogp.png"
+    },
+    {
+      "id": "nhra",
+      "league_ids": [
+        "nhra"
+      ],
+      "source_page": "https://www.nhra.com/",
+      "source_logo": "https://www.nhra.com/sites/default/files/NHRA24-75thLogoPlain.png",
+      "logo_url": "/static/icons/leagues/nhra.png"
+    },
+    {
+      "id": "pfl",
+      "league_ids": [
+        "pfl"
+      ],
+      "source_page": "https://pflmma.com/",
+      "source_logo": "https://pflmma.com/assets/img/pfl-logo-crown-white.svg",
+      "logo_url": "/static/icons/leagues/pfl.png"
+    },
+    {
+      "id": "wwe",
+      "league_ids": [
+        "wwe"
+      ],
+      "source_page": "https://www.wwe.com/",
+      "source_logo": "https://www.wwe.com/themes/custom/wwe_theme/logo.svg",
+      "logo_url": "/static/icons/leagues/wwe.png"
+    },
+    {
+      "id": "tna",
+      "league_ids": [
+        "tna"
+      ],
+      "source_page": "https://tnawrestling.com/",
+      "source_logo": "https://tnawrestling.com/favicons/default/apple-touch-icon.png",
+      "logo_url": "/static/icons/leagues/tna.png"
+    },
+    {
+      "id": "acl-cornhole",
+      "league_ids": [
+        "acl-cornhole"
+      ],
+      "source_page": "https://www.iplaycornhole.com/",
+      "source_logo": "https://www.iplaycornhole.com/images/ACL_Logos/acl-logo.svg",
+      "logo_url": "/static/icons/leagues/acl-cornhole.png"
+    },
+    {
+      "id": "aco-cornhole",
+      "league_ids": [
+        "aco-cornhole"
+      ],
+      "source_page": "https://americancornhole.com/",
+      "source_logo": "https://americancornhole.com/wp-content/uploads/ACO-Round-Logo-1-1.png",
+      "logo_url": "/static/icons/leagues/aco-cornhole.png"
+    },
+    {
+      "id": "nll",
+      "league_ids": [
+        "nll"
+      ],
+      "source_page": "https://www.nll.com/",
+      "source_logo": "https://www.nll.com/wp-content/uploads/2020/10/nll-favicon-1.png",
+      "logo_url": "/static/icons/leagues/nll.png"
+    },
+    {
+      "id": "pll",
+      "league_ids": [
+        "pll"
+      ],
+      "source_page": "https://premierlacrosseleague.com/",
+      "source_logo": "https://premierlacrosseleague.com/wp-content/uploads/2019/05/pll-logo-gray.png",
+      "logo_url": "/static/icons/leagues/pll.png"
+    },
+    {
+      "id": "world-athletics",
+      "league_ids": [
+        "world-athletics"
+      ],
+      "source_page": "https://worldathletics.org/",
+      "source_logo": "https://media.aws.iaaf.org/logos/WA-logo-white.svg",
+      "logo_url": "/static/icons/leagues/world-athletics.png"
+    },
+    {
+      "id": "diamond-league",
+      "league_ids": [
+        "diamond-league"
+      ],
+      "source_page": "https://www.diamondleague.com/",
+      "source_logo": "https://www.diamondleague.com/wp-content/uploads/2025/03/dl_logo_on_dark_bg-1.svg",
+      "logo_url": "/static/icons/leagues/diamond-league.png"
+    },
+    {
+      "id": "world-curling",
+      "league_ids": [
+        "world-curling"
+      ],
+      "source_page": "https://worldcurling.org/",
+      "source_logo": "https://worldcurling.org/wp-content/uploads/2024/01/cropped-WCF_Logo_HeroMark_Colour-300x300.png",
+      "logo_url": "/static/icons/leagues/world-curling.png"
+    },
+    {
+      "id": "world-rowing",
+      "league_ids": [
+        "world-rowing"
+      ],
+      "source_page": "https://worldrowing.com/",
+      "source_logo": "https://d2cx26qpfwuhvu.cloudfront.net/worldrowing/wp-content/uploads/2020/12/04182712/WR-Logo-Light.png",
+      "logo_url": "/static/icons/leagues/world-rowing.png"
+    },
+    {
+      "id": "world-archery",
+      "league_ids": [
+        "world-archery"
+      ],
+      "source_page": "https://www.worldarchery.sport/",
+      "source_logo": "https://www.worldarchery.sport/themes/custom/wa_radix/images/logo-small.svg",
+      "logo_url": "/static/icons/leagues/world-archery.png"
+    },
+    {
+      "id": "pba-bowling",
+      "league_ids": [
+        "pba-bowling"
+      ],
+      "source_page": "https://www.pba.com/",
+      "source_logo": "https://www.pba.com/sites/pba/files/pba_logo_v3.png",
+      "logo_url": "/static/icons/leagues/pba-bowling.png"
+    },
+    {
+      "id": "pwba-bowling",
+      "league_ids": [
+        "pwba-bowling"
+      ],
+      "source_page": "https://pwba.com/",
+      "source_logo": "https://images.bowl.com/pwba/media/assets/shared/pwba_logo_white.svg",
+      "logo_url": "/static/icons/leagues/pwba-bowling.png"
+    },
+    {
+      "id": "aew",
+      "league_ids": [
+        "aew"
+      ],
+      "source_page": "https://www.allelitewrestling.com/",
+      "source_logo": "https://static.wixstatic.com/media/815952_5964d86934774f97a1a12b104c8b0a7a~mv2.png",
+      "logo_url": "/static/icons/leagues/aew.png"
+    },
+    {
+      "id": "roh",
+      "league_ids": [
+        "roh"
+      ],
+      "source_page": "https://www.ringofhonor.com/",
+      "source_logo": "https://static.wixstatic.com/media/ac2041_081e444ad68c40dbaa862cdff62cbb68~mv2.png",
+      "logo_url": "/static/icons/leagues/roh.png"
+    },
+    {
+      "id": "wsl-surfing",
+      "league_ids": [
+        "wsl-surfing"
+      ],
+      "source_page": "https://www.worldsurfleague.com/",
+      "source_logo": "https://d3qf8nvav5av0u.cloudfront.net/cache/img/favicon-144x144_1790364319.png",
+      "logo_url": "/static/icons/leagues/wsl-surfing.png"
+    },
+    {
+      "id": "one-championship",
+      "league_ids": [
+        "one-championship"
+      ],
+      "source_page": "https://www.onefc.com/",
+      "source_logo": "https://cdn.onefc.com/wp-content/uploads/2020/01/ONE_logo-1024-w.png",
+      "logo_url": "/static/icons/leagues/one-championship.png"
+    },
+    {
+      "id": "olympics",
+      "league_ids": [
+        "olympic-curling",
+        "olympic-golf",
+        "olympic-track-field",
+        "olympic-swimming",
+        "olympic-gymnastics",
+        "olympic-figure-skating",
+        "olympic-speed-skating",
+        "olympic-skiing",
+        "olympic-snowboarding",
+        "olympic-wrestling",
+        "olympic-cycling",
+        "olympic-tennis",
+        "olympic-volleyball",
+        "olympic-boxing",
+        "olympic-biathlon",
+        "olympic-diving",
+        "olympic-water-polo",
+        "olympic-artistic-swimming",
+        "olympic-rowing",
+        "olympic-canoe-kayak",
+        "olympic-sailing",
+        "olympic-triathlon",
+        "olympic-archery",
+        "olympic-shooting",
+        "olympic-weightlifting",
+        "olympic-equestrian",
+        "olympic-handball",
+        "olympic-field-hockey",
+        "olympic-badminton",
+        "olympic-table-tennis",
+        "olympic-fencing",
+        "olympic-judo",
+        "olympic-taekwondo",
+        "olympic-sport-climbing",
+        "olympic-surfing",
+        "olympic-skateboarding",
+        "olympic-modern-pentathlon"
+      ],
+      "source_page": "https://www.olympics.com/ioc/olympic-rings",
+      "source_logo": "https://www.olympics.com/ioc/olympic-rings#inline-brand-svg",
+      "logo_url": "/static/icons/leagues/olympics.png"
+    },
+    {
+      "id": "formula-2",
+      "league_ids": [
+        "formula-2"
+      ],
+      "source_page": "https://www.fiaformula2.com/",
+      "source_logo": "https://www.fiaformula2.com/#inline-brand-svg",
+      "logo_url": "/static/icons/leagues/formula-2.png"
+    },
+    {
+      "id": "liv-golf",
+      "league_ids": [
+        "liv-golf"
+      ],
+      "source_logo": "https://www.livgolf.com/assets/logos/liv-golf-primary.svg",
+      "source_page": "https://www.livgolf.com/",
+      "logo_url": "/static/icons/leagues/liv-golf.png"
+    },
+    {
+      "id": "formula-3",
+      "league_ids": [
+        "formula-3"
+      ],
+      "source_page": "https://www.fiaformula3.com/",
+      "source_logo": "https://www.fiaformula3.com/#inline-brand-svg",
+      "logo_url": "/static/icons/leagues/formula-3.png"
+    }
+  ],
+  "ahl_correction": {
+    "source_page": "https://theahl.com/",
+    "source_logo": "https://theahl.com/wp-content/uploads/sites/3/2026/09/footer-logo260915.png",
+    "logo_url": "/static/icons/hockey/ahl.png",
+    "processing": "Use the circular emblem from the left of the official footer wordmark."
+  }
+}

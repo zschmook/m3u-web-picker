@@ -12,11 +12,13 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path, PureWindowsPath
 
 from settings import load_settings
 import movie_restart
+from plex_discovery import discover_lan_servers, discover_plex_servers
 from media.scheduled_channel import new_schedule, extend_schedule, save_schedule, trim_schedule
 
 LOCK = threading.RLock()
@@ -310,12 +312,25 @@ def seed_connection():
     return json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
 
 
+def find_servers():
+    if not SCAN_LOCK.acquire(blocking=False):
+        raise ValueError('A Plex scan is already running. Try discovery after it finishes.')
+    try:
+        found=discover_plex_servers(load_settings().lan_host)
+        with LOCK: save_schedule(root()/'discovered-servers.json',found)
+        return found
+    finally:
+        SCAN_LOCK.release()
+
+
 def discover_servers():
     """Use saved connections, Plex account resources, and local GDM discovery."""
     saved = read('servers.json',[])
     seed = seed_connection()
     token = next((s['token'] for s in saved if s.get('token')),seed.get('token',''))
     candidates = list(saved)
+    detected = discover_lan_servers(load_settings().lan_host)
+    candidates.extend(dict(url=server['url'],token=token) for server in detected)
     if seed.get('server'):
         candidates.append(dict(url=seed['server'],token=seed.get('token','')))
     if token:
@@ -364,6 +379,8 @@ def discover_servers():
         except Exception:
             continue
     result = [{k:v for k,v in s.items() if k!='_verified'} for s in servers.values()]
+    connected = {server['id'] for server in result}
+    save_schedule(root()/'discovered-servers.json',[server for server in detected if server['id'] not in connected])
     save_schedule(root()/'servers.json',result)
     return result
 
@@ -520,7 +537,12 @@ def refresh(discover=False):
                     warning=server['name']+': scan unavailable; no cached shows reused ('+type(exc).__name__+').'
                     warnings.append(warning)
                     statuses.append(dict(id=server['id'],name=server['name'],status='unavailable',shows=0,unavailable_files=0))
-            if not servers: warnings.append('No accessible Plex servers found. Add a connection below and try again.')
+            if not servers:
+                detected=read('discovered-servers.json',[])
+                if detected:
+                    warnings.append(f"Found {len(detected)} Plex server{'s' if len(detected)!=1 else ''}. Choose a discovered server below and enter its Plex token to connect.")
+                else:
+                    warnings.append('No accessible Plex servers found. Add a connection below and try again.')
             result=dict(shows=shows,servers=statuses,updated_at=time.time(),warnings=warnings)
             category_count=0
             try:
@@ -557,14 +579,22 @@ def start_discovery():
         threading.Thread(target=refresh,kwargs={'discover':True},daemon=True,name='plex-custom-discovery').start()
 
 
-def connect_server(url,token):
+def connect_server(url,token,expected_identity=None):
     parsed=urllib.parse.urlsplit(url)
     if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError('Enter a Plex server URL without credentials or query parameters.')
     if '\r' in token or '\n' in token: raise ValueError('Invalid Plex token')
-    try: meta=plex_xml(url,'/',token)
+    try:
+        meta=plex_xml(url,'/',token)
+        identity=meta.get('machineIdentifier')
+        if expected_identity and identity!=expected_identity:
+            raise ValueError('Unexpected Plex server identity.')
+        if identity: plex_xml(url,'/library/sections',token)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401,403):
+            raise ValueError('Plex requires a valid token. Enter the Plex token for this server.') from None
+        raise ValueError('Could not connect to Plex. Check the URL and token.') from None
     except Exception: raise ValueError('Could not connect to Plex. Check the URL and token.') from None
-    identity=meta.get('machineIdentifier')
     if not identity: raise ValueError('That address is not a Plex server.')
     with LOCK:
         servers=[s for s in read('servers.json',[]) if s['id']!=identity]
@@ -602,11 +632,13 @@ def summary(show, detailed=False):
 
 def payload():
     import movie_channels
+    import plex_auth
     cfg=settings();catalog=read('catalog.json',{})
     return dict(settings=cfg,commercials_folder_label=folder_label(Path(cfg['commercials_folder'])) if cfg['commercials_folder'] else '',job=dict(JOB),catalog={k:v for k,v in catalog.items() if k!='shows'},
         shows=[summary(s) for s in catalog.get('shows',[])],channels=read('channels.json',[]),
         servers=[dict(id=s['id'],name=s['name'],url=s['url']) for s in read('servers.json',[])],
-        commercial_imports=commercial_imports(),movies=movie_channels.payload())
+        discovered_servers=[dict(id=s['id'],name=s['name'],url=s['url']) for s in read('discovered-servers.json',[]) if s['id'] not in {server['id'] for server in read('servers.json',[])}],
+        commercial_imports=commercial_imports(),movies=movie_channels.payload(),plex_account=plex_auth.public_account())
 
 
 def commercial_assets(cfg):

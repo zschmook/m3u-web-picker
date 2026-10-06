@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from minor_hockey_teams import MINOR_HOCKEY_TEAMS, MINOR_HOCKEY_LEAGUE_LOGOS
+from sports_league_logos import LEAGUE_LOGOS
 
 DEFAULT_SETTINGS = {
     "enabled": False,
@@ -404,6 +406,10 @@ LEAGUE_DEFINITIONS = [
     ("ncaa-bowling", "NCAA Bowling", "bowling", "College bowling", [], [r"ncaa bowling", r"college bowling"]),
     ("professional-pool", "Professional Pool", "billiards", "Professional pool tournaments", [], [r"professional pool", r"pool championship", r"nine[- ]ball"]),
     ("snooker", "Snooker", "billiards", "Professional snooker", [], [r"\bsnooker\b"]),
+    # Append new leagues so existing saved rules and channel blocks stay stable.
+    ("echl", "ECHL", "hockey", "ECHL hockey games", ["East Coast Hockey League"], [r"\bechl\b", r"east coast hockey league"]),
+    ("sphl", "SPHL", "hockey", "Southern Professional Hockey League games", ["Southern Professional Hockey League"], [r"\bsphl\b", r"southern professional hockey league"]),
+    ("fphl", "FPHL", "hockey", "Federal Prospects Hockey League games", ["Federal Prospects Hockey League", "Federal Hockey League", "FHL"], [r"\bfphl\b", r"federal prospects hockey league", r"federal hockey league", r"\bfhl\b"]),
 ]
 
 SPORT_NAMES = {sport_id: name for sport_id, name, _patterns in SPORT_DEFINITIONS}
@@ -422,7 +428,7 @@ COLLEGE_FOOTBALL_LEAGUES = {
 }
 TEAM_MATCHUP_LEAGUES = {
     "nfl", "mlb", "milb", "nba", "wnba", "nba-g-league",
-    "nhl", "ahl", "ncaaf-fbs", "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3",
+    "nhl", "ahl", "echl", "sphl", "fphl", "ncaaf-fbs", "ncaaf-fcs", "ncaaf-d2", "ncaaf-d3",
     "naia-football", "njcaa-football", "high-school-football",
     "ncaab-men", "ncaab-women", "mls", "nwsl", "premier-league",
     "la-liga", "uefa-champions-league", "international-soccer",
@@ -550,7 +556,7 @@ for league_id, name, sport_id, subtitle, aliases, _patterns in LEAGUE_DEFINITION
             subtitle,
             league_id,
             aliases,
-            "",
+            LEAGUE_LOGOS.get(league_id, MINOR_HOCKEY_LEAGUE_LOGOS.get(league_id, "")),
             {
                 "sport_id": sport_id,
                 "family": SPORT_NAMES.get(sport_id, sport_id),
@@ -616,6 +622,13 @@ LEGACY_DEMO_RULES = {
     ("conference", "ncaaf:big-ten"),
     ("sport", "cornhole"),
 }
+
+SEED_CATALOG.extend(
+    ("team", team["id"], team["name"], f'{team["league"].upper()} team • home and away games',
+     team["league"], [team["name"], *team["aliases"]], team["logo_url"],
+     {"sport_id": "hockey", "family": "Hockey", "season": "2026-27", "source_url": team["source_page"]})
+    for team in MINOR_HOCKEY_TEAMS
+)
 
 TEAM_FEED_PATTERNS = [
     ("mlb", re.compile(r"^MLB\s+(?!NETWORK\b|STRIKE\b)(?P<team>.+?)\s*$", re.I)),

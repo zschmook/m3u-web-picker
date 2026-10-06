@@ -61,7 +61,7 @@ jobs:
           IMAGE: ${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.tag }}
         run: |
           docker run --rm --entrypoint python "$IMAGE" -c 'import flask, markdown, src.app; import subprocess; subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.DEVNULL)'
-          docker run --rm --entrypoint python "$IMAGE" -m unittest tests.test_roku_app tests.test_shared_media_sessions tests.test_hls_manifest tests.test_live_read_ahead tests.test_movie_lighting tests.test_hls_audio_clock tests.test_hls_recovery_continuity tests.test_release_main tests.test_cross_platform_docker_installer
+          docker run --rm --entrypoint python "$IMAGE" -m unittest tests.test_roku_app tests.test_shared_media_sessions tests.test_hls_manifest tests.test_live_read_ahead tests.test_movie_lighting tests.test_hls_audio_clock tests.test_hls_recovery_continuity tests.test_release_main tests.test_cross_platform_docker_installer tests.test_plex_auth tests.test_plex_discovery tests.test_minor_hockey
 
   publish:
     needs: [prepare, image]

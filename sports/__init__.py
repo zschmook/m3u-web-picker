@@ -102,7 +102,7 @@ _install(
         "_utc_instant", "_channel_text", "_league_matches", "_college_football_match",
         "_detect_league", "_detect_sport_tags", "_detect_sport", "_strip_provider_prefix",
         "_extract_event_datetime", "_team_catalog", "_build_team_lookup", "_find_team_id",
-        "_infer_baseball_league", "_event_from_text", "_event_has_usable_timing",
+        "_infer_baseball_league", "_infer_minor_hockey_league", "_event_from_text", "_event_has_usable_timing",
         "_primary_event_end", "_event_end", "_event_overlaps_window",
         "_event_overlaps_replay_context", "_event_is_stale",
     ),
