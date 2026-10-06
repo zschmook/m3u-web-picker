@@ -53,7 +53,7 @@ class ReleaseTests(unittest.TestCase):
             api = Mock()
             api.request.side_effect = [ref(32, "new"), {"id": 123}, {"commit": {"sha": head}}, {}]
             publish(api, "v32", "new")
-            self.assertEqual(api.request.call_args.args[1], {"draft": False, "make_latest": expected})
+            self.assertEqual(api.request.call_args.args[1], {"tag_name": "v32", "target_commitish": "new", "draft": False, "make_latest": expected})
 
     def test_draft_lookup_pages_through_authenticated_release_list(self):
         api = Mock()

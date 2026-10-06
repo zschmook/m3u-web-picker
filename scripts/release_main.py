@@ -125,7 +125,7 @@ def publish(api, tag, sha):
     if release is None:
         raise RuntimeError("The reserved release was not found.")
     current = api.request("branches/main")["commit"]["sha"] == sha
-    api.request(f"releases/{release['id']}", {"draft": False,
+    api.request(f"releases/{release['id']}", {"tag_name": tag, "target_commitish": sha, "draft": False,
         "make_latest": "true" if current else "false"}, method="PATCH")
 
 
