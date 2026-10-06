@@ -82,6 +82,11 @@ jobs:
           # A private package needs its visibility changed to Public first.
           # Never advertise a release that anonymous users cannot pull.
           python scripts/release_main.py verify
+      - name: Upload assets to the reserved release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: python scripts/release_main.py upload
       - name: Promote current main image to latest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,9 +101,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          gh release upload "$RELEASE_TAG" docker-compose.release.yml docker-compose.gpu.yml docker-compose.discovery.yml .env.example --clobber --repo "$GITHUB_REPOSITORY"
-          python scripts/release_main.py publish
+        run: python scripts/release_main.py publish
       - name: Start existing installer packaging separately
         env:
           GH_TOKEN: ${{ github.token }}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,15 @@ class GitHub:
             data=None if data is None else json.dumps(data).encode(), method=method,
             headers={"Authorization": f"Bearer {self.token}",
                 "Accept": "application/vnd.github+json", "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "M3U-Web-Picker-Release"})
+        with urlopen(request, timeout=60) as response:
+            return None if response.status == 204 else json.load(response)
+
+    def upload_asset(self, release_id: int, name: str, payload: bytes):
+        request = Request(
+            f"https://uploads.github.com/repos/{self.repository}/releases/{release_id}/assets?{urlencode({'name': name})}",
+            data=payload, method="POST", headers={"Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json", "Content-Type": "application/octet-stream",
                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "M3U-Web-Picker-Release"})
         with urlopen(request, timeout=60) as response:
             return json.load(response)
@@ -83,6 +93,30 @@ def prepare(api, sha):
     return tag
 
 
+def upload_assets(api, tag, sha, root=None):
+    if api.request(f"git/ref/tags/{tag}")["object"]["sha"] != sha:
+        raise RuntimeError("Release tag does not match the workflow commit.")
+    release = find_release(api, tag)
+    if release is None:
+        raise RuntimeError("The reserved release was not found.")
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[1]
+    files = {"docker-compose.release.yml": "docker-compose.release.yml",
+        "docker-compose.gpu.yml": "docker-compose.gpu.yml",
+        "docker-compose.discovery.yml": "docker-compose.discovery.yml",
+        ".env.example": "default.env.example"}
+    # Read all files before modifying the release; retry skips identical uploads.
+    payloads = [(name, (root / source).read_bytes()) for source, name in files.items()]
+    assets = {asset["name"]: asset for asset in release.get("assets", [])}
+    for name, payload in payloads:
+        existing = assets.get(name)
+        digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+        if existing and existing.get("state") == "uploaded" and existing.get("digest") == digest:
+            continue
+        if existing:
+            api.request(f"releases/assets/{existing['id']}", method="DELETE")
+        api.upload_asset(release["id"], name, payload)
+
+
 def publish(api, tag, sha):
     ref = api.request(f"git/ref/tags/{tag}")
     if ref["object"]["sha"] != sha:
@@ -116,7 +150,7 @@ def verify_public_image(image, tag):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("prepare", "publish", "verify"))
+    parser.add_argument("command", choices=("prepare", "upload", "publish", "verify"))
     args = parser.parse_args()
     if args.command == "verify":
         verify_public_image(os.environ["IMAGE"], os.environ["TAG"])
@@ -128,6 +162,8 @@ def main():
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
             output.write(f"tag={tag}\nimage=ghcr.io/{api.repository.lower()}\n")
         print(f"Reserved {tag} for {sha[:12]}")
+    elif args.command == "upload":
+        upload_assets(api, os.environ["RELEASE_TAG"], sha)
     else:
         publish(api, os.environ["RELEASE_TAG"], sha)
 
