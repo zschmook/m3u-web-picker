@@ -5,9 +5,10 @@
     payload: null,
     step: "choices",
     busy: false,
-    channelIds: new Set(),
+    channelKeys: new Set(),
+    selectionRevision: "",
     channelsInitialized: false,
-    visibleChannelIds: [],
+    visibleChannelKeys: [],
     channelMatchingTotal: 0,
     sportsKeys: new Set(),
     sportsItems: [],
@@ -52,13 +53,13 @@
   function updateChannelResultCount() {
     const count = document.getElementById("channelResultCount");
     if (!count) return;
-    const shown = ctx.visibleChannelIds.length;
-    const selectedShown = ctx.visibleChannelIds.filter(id => ctx.channelIds.has(id)).length;
+    const shown = ctx.visibleChannelKeys.length;
+    const selectedShown = ctx.visibleChannelKeys.filter(id => ctx.channelKeys.has(id)).length;
     const matching = Number(ctx.channelMatchingTotal || shown);
     const matchCopy = matching > shown
       ? `${shown.toLocaleString()} shown of ${matching.toLocaleString()} matches`
       : `${matching.toLocaleString()} matching`;
-    count.textContent = `${matchCopy} · ${selectedShown.toLocaleString()} shown selected · ${ctx.channelIds.size.toLocaleString()} total selected`;
+    count.textContent = `${matchCopy} · ${selectedShown.toLocaleString()} shown selected · ${ctx.channelKeys.size.toLocaleString()} total selected`;
   }
 
   function isTesting() {
@@ -194,17 +195,18 @@
     const query = document.getElementById("channelSearch")?.value || "";
     const group = document.getElementById("channelGroup")?.value || "";
     const hideSd = Boolean(document.getElementById("hideSdChannels")?.checked);
-    const data = await api(`/api/setup/channels?q=${encodeURIComponent(query)}&group=${encodeURIComponent(group)}&hide_sd=${hideSd ? "1" : "0"}`);
+    const data = await api(`/api/setup/channels?q=${encodeURIComponent(query)}&group=${encodeURIComponent(group)}&hide_sd=${hideSd ? "1" : "0"}`, {cache: "no-store"});
     if (!ctx.channelsInitialized) {
-      (data.selected_ids || []).forEach(id => ctx.channelIds.add(Number(id)));
+      (data.selected_keys || []).forEach(key => ctx.channelKeys.add(String(key)));
+      ctx.selectionRevision = data.selection_revision || "";
       ctx.channelsInitialized = true;
     }
-    ctx.visibleChannelIds = (data.channels || []).map(item => Number(item.id));
-    ctx.channelMatchingTotal = Number(data.total || ctx.visibleChannelIds.length);
+    ctx.visibleChannelKeys = (data.channels || []).map(item => String(item.key));
+    ctx.channelMatchingTotal = Number(data.total || ctx.visibleChannelKeys.length);
     const list = document.getElementById("channelList");
     if (list) list.innerHTML = data.channels?.length ? data.channels.map(item => `
       <label class="setup-list-item">
-        <input class="channel-check" type="checkbox" value="${Number(item.id)}" ${ctx.channelIds.has(Number(item.id)) ? "checked" : ""}>
+        <input class="channel-check" type="checkbox" value="${esc(item.key)}" ${ctx.channelKeys.has(String(item.key)) ? "checked" : ""}>
         ${item.tvg_logo ? `<img src="${esc(item.tvg_logo)}" alt="" loading="lazy">` : "<span></span>"}
         <span><strong>${esc(item.name)}</strong><small>${esc(item.group || "Ungrouped")}</small></span>
       </label>`).join("") : '<div class="setup-empty">No matching channels.</div>';
@@ -240,27 +242,28 @@
     document.getElementById("channelList").addEventListener("change", event => {
       const input = event.target.closest(".channel-check");
       if (!input) return;
-      const id = Number(input.value);
-      if (input.checked) ctx.channelIds.add(id); else ctx.channelIds.delete(id);
+      const id = String(input.value);
+      if (input.checked) ctx.channelKeys.add(id); else ctx.channelKeys.delete(id);
       updateChannelResultCount();
     });
     document.getElementById("selectVisible").addEventListener("click", () => {
-      ctx.visibleChannelIds.forEach(id => ctx.channelIds.add(id));
+      ctx.visibleChannelKeys.forEach(id => ctx.channelKeys.add(id));
       document.querySelectorAll(".channel-check").forEach(input => { input.checked = true; });
       updateChannelResultCount();
     });
     document.getElementById("clearChannels").addEventListener("click", () => {
-      ctx.channelIds.clear();
+      ctx.channelKeys.clear();
       document.querySelectorAll(".channel-check").forEach(input => { input.checked = false; });
       updateChannelResultCount();
     });
     document.getElementById("setupNext").addEventListener("click", async () => {
-      if (!ctx.channelIds.size) return setStatus("Choose at least one channel.", "error");
+      if (!ctx.channelKeys.size) return setStatus("Choose at least one channel.", "error");
       setBusy(true, "Saving the curated channel lineup…");
       try {
         const data = await api("/api/setup/channels", {
           method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({
-            ids: [...ctx.channelIds],
+            keys: [...ctx.channelKeys],
+            selection_revision: ctx.selectionRevision,
             hide_sd: document.getElementById("hideSdChannels").checked,
           }),
         });
@@ -543,7 +546,7 @@
       const data = await api("/api/setup/reset", {method: "POST"});
       ctx.payload = data;
       ctx.step = "choices";
-      ctx.channelIds.clear();
+      ctx.channelKeys.clear();
       ctx.channelsInitialized = false;
       ctx.sportsKeys.clear();
       ctx.sportsItems = [];

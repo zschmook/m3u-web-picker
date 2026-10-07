@@ -46,7 +46,7 @@ def _payload() -> dict:
         "state": state,
         "provider_configured": _provider_configured(),
         "channel_count": len(core.channels),
-        "selected_count": len(core.selected_ids),
+        "selected_count": len(core.load_selected_keys_from_db()),
         "sports": {
             "settings": sports.get_settings(core.DB_PATH),
             "rules": sports.get_rules(core.DB_PATH),
@@ -170,10 +170,15 @@ def api_setup_provider():
 
 @app.get("/api/setup/channels")
 def api_setup_channels():
+    with core.state_lock:
+        return _setup_channels_payload()
+
+
+def _setup_channels_payload():
     query = str(request.args.get("q", "") or "").strip().casefold()
     group = str(request.args.get("group", "") or "").strip()
     hide_sd = str(request.args.get("hide_sd", "") or "").lower() in {"1", "true", "yes"}
-    channels = core.combined_channels_for_api()
+    channels = [row for row in core.combined_channels_for_api() if int(row["id"]) >= 0]
     if hide_sd:
         channels = [
             item for item in channels
@@ -187,34 +192,30 @@ def api_setup_channels():
             item for item in channels
             if query in f"{item.get('name', '')} {item.get('group', '')} {item.get('tvg_id', '')}".casefold()
         ]
-    return jsonify(
+    response = jsonify(
         channels=channels[:500],
         total=len(channels),
         groups=groups,
         selected_ids=core.selected_ids_payload(),
+        selected_keys=[core.channel_key(row) for row in core.selected_channels_in_order()],
+        selection_revision=core.manual_selection_revision(),
     )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 
 @app.post("/api/setup/channels")
 def api_save_setup_channels():
     data = _json()
-    values = data.get("ids") if isinstance(data.get("ids"), list) else []
     hide_sd = bool(data.get("hide_sd"))
-    valid = {
-        int(channel["id"])
-        for channel in core.channels
-        if not hide_sd
-        or str(channel.get("group", "") or "").strip().upper() != "LOW BANDWIDTH"
-    }
-    core.selected_ids = {
-        int(value) for value in values
-        if str(value).isdigit() and int(value) in valid
-    }
-    if not core.selected_ids:
-        return jsonify(error="Choose at least one channel."), 400
-    sports.update_settings(core.DB_PATH, {"exclude_sd": hide_sd})
-    core.write_current_playlist()
-    core.save_config()
+    with core.state_lock:
+        try:
+            core.save_manual_selection(data.get("keys"), data.get("selection_revision"),
+                                       exclude_sd=hide_sd, require_one=True)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 409
+        sports.update_settings(core.DB_PATH, {"exclude_sd": hide_sd})
+        selected_count = len(core.load_selected_keys_from_db())
     state = setup_wizard.load_state()
     next_step = "build" if state.get("mode") == "testing" else "sports"
     state = setup_wizard.save_state(
@@ -222,12 +223,12 @@ def api_save_setup_channels():
             "current_step": next_step,
             "channels": {
                 "saved": True,
-                "selected_count": len(core.selected_ids),
+                "selected_count": selected_count,
                 "hide_sd": hide_sd,
             },
         }
     )
-    return jsonify(state=state, selected_count=len(core.selected_ids))
+    return jsonify(state=state, selected_count=selected_count)
 
 
 @app.post("/api/setup/dvr")
@@ -557,7 +558,8 @@ def api_setup_reset():
         ), 409
     if _provider_configured():
         core.remove_primary_source()
-    core.selected_ids.clear()
+    core.save_selected_channels_to_db([], preserve_missing=False)
+    core.apply_saved_selections_to_loaded_channels()
     core.save_config()
     core.write_current_playlist()
     for rule in sports.get_rules(core.DB_PATH):

@@ -79,7 +79,7 @@ def _demo_provider_requires_guide_matches() -> bool:
     try:
         primary = core.primary_provider_source() or {}
         name = str(primary.get("name", "") or "").strip()
-        return bool(core.selected_ids) and name.endswith(" Demo")
+        return bool(core.load_selected_keys_from_db()) and name.endswith(" Demo")
     except Exception:
         return False
 

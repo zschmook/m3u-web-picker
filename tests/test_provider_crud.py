@@ -12,6 +12,7 @@ class ProviderCrudTests(unittest.TestCase):
             source={'id':'primary','role':'primary','name':'Original','url':'http://example.test','username':'user','password':'pass','kind':'xtream'}
             with patch.multiple(core, DB_PATH=root/'db',PLAYLIST_PATH=root/'playlist',MASTER_CACHE_PATH=root/'master',EPG_CACHE_PATH=root/'epg',channels=[channel],selected_ids={channel['id']},provider_sources=[source],source_mode='url'), patch('core.save_config'), patch('core.sports.generated_rows',return_value=[]), patch('core.ensure_epg_exports_current'):
                 core.db_connect().close()
+                core.save_selected_channels_to_db([channel])
                 core.write_current_playlist()
                 keys=core.load_selected_keys_from_db()
                 core.update_provider('primary',{'enabled':False,'name':'Renamed','password':''})

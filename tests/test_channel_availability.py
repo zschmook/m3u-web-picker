@@ -92,6 +92,7 @@ class SelectionRetentionTests(unittest.TestCase):
                 original = core.parse_m3u_text('#EXTM3U\n#EXTINF:-1 tvg-id="one",One\nhttp://example.test/one\n#EXTINF:-1 tvg-id="two",Two\nhttp://example.test/two\n')
                 core.channels = original
                 core.selected_ids = {item["id"] for item in original}
+                core.save_selected_channels_to_db(original)
                 core.write_current_playlist()
                 saved_keys = core.load_selected_keys_from_db()
                 core.channels = [original[1]]
@@ -114,6 +115,7 @@ class SelectionRetentionTests(unittest.TestCase):
                 self.assertEqual(core.load_selected_keys_from_db(), saved_keys)
                 # Explicitly deselecting a loaded channel still works.
                 core.selected_ids = {original[1]["id"]}
+                core.save_selected_channels_to_db([original[1]], preserve_missing=True)
                 core.write_current_playlist()
                 self.assertEqual(core.load_selected_keys_from_db(), {core.channel_key(original[1])})
 

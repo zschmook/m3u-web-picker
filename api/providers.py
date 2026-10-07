@@ -4,6 +4,7 @@ from flask import jsonify, request
 
 import core
 import sports
+from .http import no_cache
 
 
 def register_provider_routes(app):
@@ -37,6 +38,7 @@ def register_provider_routes(app):
             count=len(core.combined_channels_for_api()),
             channels=core.combined_channels_for_api(),
             selected_ids=core.selected_ids_payload(),
+            selection_revision=core.manual_selection_revision(),
             providers=core.provider_sources_payload(),
         )
 
@@ -129,49 +131,52 @@ def register_provider_routes(app):
             count=len(core.combined_channels_for_api()),
             channels=core.combined_channels_for_api(),
             selected_ids=core.selected_ids_payload(),
+            selection_revision=core.manual_selection_revision(),
         )
 
     @app.post("/api/selection")
     def api_selection():
         data = request.get_json(force=True, silent=True) or {}
-        ids = data.get("ids", [])
-        valid_provider_ids = {int(channel["id"]) for channel in core.manual_channel_catalog()}
-        core.selected_ids = {
-            int(value)
-            for value in ids
-            if str(value).lstrip("-").isdigit()
-            and int(value) >= 0
-            and int(value) in valid_provider_ids
-        }
-        count = core.write_current_playlist()
-        core.save_config()
-        return jsonify(count=count, path=str(core.PLAYLIST_PATH), url="/playlist/channels.m3u")
+        with core.state_lock:
+            try:
+                count = core.save_manual_selection(data.get("keys"), data.get("selection_revision"))
+            except ValueError as exc:
+                return jsonify(error=str(exc)), 409
+            return no_cache(jsonify(count=count, path=str(core.PLAYLIST_PATH), url="/playlist/channels.m3u",
+                                    selection_revision=core.manual_selection_revision()))
 
     @app.get("/api/selection/order")
     def api_selection_order():
-        core.write_current_playlist()
-        return jsonify(channels=core.selected_channel_order_payload())
+        with core.state_lock:
+            return no_cache(jsonify(channels=core.selected_channel_order_payload(),
+                                    selection_revision=core.manual_selection_revision()))
 
     @app.post("/api/selection/order")
     def api_save_selection_order():
         data = request.get_json(force=True, silent=True) or {}
         keys = [str(key).strip() for key in data.get("keys", []) if str(key).strip()]
-        count = core.save_channel_order(keys)
-        core.write_current_playlist()
-        core.save_config()
-        return jsonify(count=count, url="/playlist/channels.m3u")
+        with core.state_lock:
+            if data.get("selection_revision") != core.manual_selection_revision():
+                return jsonify(error="Channel selections or order changed. Reopen the order dialog and try again."), 409
+            count = core.save_channel_order(keys)
+            core.apply_saved_selections_to_loaded_channels()
+            core.write_current_playlist()
+            return no_cache(jsonify(count=count, url="/playlist/channels.m3u",
+                                    selection_revision=core.manual_selection_revision()))
 
     @app.get("/api/channels")
     def api_channels():
-        combined = core.combined_channels_for_api()
-        return jsonify(
-            count=len(combined),
-            channels=combined,
-            selected_ids=core.selected_ids_payload(),
-            source_mode=core.source_mode,
-            source_url_configured=bool(core.last_source_url),
-            providers=core.provider_sources_payload(),
-        )
+        with core.state_lock:
+            combined = core.combined_channels_for_api()
+            return no_cache(jsonify(
+                count=len(combined),
+                channels=combined,
+                selected_ids=core.selected_ids_payload(),
+                selection_revision=core.manual_selection_revision(),
+                source_mode=core.source_mode,
+                source_url_configured=bool(core.last_source_url),
+                providers=core.provider_sources_payload(),
+            ))
 
     @app.get("/api/providers")
     def api_provider_sources():

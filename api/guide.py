@@ -189,8 +189,9 @@ def register_guide_routes(app):
         # Generated sports rows and their XMLTV files publish together under this
         # lock. Hold it through enrichment so one response cannot pair an old
         # channel/logo row with programmes from the newly published guide.
-        with generated_publish_lock:
+        with generated_publish_lock, core.state_lock:
             items = core.curated_channels_for_guide()
+            lineup_revision = core.curated_lineup_revision()
             sports_settings = sports.get_settings(core.DB_PATH)
             items, epg_status = enrich_guide_channels(
                 items,
@@ -209,7 +210,7 @@ def register_guide_routes(app):
             epg_status['programme_count'] = epg_status.get('programme_count',0)+len(custom['upcoming'])+bool(custom['now'])
         if commercial:
             items.insert(0, commercial)
-        response = jsonify(count=len(items), channels=items, epg=epg_status)
+        response = jsonify(count=len(items), channels=items, epg=epg_status, lineup_revision=lineup_revision)
         return no_cache(response)
 
     @app.post("/api/guide/cast/start")

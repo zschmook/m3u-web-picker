@@ -4,6 +4,7 @@
   const state = {
     channels: [],
     selected: new Set(),
+    selectionRevision: "",
     loading: false,
     checkedSportsStep: false,
     manualDone: false,
@@ -149,13 +150,14 @@
     setStepCount();
 
     try {
-      const payload = await api("/api/channels");
+      const payload = await api("/api/channels", {cache: "no-store"});
       if (heading() !== "Manual Channels") return;
       state.channels = (payload.channels || []).filter(channel => {
         const id = Number(channel.id);
         return Number.isFinite(id) && id >= 0 && !channel.is_sports_generated;
       });
       state.selected = new Set((payload.selected_ids || []).map(Number).filter(Number.isFinite));
+      state.selectionRevision = payload.selection_revision || "";
       renderManualList();
     } catch (error) {
       setStatus(error.message || "Could not load provider channels.", "error");
@@ -215,7 +217,10 @@
         await api("/api/selection", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ids: [...state.selected]}),
+          body: JSON.stringify({
+            keys: state.channels.filter(channel => state.selected.has(Number(channel.id))).map(channel => channel.key),
+            selection_revision: state.selectionRevision,
+          }),
         });
         await api("/api/onboarding", {
           method: "PATCH",

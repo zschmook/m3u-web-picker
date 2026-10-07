@@ -17,6 +17,7 @@ class FallbackCatalogTests(unittest.TestCase):
                 self.assertTrue(all(r['id'] < 2**53 for r in rows))
                 self.assertEqual(rows[1]['provider_source_name'],'Fallback A')
                 core.selected_ids={rows[0]['id'],rows[1]['id']}
+                core.save_selected_channels_to_db([rows[0], rows[1]])
                 core.write_current_playlist()
                 keys=core.load_selected_keys_from_db()
                 self.assertEqual(len(keys),2)
@@ -34,6 +35,7 @@ class FallbackCatalogTests(unittest.TestCase):
                 core.apply_saved_selections_to_loaded_channels()
                 self.assertIn(rows[1]['id'],core.selected_ids)
                 core.selected_ids={rows[0]['id']}
+                core.save_selected_channels_to_db([rows[0]], preserve_missing=True)
                 core.write_current_playlist()
                 self.assertEqual(len(core.load_selected_keys_from_db()),1)
 

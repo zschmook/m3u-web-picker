@@ -1,6 +1,12 @@
 let channels = [];
 let selected = new Set();
 let saveTimer = null;
+let selectionRevision = "";
+let selectionDirty = false;
+let selectionSaveRunning = false;
+let selectionEditGeneration = 0;
+let channelLoadSequence = 0;
+let channelStateRefreshPromise = null;
 let customGroups = [];
 let activeGroupSlug = "";
 let activeGroupMembers = new Set();
@@ -1027,6 +1033,7 @@ async function removeVisibleFromGroup() {
 function applyChannelPayload(data) {
   channels = data.channels || [];
   selected = new Set((data.selected_ids || []).map(Number));
+  selectionRevision = data.selection_revision ?? selectionRevision;
   rebuildProviderGroupFilter();
   render();
 }
@@ -1106,9 +1113,14 @@ async function uploadFile() {
 }
 
 async function loadInitialChannels({quiet = false} = {}) {
+  const requestSequence = ++channelLoadSequence;
+  const editGeneration = selectionEditGeneration;
   try {
-    const response = await fetch("/api/channels");
+    const response = await fetch("/api/channels", {cache: "no-store"});
     const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not load channels.");
+    if (requestSequence !== channelLoadSequence || editGeneration !== selectionEditGeneration
+        || selectionDirty || selectionSaveRunning) return;
     applyChannelPayload(data);
     if (Array.isArray(data.providers)) {
       providerSources = data.providers;
@@ -1122,24 +1134,55 @@ async function loadInitialChannels({quiet = false} = {}) {
 }
 
 function scheduleSaveSelected() {
+  selectionDirty = true;
+  selectionEditGeneration += 1;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveSelected, 250);
 }
 
 async function saveSelected() {
-  const manualIds = [...selected].filter(id => Number(id) >= 0);
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (selectionSaveRunning) return;
+  selectionSaveRunning = true;
+  const editGeneration = selectionEditGeneration;
+  const keys = channels.filter(channel => Number(channel.id) >= 0 && selected.has(Number(channel.id)))
+    .map(channelKey);
+  let saved = false;
   setStatus("Saving playlist...");
-  const response = await fetch("/api/selection", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ids: manualIds})
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    setStatus(data.error || "Save failed.");
-    return;
+  try {
+    const response = await fetch("/api/selection", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({keys, selection_revision: selectionRevision})
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (response.status === 409) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        selectionDirty = false;
+        selectionEditGeneration += 1;
+        selectionSaveRunning = false;
+        await loadInitialChannels({quiet: true});
+      }
+      setStatus(data.error || "Save failed.");
+      return;
+    }
+    selectionRevision = data.selection_revision;
+    saved = true;
+    if (editGeneration === selectionEditGeneration) selectionDirty = false;
+    selectionEditGeneration += 1;
+    setStatus("Playlist updated.");
+  } catch {
+    setStatus("Could not save the playlist. Your changes are still on this page; try again.");
+  } finally {
+    selectionSaveRunning = false;
+    if (saved && selectionDirty) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveSelected, 250);
+    }
   }
-  setStatus("Playlist updated.");
 }
 
 els.table.addEventListener("change", event => {
@@ -1272,6 +1315,7 @@ document.getElementById("clearSearchBtn").addEventListener("click", () => {
 // intentionally do not appear here.
 let orderChannels = [];
 let orderSelectedKey = "";
+let orderSelectionRevision = "";
 
 function renderOrderTable() {
   const tbody = document.getElementById("orderTable");
@@ -1284,9 +1328,10 @@ function renderOrderTable() {
 }
 
 async function openOrderModal() {
-  const response = await fetch("/api/selection/order");
+  const response = await fetch("/api/selection/order", {cache: "no-store"});
   const data = await response.json();
   orderChannels = data.channels || [];
+  orderSelectionRevision = data.selection_revision || "";
   orderSelectedKey = "";
   renderOrderTable();
   new bootstrap.Modal(document.getElementById("orderModal")).show();
@@ -1306,10 +1351,11 @@ async function saveOrder() {
   const response = await fetch("/api/selection/order", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({keys: orderChannels.map(channel => channel.key)})
+    body: JSON.stringify({keys: orderChannels.map(channel => channel.key), selection_revision: orderSelectionRevision})
   });
   const data = await response.json();
   if (!response.ok) return alert(data.error || "Could not save order.");
+  selectionRevision = data.selection_revision;
   setStatus(`Saved manual order for ${data.count} channels.`);
   bootstrap.Modal.getInstance(document.getElementById("orderModal"))?.hide();
 }
@@ -2239,3 +2285,17 @@ document.getElementById("publicEpgCountries")?.addEventListener("change", event 
 
 bindSports();
 initialize();
+
+function refreshChannelState() {
+  if (selectionDirty || selectionSaveRunning || channelStateRefreshPromise) return;
+  channelStateRefreshPromise = loadInitialChannels({quiet: true}).finally(() => {
+    channelStateRefreshPromise = null;
+  });
+  return channelStateRefreshPromise;
+}
+function synchronizeChannelState(serverRevision) {
+  if (serverRevision && serverRevision !== selectionRevision) return refreshChannelState();
+}
+window.addEventListener("focus", refreshChannelState);
+window.addEventListener("pageshow", event => { if (event.persisted) refreshChannelState(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshChannelState(); });

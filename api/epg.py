@@ -128,10 +128,11 @@ def register_epg_routes(app):
     @app.get("/api/status")
     def api_status():
         generated_count = len(sports.generated_rows(core.DB_PATH))
+        manual_count = len(core.load_selected_keys_from_db())
         return jsonify(
             loaded=len(core.channels),
-            selected=len(core.selected_ids) + generated_count,
-            manual_selected=len(core.selected_ids),
+            selected=manual_count + generated_count,
+            manual_selected=manual_count,
             generated_sports=generated_count,
             saved_selections=len(core.load_selected_keys_from_db()),
             playlist_exists=core.PLAYLIST_PATH.exists(),

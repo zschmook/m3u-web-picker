@@ -80,6 +80,7 @@ class SportsApiTests(unittest.TestCase):
 """
         )
         core.selected_ids = {int(core.channels[0]["id"])}
+        core.save_selected_channels_to_db(core.channels)
 
         response = self.client.get("/api/guide/channels")
         self.assertEqual(response.status_code, 200)
@@ -114,12 +115,15 @@ class SportsApiTests(unittest.TestCase):
             {"enabled": True, "everything_mode": True, "timezone": "America/New_York"},
         )
         sports.scan_channels(core.DB_PATH, channels, now=now, trigger="test")
+        core.channels = channels
         row = sports.generated_rows(core.DB_PATH)[0]
 
-        response = self.client.get(
-            sports.generated_stream_path(row["assigned_number"]),
-            follow_redirects=False,
-        )
+        with patch("channel_availability.availability.resolve", return_value=source_url) as resolve:
+            response = self.client.get(
+                sports.generated_stream_path(row["assigned_number"]),
+                follow_redirects=False,
+            )
+        resolve.assert_called_once_with([source_url])
         self.assertEqual(response.status_code, 307)
         self.assertEqual(response.headers["Location"], source_url)
         self.assertIn("no-store", response.headers.get("Cache-Control", ""))

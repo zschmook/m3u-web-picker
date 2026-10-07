@@ -529,7 +529,7 @@ def selected_xmltv_ids() -> set[str]:
     """Return exact XMLTV ids for manual channels currently in custom.m3u."""
     return {
         str(channel.get("tvg_id", "") or "").strip()
-        for channel in selected_channels_from_selected_ids_in_order()
+        for channel in saved_manual_guide_channels()
         if str(channel.get("tvg_id", "") or "").strip()
     }
 
@@ -556,6 +556,62 @@ def selected_channel_order_payload() -> list[dict]:
         }
         for row in rows
     ]
+
+
+def manual_selection_revision() -> str:
+    """Identify the saved selection and order without depending on provider IDs."""
+    conn = db_connect()
+    try:
+        rows = conn.execute("SELECT key, sort_order FROM selections ORDER BY key").fetchall()
+    finally:
+        conn.close()
+    values = [(row[0], row[1]) for row in rows]
+    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest()
+
+
+def curated_lineup_revision() -> str:
+    """Identify server-side lineup changes for connected Guide clients."""
+    generated = [(row.get("tvg_id"), row.get("assigned_number"), row.get("display_name"), row.get("generated_at"))
+                 for row in sports.generated_rows(DB_PATH)]
+    # Plex catalogs still use server-side files. Track their changes without
+    # copying those records into browser storage.
+    files = []
+    for name in ("custom-channels/channels.json", "custom-channels/settings.json",
+                 "custom-channels/movies/channels.json"):
+        try:
+            metadata = (DATA_DIR / name).stat()
+            files.append((name, metadata.st_mtime_ns, metadata.st_size))
+        except FileNotFoundError:
+            files.append((name, None, None))
+    value = [manual_selection_revision(), generated, files]
+    return hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
+
+
+def save_manual_selection(keys: list[str], revision: str, *, exclude_sd: bool = False,
+                          require_one: bool = False) -> int:
+    """Commit an explicit channel edit; exports never commit cached selections."""
+    with state_lock:
+        if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+            raise ValueError("Reload the channel list before saving selections.")
+        if revision != manual_selection_revision():
+            raise ValueError("Channel selections changed. Reload the list and try again.")
+        catalog = channel_by_key_map()
+        if any(key not in catalog for key in keys):
+            raise ValueError("The provider channel list changed. Reload the list and try again.")
+        chosen = [catalog[key] for key in dict.fromkeys(keys)]
+        if exclude_sd:
+            chosen = [row for row in chosen if str(row.get("group", "")).strip().upper() != "LOW BANDWIDTH"]
+        if require_one and not chosen:
+            raise ValueError("Choose at least one channel.")
+        save_selected_channels_to_db(chosen, preserve_missing=True)
+        apply_saved_selections_to_loaded_channels()
+        return write_current_playlist()
+
+
+def selected_manual_ids() -> set[int]:
+    """Project saved SQLite identities onto the currently loaded provider catalog."""
+    saved = load_selected_keys_from_db()
+    return {int(row["id"]) for row in manual_channel_catalog() if channel_key(row) in saved}
 
 
 def save_channel_order(keys: list[str]) -> int:
@@ -1400,34 +1456,15 @@ def detect_provider_source(
 
 
 def selected_channels_from_selected_ids_in_order() -> list[dict]:
-    selected_channels = [
-        channel for channel in manual_channel_catalog() if int(channel["id"]) in selected_ids
-    ]
-    conn = db_connect()
-    try:
-        existing_order = {
-            row[0]: row[1]
-            for row in conn.execute("SELECT key, sort_order FROM selections").fetchall()
-        }
-    finally:
-        conn.close()
-
-    def sort_key(channel: dict):
-        key = channel_key(channel)
-        order = existing_order.get(key)
-        if order is None:
-            return (1, channel.get("name", "").lower(), key)
-        return (0, order, channel.get("name", "").lower())
-
-    return sorted(selected_channels, key=sort_key)
+    # Compatibility name: the saved database rows, not the process-local ID set,
+    # determine membership and order.
+    return selected_channels_in_order()
 
 
-def write_current_playlist(*, preserve_missing: bool = True) -> int:
+def write_current_playlist() -> int:
+    """Export SQLite selections without modifying their membership or order."""
     with state_lock:
-        manual_channels = selected_channels_from_selected_ids_in_order()
-        save_selected_channels_to_db(manual_channels, preserve_missing=preserve_missing)
-        if preserve_missing:
-            manual_channels = saved_manual_guide_channels()
+        manual_channels = saved_manual_guide_channels()
         generated = sports.generated_rows(DB_PATH)
         # Manual/static and generated sports channels intentionally coexist.
         # Never deduplicate across these namespaces, even when their stream URL
@@ -1538,7 +1575,7 @@ def combined_channels_for_api() -> list[dict]:
 
 def saved_manual_guide_channels() -> list[dict]:
     """Keep absent saved selections in their original guide positions."""
-    current = {channel_key(item): item for item in selected_channels_from_selected_ids_in_order()}
+    current = channel_by_key_map()
     conn = db_connect()
     try:
         rows = _selection_rows(conn)
@@ -1546,7 +1583,7 @@ def saved_manual_guide_channels() -> list[dict]:
         conn.close()
     result = []
     for row in rows:
-        item = current.pop(row["key"], None) or {
+        item = current.get(row["key"]) or {
             "key": row["key"], "name": row["name"], "group": row["group_title"],
             "tvg_id": row["tvg_id"], "url": row["url"],
         }
@@ -1558,7 +1595,7 @@ def saved_manual_guide_channels() -> list[dict]:
                 str(item.get("url") or ""),
             ]
         result.append(item)
-    return [*result, *current.values()]
+    return result
 
 
 def manual_fallback_channel_sets() -> list[list[dict]]:
@@ -1665,7 +1702,7 @@ def curated_channels_for_guide() -> list[dict]:
 
 def selected_ids_payload() -> list[int]:
     generated_ids = [channel["id"] for channel in sports.generated_channel_payloads(DB_PATH)]
-    return sorted([*selected_ids, *generated_ids])
+    return sorted([*selected_manual_ids(), *generated_ids])
 
 
 def group_channels_for_slug(slug: str) -> tuple[str, list[dict]]:
@@ -2317,11 +2354,16 @@ def _public_epg_relevant_matchers() -> tuple[set[str], set[str]]:
     """
     wanted_ids = set(selected_xmltv_ids())
     wanted_names: set[str] = set()
+    saved_keys = load_selected_keys_from_db()
+    for saved in saved_manual_guide_channels():
+        for value in (saved.get("tvg_name"), saved.get("name")):
+            normalized = sports._normalize(str(value or ""))
+            if normalized:
+                wanted_names.add(normalized)
     for channel in channels:
         channel_id = str(channel.get("tvg_id", "") or "").strip()
         name_values = [str(channel.get("tvg_name", "") or "").strip(), str(channel.get("name", "") or "").strip()]
-        provider_channel_id = channel.get("id")
-        is_manual = provider_channel_id is not None and int(provider_channel_id) in selected_ids
+        is_manual = channel_key(channel) in saved_keys
         text = " ".join([str(channel.get("group", "") or ""), *name_values])
         is_sports_candidate = bool(
             sports._team_feed_identity(channel)

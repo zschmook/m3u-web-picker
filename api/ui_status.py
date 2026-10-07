@@ -277,13 +277,15 @@ def ui_status_payload() -> dict:
             provider_state = "success"
 
     return {
+        "selection_revision": core.manual_selection_revision(),
+        "lineup_revision": core.curated_lineup_revision(),
         "provider": {
             "label": provider_label,
             "status": provider_state,
         },
         "counts": {
             "all_channels": len(core.channels),
-            "indexed_channels": len(core.selected_ids),
+            "indexed_channels": len(core.load_selected_keys_from_db()),
             "sports_channels": generated_count,
             "active_recordings": active_recordings,
         },

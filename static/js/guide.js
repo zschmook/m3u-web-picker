@@ -1,5 +1,7 @@
 const GUIDE_LISTEN_SESSION_KEY = "m3u-guide-active-listen";
 const GUIDE_LISTEN_SESSION_MAX_AGE_MS = 2 * 60 * 1000;
+let guideLoadInFlight = false;
+let guideStatusInFlight = false;
 const GUIDE_VIDEO_RECONNECT_ATTEMPTS = 3;
 const GUIDE_VIDEO_RECONNECT_DELAY_MS = 1000;
 const GUIDE_VIDEO_STALL_TIMEOUT_MS = 12500;
@@ -9,6 +11,7 @@ const guideListenClientId = globalThis.crypto?.randomUUID?.()
 
 const guideState = {
   channels: [],
+  lineupRevision: "",
   currentChannel: null,
   config: {media_origin: ""},
   mode: "stopped",
@@ -147,12 +150,15 @@ function renderGuide() {
 }
 
 async function loadGuide() {
+  if (guideLoadInFlight) return;
+  guideLoadInFlight = true;
   guideEls.status.textContent = "Loading curated lineup…";
   try {
     const response = await fetch("/api/guide/channels", {cache: "no-store"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not load curated lineup.");
     guideState.channels = Array.isArray(data.channels) ? data.channels : [];
+    guideState.lineupRevision = data.lineup_revision || "";
     renderGuide();
     guideEls.status.textContent = `${guideState.channels.length.toLocaleString()} currently served channel${guideState.channels.length === 1 ? "" : "s"}`;
     restoreListenSession();
@@ -160,6 +166,23 @@ async function loadGuide() {
     guideState.channels = [];
     renderGuide();
     guideEls.status.textContent = error.message;
+  } finally {
+    guideLoadInFlight = false;
+  }
+}
+
+async function synchronizeGuideState() {
+  if (document.hidden || guideStatusInFlight || guideLoadInFlight) return;
+  guideStatusInFlight = true;
+  try {
+    const response = await fetch("/api/ui/status", {cache: "no-store"});
+    const data = await response.json();
+    if (response.ok && !data.update?.stale && data.lineup_revision
+        && data.lineup_revision !== guideState.lineupRevision) await loadGuide();
+  } catch {
+    // Keep the current view while disconnected; saved records remain on the server.
+  } finally {
+    guideStatusInFlight = false;
   }
 }
 
@@ -539,9 +562,6 @@ function rememberListenSession(channel = guideState.currentChannel, {
     updated_at: Date.now(),
     channel: {
       play_url: String(channel.play_url || ""),
-      name: String(channel.name || "Channel"),
-      group: String(channel.group || ""),
-      logo: String(channel.logo || ""),
     },
   }));
   if (startHeartbeat && guideState.listen.heartbeatTimer === null) {
@@ -804,7 +824,7 @@ function startListenMode(channel, {handoff = false} = {}) {
 }
 
 function restoreListenSession() {
-  if (guideState.listen.restoreAttempted || guideState.listen.active || !guideState.channels.length) return;
+  if (guideState.listen.restoreAttempted || guideState.listen.active) return;
   guideState.listen.restoreAttempted = true;
   const session = storedListenSession();
   if (!session) return;
@@ -815,7 +835,11 @@ function restoreListenSession() {
 
   const channel = guideState.channels.find(item => (
     String(item.play_url || "") === String(session.channel.play_url || "")
-  )) || session.channel;
+  ));
+  if (!channel || channel.available === false) {
+    localStorage.removeItem(GUIDE_LISTEN_SESSION_KEY);
+    return;
+  }
   startListenMode(channel, {handoff: true});
 }
 
@@ -1225,3 +1249,7 @@ updateRokuControls();
 updateCastStatus();
 loadGuideConfig();
 loadGuide();
+window.addEventListener("focus", loadGuide);
+window.addEventListener("pageshow", event => { if (event.persisted) loadGuide(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadGuide(); });
+window.setInterval(synchronizeGuideState, 10000);

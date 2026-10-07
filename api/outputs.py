@@ -166,7 +166,8 @@ def register_output_routes(app):
     @app.get("/playlist/custom.m3u")
     def playlist():
         guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
-        text = curated_playlist_text(encoded=media_pipeline.settings()["enabled"])
+        with core.state_lock:
+            text = curated_playlist_text(encoded=media_pipeline.settings()["enabled"])
         lines = text.splitlines()
         lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
         text = "\n".join(lines) + "\n"
@@ -179,7 +180,8 @@ def register_output_routes(app):
     @app.get("/playlist/channels.direct.m3u")
     def playlist_direct():
         guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
-        lines = curated_playlist_text(encoded=False).splitlines()
+        with core.state_lock:
+            lines = curated_playlist_text(encoded=False).splitlines()
         lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
         response = Response(with_manual_epg_logos("\n".join(lines) + "\n"), mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

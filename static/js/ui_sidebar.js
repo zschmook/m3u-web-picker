@@ -606,6 +606,9 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Status request failed.");
       renderStatus(data);
+      if (!data.update?.stale && typeof window.synchronizeChannelState === "function") {
+        window.synchronizeChannelState(data.selection_revision);
+      }
     } catch (error) {
       el("uiSystemHealth").textContent = "Status unavailable";
       setHealthClass(el("uiSystemHealthDot"), "failed");

@@ -423,6 +423,7 @@ http://fallback.test/game.ts
         ), patch.object(core, "channels", manual), patch.object(
             core, "selected_ids", {0}
         ), patch("core.sports.generated_rows", return_value=generated):
+            core.save_selected_channels_to_db(manual)
             count = core.write_current_playlist()
 
         text = playlist_path.read_text(encoding="utf-8")
@@ -449,6 +450,7 @@ http://fallback.test/game.ts
         ), patch.object(core, "channels", manual), patch.object(
             core, "selected_ids", {0, 1}
         ), patch("core.sports.generated_rows", return_value=[]):
+            core.save_selected_channels_to_db(manual)
             count = core.write_current_playlist()
             keys = core.load_selected_keys_from_db()
 
@@ -3473,7 +3475,7 @@ http://provider.test/phillies.ts
         self.assertIn("runMasterUpdate", javascript)
         self.assertIn("/playlist/channels.m3u", javascript)
         self.assertIn("/epg/epg.xml", javascript)
-        self.assertIn("v='v33-provider-crud'", html)
+        self.assertIn("v='server-state-1'", html)
         self.assertIn('id="masterUpdateEnabled"', html)
         self.assertIn('id="masterUpdateTime"', html)
         self.assertIn('id="masterUpdateNowBtn"', html)
@@ -3495,7 +3497,8 @@ http://provider.test/phillies.ts
                 "url": "http://provider.test/wgal",
             }]
             core.selected_ids = {42}
-            with patch("core.selected_xmltv_ids", return_value={"NBCWGAL.us"}):
+            with patch("core.selected_xmltv_ids", return_value={"NBCWGAL.us"}), \
+                    patch("core.load_selected_keys_from_db", return_value={core.channel_key(core.channels[0])}):
                 wanted_ids, wanted_names = core._public_epg_relevant_matchers()
         finally:
             core.channels = original_channels
