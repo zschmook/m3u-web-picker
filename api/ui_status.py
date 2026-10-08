@@ -15,6 +15,7 @@ import media_pipeline
 import roku_devices
 import sports
 import custom_channels
+import vpn_runtime
 from media import hls
 from .hdhr import HDHR_TUNER_COUNT
 
@@ -296,7 +297,7 @@ def ui_status_payload() -> dict:
             },
             "roku_saved": len(saved_roku),
             "roku_devices": saved_roku,
-            "active_streams": _active_hls_sessions(),
+            "active_streams": _active_hls_sessions() + __import__('media.upstream_relay',fromlist=['active_count']).active_count(),
         },
         "master_update": master,
         "last_update_report": report,
@@ -307,6 +308,7 @@ def ui_status_payload() -> dict:
             "epg": "/epg/epg.xml",
         },
         "playback": media_pipeline.status(),
+        "vpn": vpn_runtime.status(core.DB_PATH),
     }
 
 

@@ -17,8 +17,9 @@
       brand.setAttribute("tabindex", "0");
       brand.setAttribute("aria-label", "Open Overview");
       brand.setAttribute("title", "Overview");
-      brand.addEventListener("click", openOverview);
+      brand.addEventListener("click", event => { if (!event.target.closest('#uiVpnStatus')) openOverview(); });
       brand.addEventListener("keydown", event => {
+        if (event.target.closest('#uiVpnStatus')) return;
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         openOverview();

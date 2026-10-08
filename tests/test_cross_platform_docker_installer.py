@@ -22,6 +22,19 @@ SPEC.loader.exec_module(installer)
 
 
 class CrossPlatformDockerInstallerTests(unittest.TestCase):
+    def test_upgrade_uses_persisted_vpn_network_and_updated_env_image(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root)
+            path = folder / 'runtime/vpn/docker-compose.vpn.json'
+            path.parent.mkdir(parents=True)
+            path.write_text('{}')
+            (folder / '.env').write_text('M3U_IMAGE=ghcr.io/zschmook/m3u-web-picker:v42\n')
+            command = installer.compose_command('docker', folder)
+            self.assertEqual(command, ['docker', 'compose', '--env-file', str(folder/'.env'), '-f', str(path)])
+
+    def setUp(self):
+        detected=patch.object(installer,"detect_lan_subnet",return_value="192.168.1.0/24")
+        detected.start();self.addCleanup(detected.stop)
     def compose_config(self, _command, *, cwd, **_kwargs):
         volumes = [
             dict(type="bind", source=str(cwd / "runtime" / "backups"), target="/backups"),
@@ -333,3 +346,23 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LanSubnetDetectionTests(unittest.TestCase):
+    def check(self, system, address, stdout, expected):
+        with patch.object(installer,'host_system',return_value=system),patch.object(installer.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=stdout)):
+            self.assertEqual(installer.detect_lan_subnet(address),expected)
+    def test_windows_matches_host_address_and_uses_real_prefix(self):
+        self.check('Windows','192.168.49.9',json.dumps([{'IPAddress':'172.20.0.1','PrefixLength':16},{'IPAddress':'192.168.49.9','PrefixLength':20}]),'192.168.48.0/20')
+    def test_linux_matches_host_address_not_docker_bridge(self):
+        self.check('Linux','10.0.5.17',json.dumps([{'addr_info':[{'local':'172.18.0.1','prefixlen':16}]},{'addr_info':[{'local':'10.0.5.17','prefixlen':23}]}]),'10.0.4.0/23')
+    def test_macos_hex_netmask(self):
+        self.check('Darwin','10.0.5.17','\tinet 10.0.5.17 netmask 0xfffffc00 broadcast 10.0.7.255\n','10.0.4.0/22')
+    def test_unknown_interface_does_not_guess(self):
+        self.check('Linux','10.0.0.18','[]','')
+    def test_tailnet_and_public_addresses_are_not_home_lan(self):
+        for address in ['100.80.123.46','8.8.8.8','127.0.0.1']:
+            with patch.object(installer.subprocess,'run') as command:
+                self.assertEqual(installer.detect_lan_subnet(address),'');command.assert_not_called()
+    def test_missing_tools_fall_back_without_blocking_install(self):
+        with patch.object(installer.subprocess,'run',side_effect=FileNotFoundError):
+            self.assertEqual(installer.detect_lan_subnet('10.0.0.18'),'')

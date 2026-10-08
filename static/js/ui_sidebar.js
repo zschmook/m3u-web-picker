@@ -284,7 +284,8 @@
             <div class="ui-settings-status" id="uiDvrStatus" role="status" aria-live="polite"></div>
           </div>
         </section>
-        <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="network" aria-labelledby="uiNetworkTitle">
+        <section class="ui-settings-panel ui-settings-collection" data-settings-panel-content="network" aria-labelledby="uiNetworkTitle">
+        <section class="ui-modern-card">
           <div class="ui-card-heading">
             <div><span id="uiNetworkTitle">Network URLs</span><small>Control the address advertised to guide clients and devices.</small></div>
           </div>
@@ -295,6 +296,11 @@
             <div class="ui-settings-actions"><button class="btn ui-btn-primary" id="uiNetworkSave" type="button">Save Network Setting</button></div>
             <div class="ui-settings-status" id="uiNetworkStatus" role="status" aria-live="polite"></div>
           </div>
+        </section>
+        <section class="ui-modern-card" id="uiVpnSettingsCard" aria-labelledby="uiVpnSettingsTitle">
+          <div class="ui-card-heading"><div><span id="uiVpnSettingsTitle">VPN settings</span><small>View the active connection and test a WireGuard configuration.</small></div></div>
+          <div data-vpn-config></div>
+        </section>
         </section>
         <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="lighting" aria-labelledby="uiLightingTitle">
           <div class="ui-card-heading"><div><span id="uiLightingTitle">Movie Lighting</span><small>Create rooms with one Roku and a group of lights.</small></div></div>

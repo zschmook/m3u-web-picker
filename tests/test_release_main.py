@@ -119,6 +119,13 @@ class ReleaseTests(unittest.TestCase):
         api.upload_asset.assert_not_called()
         self.assertEqual(api.request.call_count, 2)
 
+    def test_prepare_includes_reviewed_release_notes(self):
+        api = Mock()
+        api.request.side_effect = [[ref(42, "new")], HTTPError("", 404, "missing", {}, None), [], {}]
+        with patch("scripts.release_main.Path.is_file", return_value=True), patch("scripts.release_main.Path.read_text", return_value="VPN preview limitations"):
+            self.assertEqual(prepare(api, "new"), "v42")
+        self.assertEqual(api.request.call_args.args[1]["body"], "VPN preview limitations")
+
     def test_upload_refuses_a_tag_pointing_at_another_commit(self):
         api = Mock()
         api.request.return_value = ref(37, "other")

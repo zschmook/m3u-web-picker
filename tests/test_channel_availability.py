@@ -10,6 +10,48 @@ from channel_availability import AvailabilityCache, candidate_urls, probe_stream
 
 
 class AvailabilityTests(unittest.TestCase):
+    def test_opening_another_guide_during_playback_does_not_probe(self):
+        calls = []
+        cache = AvailabilityCache(lambda url: calls.append(url) or True, playback_active=lambda: True)
+        try:
+            with patch.object(cache.worker, "submit") as submit:
+                self.assertEqual(cache.lookup(["playing"]), (None, "playing"))
+                self.assertEqual(cache.lookup(["another"]), (None, "another"))
+                submit.assert_not_called()
+            cache._check(("playing",))
+            self.assertEqual(calls, [])
+        finally:
+            cache.worker.shutdown()
+
+    def test_probes_resume_when_playback_stops_and_stale_failure_is_unknown(self):
+        busy = [True]
+        cache = AvailabilityCache(lambda url: True, playback_active=lambda: busy[0])
+        try:
+            cache.results[("playing",)] = (0, False, "")
+            self.assertEqual(cache.lookup(["playing"]), (None, "playing"))
+            busy[0] = False
+            cache._check(("playing",))
+            self.assertEqual(cache.lookup(["playing"]), (True, "playing"))
+        finally:
+            cache.worker.shutdown()
+
+    def test_pending_probe_skips_fallback_when_playback_starts(self):
+        busy = [False]
+        calls = []
+        def probe(url):
+            calls.append(url)
+            busy[0] = True
+            return False
+        cache = AvailabilityCache(probe, playback_active=lambda: busy[0])
+        try:
+            cache.pending.add(("primary", "fallback"))
+            cache._check(("primary", "fallback"))
+            self.assertEqual(calls, ["primary"])
+            self.assertEqual(cache.peek(["primary", "fallback"]), (None, ""))
+            self.assertFalse(cache.pending)
+        finally:
+            cache.worker.shutdown()
+
     def test_primary_failure_uses_backup_and_recovery_retries_primary(self):
         healthy = {"backup"}
         calls = []

@@ -130,31 +130,52 @@
           <span>Validate an M3U or Xtream provider, then configure the full application.</span>
         </label>
       </div>
-      <p class="setup-help" style="margin-top:14px">Just Testing uses the free public lineup and skips optional feature configuration.</p>
+      <p class="setup-help" style="margin-top:14px">Just Testing uses the free public lineup and skips provider configuration.</p>
+      <div data-vpn-config></div>
       ${actions({back: false, next: "Continue"})}`;
+    window.mountVpnConfiguration?.();
 
     document.getElementById("setupNext").addEventListener("click", async () => {
+      if (window.vpnWizard && !window.vpnWizard.canContinue()) return;
       const mode = document.querySelector('input[name="setupMode"]:checked')?.value || "testing";
       setBusy(true, mode === "testing" ? "Loading the free testing lineup…" : "Saving source choice…");
       try {
         const data = await api("/api/setup/choices", {
-          method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({mode}),
+          method: "POST", headers: {"Content-Type": "application/json", "X-VPN-Session": window.vpnWizard?.session || ""},
+          body: JSON.stringify({mode, vpn_requested: window.vpnWizard?.requested() || false}),
         });
         ctx.payload.state = data.state;
+        if (data.vpn?.requested && ['pending','applying'].includes(data.vpn.status)) await waitForSetupVpn();
         if (mode === "testing" && !ctx.payload.provider_configured) {
           const provider = await api("/api/setup/provider", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
           ctx.payload.state = provider.state;
           ctx.payload.provider_configured = true;
           ctx.payload.channel_count = provider.channel_count;
         }
-        ctx.step = mode === "testing" ? "channels" : "provider";
+        ctx.step = mode === "testing" || ctx.payload.provider_configured ? "channels" : "provider";
         render();
       } catch (error) {
         setBusy(false);
         setStatus(error.message, "error");
       }
     });
+  }
+
+  async function waitForSetupVpn() {
+    setStatus('Connecting the VPN before any provider requests. Setup resumes when protection is active.');
+    const deadline=Date.now()+180000;
+    while (Date.now()<deadline) {
+      await new Promise(resolve=>window.setTimeout(resolve,1500));
+      let status;
+      try { status=await api('/api/vpn-state',{cache:'no-store'}); }
+      catch { continue; }
+      if (status.status==='failed') throw Error(status.error || 'VPN startup failed. Upload and test the file again.');
+      if (status.app_vpn_active) {
+        ctx.payload=await api('/api/setup/state',{cache:'no-store'});
+        return;
+      }
+    }
+    throw Error('VPN startup timed out. No provider request was made.');
   }
 
   function renderProvider() {
@@ -471,6 +492,14 @@
         const data = await api(`/api/setup/build-status?_=${Date.now()}`);
         ctx.payload.state = data.state;
         const update = data.master_update || {};
+        if (data.vpn?.requested && ['pending','applying'].includes(data.vpn.status)) {
+          setStatus('Connecting Picker through your VPN. The test instance may be briefly unavailable.');
+          continue;
+        }
+        if (data.vpn?.status === 'failed') {
+          setStatus(data.vpn.error || 'VPN startup failed. Return to Start and upload the configuration again.', 'error');
+          return;
+        }
         const elapsed = document.getElementById("setupUpdateElapsed");
         if (elapsed) elapsed.textContent = `Running for ${formatElapsed(update.elapsed_seconds)}`;
         const status = data.state?.initial_update?.status;
@@ -497,6 +526,7 @@
       <div class="setup-summary">
         <div class="setup-summary-row"><span>Source</span><strong>${state.mode === "testing" ? "Free testing lineup" : esc(state.provider.name || "Validated provider")}</strong></div>
         <div class="setup-summary-row"><span>Selected channels</span><strong>${Number(state.channels.selected_count || 0).toLocaleString()}</strong></div>
+        <div class="setup-summary-row"><span>VPN</span><strong>${state.vpn?.requested ? 'Enable at startup' : 'Off'}</strong></div>
         <div class="setup-summary-row"><span>DVR</span><strong>${yesNo(state.features.dvr)}</strong></div>
         <div class="setup-summary-row"><span>Media server</span><strong>${state.media_server?.type === "jellyfin" ? "Jellyfin" : state.media_server?.type === "plex" ? "Plex" : "None"}</strong></div>
         <div class="setup-summary-row"><span>Sports Automation</span><strong>${yesNo(state.sports.enabled)}</strong></div>
@@ -528,11 +558,17 @@
   async function start() {
     try {
       ctx.payload = await api("/api/setup/state");
+      let vpnNeedsUpload=false;
+      if (ctx.payload.state?.vpn?.requested) {
+        const vpn=await api('/api/vpn-state',{cache:'no-store'});
+        if (['pending','applying'].includes(vpn.status)) await waitForSetupVpn();
+        else vpnNeedsUpload=!vpn.app_vpn_active;
+      }
       if (["starting", "running"].includes(ctx.payload.state?.initial_update?.status)) {
         watchInitialUpdate();
         return;
       }
-      ctx.step = ctx.payload.state.completed ? "build" : (ctx.payload.state.current_step || "choices");
+      ctx.step = vpnNeedsUpload ? "choices" : ctx.payload.state.completed ? "build" : (ctx.payload.state.current_step || "choices");
       if (!steps().some(item => item.id === ctx.step)) ctx.step = "choices";
       render();
     } catch (error) {

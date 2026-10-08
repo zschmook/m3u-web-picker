@@ -5,6 +5,7 @@ import threading
 from typing import Callable
 
 import setup_wizard
+import vpn_runtime
 
 
 _LOCK = threading.Lock()
@@ -36,7 +37,14 @@ def _main_app() -> Callable:
 def application(environ, start_response):
     path = str(environ.get("PATH_INFO", "") or "")
     setup_request = path == "/setup" or path.startswith("/api/setup/")
-    if setup_request or not setup_wizard.load_state().get("completed"):
+    state=setup_wizard.load_state()
+    import core
+    vpn_requested=state.get('vpn',{}).get('requested') or vpn_runtime.read(core.DB_PATH).get('requested')
+    protection_missing=vpn_runtime.protection_missing(core.DB_PATH,vpn_requested)
+    if protection_missing and not setup_request and path not in ('/','/api/vpn-state','/api/vpn-activity','/api/vpn-control','/api/vpn-preference','/api/vpn-config','/api/vpn-test') and not path.startswith('/static/'):
+        from werkzeug.wrappers import Response
+        return Response('VPN unavailable. Provider requests are blocked.\n',status=503)(environ,start_response)
+    if setup_request or not state.get("completed") or protection_missing:
         from setup_app import app as setup_app
 
         if path == "/setup":

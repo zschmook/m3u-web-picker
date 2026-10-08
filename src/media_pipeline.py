@@ -189,6 +189,11 @@ def acquire_session(output: str) -> str:
     return token
 
 
+def active_session_count() -> int:
+    with _session_lock:
+        return len(_sessions)
+
+
 def clear_output_error(output: str) -> None:
     with _session_lock:
         if _last_output_error.get("output") == str(output or ""):

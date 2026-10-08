@@ -16,6 +16,7 @@ screens/
 tmp/
 exports/
 runtime/
+m3u-web-picker-main/
 .vscode/
 .idea/
 config.json

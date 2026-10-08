@@ -5,6 +5,15 @@ import shutil
 import subprocess
 import threading
 import time
+import sys
+
+
+def playback_in_use():
+    """Do not open extra provider sessions while actual players are connected."""
+    pipeline = sys.modules.get("media_pipeline")
+    relay = sys.modules.get("media.upstream_relay")
+    return bool((pipeline and pipeline.active_session_count()) or
+                (relay and relay.active_count()))
 
 
 def probe_stream(url):
@@ -31,9 +40,10 @@ def probe_stream(url):
 
 
 class AvailabilityCache:
-    def __init__(self, probe=probe_stream, ttl=60):
+    def __init__(self, probe=probe_stream, ttl=60, playback_active=lambda: False):
         self.probe = probe
         self.ttl = ttl
+        self.playback_active = playback_active
         self.lock = threading.Lock()
         self.results = {}
         self.pending = set()
@@ -44,6 +54,8 @@ class AvailabilityCache:
         available, target = False, ""
         try:
             for url in urls:
+                if self.playback_active():
+                    return
                 result = self.probe(url)
                 if result is True:
                     available, target = True, url
@@ -66,6 +78,12 @@ class AvailabilityCache:
         with self.lock:
             now = time.monotonic()
             cached = self.results.get(urls)
+            if self.playback_active():
+                # A stale result is unknown until a real play or an idle-time
+                # probe verifies it; do not hide a recovered channel forever.
+                if cached and now - cached[0] < self.ttl:
+                    return cached[1], cached[2] or (urls[0] if cached[1] is None else "")
+                return None, urls[0]
             if (cached is None or now - cached[0] >= self.ttl) and urls not in self.pending and len(self.pending) < 256:
                 self.pending.add(urls)
                 self.worker.submit(self._check, urls)
@@ -106,7 +124,7 @@ class AvailabilityCache:
                 self.results.pop(oldest, None)
 
 
-availability = AvailabilityCache()
+availability = AvailabilityCache(playback_active=playback_in_use)
 
 
 def candidate_urls(channel, primary_channels, fallback_sets, key_function):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import ipaddress
 import os
 import platform
 import re
@@ -183,6 +184,44 @@ def detect_lan_ipv4() -> str:
     return ""
 
 
+
+def detect_lan_subnet(address: str) -> str:
+    """Read the mask of the interface owning the detected LAN IP, without guessing."""
+    try:
+        host = ipaddress.ip_address(address)
+        if host.version != 4 or not any(host in ipaddress.ip_network(block) for block in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
+            return ""
+        system = host_system()
+        if system == "Windows":
+            command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                "Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,PrefixLength | ConvertTo-Json -Compress"]
+        elif system == "Darwin":
+            command = ["ifconfig"]
+        else:
+            command = ["ip", "-j", "-4", "address", "show"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False, **command_flags())
+        if result.returncode:
+            return ""
+        if system == "Windows":
+            payload = json.loads(result.stdout or "[]")
+            records = payload if isinstance(payload, list) else [payload]
+            masks = [row["PrefixLength"] for row in records if row.get("IPAddress") == address]
+        elif system == "Darwin":
+            masks = []
+            for candidate, mask in re.findall(r"inet ([0-9.]+) netmask (0x[0-9a-fA-F]+|[0-9.]+)", result.stdout):
+                if candidate == address:
+                    masks.append(str(ipaddress.IPv4Address(int(mask, 16))) if mask.startswith("0x") else mask)
+        else:
+            masks = [row["prefixlen"] for interface in json.loads(result.stdout or "[]")
+                     for row in interface.get("addr_info", []) if row.get("local") == address]
+        if not masks:
+            return ""
+        network = ipaddress.ip_network(f"{address}/{masks[0]}", strict=False)
+        return str(network) if network.version == 4 and any(network.subnet_of(ipaddress.ip_network(block)) for block in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')) else ""
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+        return ""
+
+
 def prepare_install_environment(staging: Path, image_tag: str = "latest") -> None:
     env_path = staging / ".env"
     example = staging / ".env.example"
@@ -194,6 +233,7 @@ def prepare_install_environment(staging: Path, image_tag: str = "latest") -> Non
     lan_host = detect_lan_ipv4()
     if lan_host:
         set_dotenv_value(env_path, "M3U_LAN_HOST", lan_host)
+        set_dotenv_value(env_path, "M3U_LAN_SUBNET", detect_lan_subnet(lan_host))
     configured_dvr = dotenv_value(env_path, "M3U_DVR_DIR")
     if not configured_dvr or configured_dvr == "./runtime/recordings":
         dvr_dir = default_dvr_dir()
@@ -251,6 +291,14 @@ def production_container_status(docker: str) -> str:
 
 
 def compose_command(docker: str, install_dir: Path) -> list[str]:
+    persistent_vpn = install_dir / "runtime" / "vpn" / "docker-compose.vpn.json"
+    if persistent_vpn.is_file():
+        # UP copies runtime before selecting Compose. Keep the credential volume,
+        # Gluetun dependency and protected network; .env supplies the new image.
+        command = [docker, "compose"]
+        if (install_dir / ".env").is_file():
+            command += ["--env-file", str(install_dir / ".env")]
+        return command + ["-f", str(persistent_vpn)]
     command = [docker, "compose", "-f", str(install_dir / "docker-compose.release.yml")]
     if host_system() != "Darwin" and (shutil.which("nvidia-smi") or shutil.which("nvidia-smi.exe")):
         command.extend(["-f", str(install_dir / "docker-compose.gpu.yml")])
@@ -262,6 +310,40 @@ def compose_command(docker: str, install_dir: Path) -> list[str]:
 
 def run_compose(command: list[str], install_dir: Path, *arguments: str) -> None:
     subprocess.run([*command, *arguments], cwd=install_dir, check=True)
+
+
+def clean_vpn_volumes(docker: str, install_dir: Path) -> None:
+    path = install_dir / "runtime/vpn/docker-compose.vpn.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    names = set()
+    for service in config["services"].values():
+        for mount in service.get("volumes", []):
+            if mount.get("type") == "volume" and mount.get("target") in ("/gluetun", "/app/data", "/app/setup-data", "/commercials"):
+                names.add(config["volumes"][mount["source"]]["name"])
+    # CL is an explicit destructive install choice. Check volume ownership before
+    # removing its app database or credential volume; retain recordings/backups.
+    for name in names:
+        result = subprocess.run([docker, "volume", "inspect", name], capture_output=True, text=True, check=True, **command_flags())
+        labels = json.loads(result.stdout)[0].get("Labels") or {}
+        if labels.get("com.docker.compose.project") not in {config["name"], config["name"].removesuffix("-vpn")} and not re.fullmatch(r"[a-f0-9]{32}", labels.get("m3u.vpn-config", "")):
+            raise RuntimeError("Refusing to erase a volume not owned by this VPN installation.")
+    for name in names:
+        subprocess.run([docker, "volume", "rm", name], check=True)
+
+
+def verify_vpn_upgrade_image(docker: str, command: list[str], install_dir: Path) -> None:
+    if not (install_dir / "runtime/vpn/docker-compose.vpn.json").is_file():
+        return
+    resolved = subprocess.run([*command, "config", "--format", "json"], cwd=install_dir,
+                              capture_output=True, text=True, check=True, **command_flags())
+    services = json.loads(resolved.stdout)["services"]
+    metadata = json.loads((install_dir / "runtime/vpn/docker-compose.vpn.json").read_text(encoding="utf-8"))
+    app = services[metadata["x-m3u-vpn"]["service"]]
+    check = "from pathlib import Path; import sys; sys.exit(0 if all(Path(p).is_file() for p in ('/app/src/vpn_runtime.py','/app/src/setup_runtime.py','/app/media/upstream_relay.py','/app/static/js/ui_vpn_power.js')) and 'def protection_missing' in Path('/app/src/vpn_runtime.py').read_text() else 1)"
+    result = subprocess.run([docker, "run", "--rm", "--network", "none", "--entrypoint", "python", app["image"], "-c", check],
+                            capture_output=True, check=False, **command_flags())
+    if result.returncode:
+        raise RuntimeError("This image lacks protected VPN playback support. The current installation has been left running.")
 
 
 def prepare_bind_mount_directories(command: list[str], install_dir: Path) -> None:
@@ -354,6 +436,7 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
         prepare_bind_mount_directories(staging_compose, staging)
         # A failed image download must leave an existing installation running.
         run_compose(staging_compose, staging, "pull")
+        verify_vpn_upgrade_image(docker, staging_compose, staging)
         if existing_install:
             install_dir.replace(previous)
         try:
@@ -365,6 +448,9 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
 
     compose = compose_command(docker, install_dir)
     try:
+        if mode == CLEAN and (previous / "runtime/vpn/docker-compose.vpn.json").is_file():
+            run_compose(compose_command(docker, previous), previous, "down", "--remove-orphans")
+            clean_vpn_volumes(docker, previous)
         run_compose(compose, install_dir, "down", "-v" if mode == CLEAN else "--remove-orphans")
         run_compose(compose, install_dir, "up", "-d", "--no-build")
         run_compose(compose, install_dir, "ps")
