@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: '22'
       - name: Test browser selection and Guide state
-        run: node --test tests/guide_storage_authority.test.cjs tests/selection_consistency.test.cjs tests/setup_selection_keys.test.cjs
+        run: node --test tests/guide_storage_authority.test.cjs tests/selection_consistency.test.cjs tests/setup_selection_keys.test.cjs tests/vpn_status.test.cjs tests/vpn_preferences_ui.test.cjs
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -67,6 +67,7 @@ jobs:
         run: |
           docker run --rm --entrypoint python "$IMAGE" -c 'import flask, markdown, src.app; import subprocess; subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.DEVNULL)'
           docker run --rm --entrypoint python "$IMAGE" -m unittest tests.test_roku_app tests.test_shared_media_sessions tests.test_hls_manifest tests.test_live_read_ahead tests.test_movie_lighting tests.test_hls_audio_clock tests.test_hls_recovery_continuity tests.test_release_main tests.test_cross_platform_docker_installer tests.test_plex_auth tests.test_plex_discovery tests.test_minor_hockey tests.test_selection_consistency
+          docker run --rm --network none -e M3U_DATA_DIR=/tmp/vpn-tests -e M3U_DISABLE_SCHEDULER=true --entrypoint python "$IMAGE" -m unittest tests.test_vpn_config tests.test_vpn_connection tests.test_vpn_persistence tests.test_vpn_power tests.test_vpn_relay tests.test_vpn_startup tests.test_standalone_setup_wizard tests.test_browser_bridge tests.test_channel_availability
 
   publish:
     needs: [prepare, image]

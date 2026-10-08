@@ -13,6 +13,7 @@ The app runs in Docker on Windows, macOS, and Linux. Start with a [packaged inst
 - **TV devices:** browse the native Roku guide, send playback from the browser to Roku or Google Cast, or use the virtual HDHomeRun interface with compatible clients.
 - **Plex custom channels — experimental:** create continuous show channels, movie genre channels, and optional nostalgia commercial breaks from your own media.
 - **Movie lighting — experimental:** create named rooms, each with one Roku, several compatible lights, and separate playing and paused brightness settings.
+- **VPN — development preview:** import and test a WireGuard profile, relay provider streams through Gluetun, retain an applied configuration, and view VPN power/status/public IP. Automatic testing and switching currently require the port-9998 development host helpers; the packaged installer does not yet provision or supervise them. See [VPN development and limitations](docs/VPN-DEVELOPMENT.md) before enabling this option.
 
 ## Install (recommended)
 

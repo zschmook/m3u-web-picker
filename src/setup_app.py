@@ -16,6 +16,7 @@ import jellyfin_cache
 import master_update_worker
 import sports
 import setup_wizard
+import vpn_runtime
 
 
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -26,6 +27,10 @@ app = Flask(
     static_folder=str(REPO_DIR / "static"),
     template_folder=str(REPO_DIR / "templates"),
 )
+
+
+from api.vpn import register_vpn_routes
+register_vpn_routes(app)
 
 
 @app.after_request
@@ -115,6 +120,8 @@ def _apply_full_app_configuration(state: dict) -> None:
 
 @app.get("/")
 def index():
+    if setup_wizard.load_state().get('completed') and vpn_runtime.protection_missing(core.DB_PATH):
+        return render_template('vpn_unavailable.html')
     return render_template("setup_wizard.html")
 
 
@@ -126,17 +133,51 @@ def api_setup_state():
 @app.post("/api/setup/choices")
 def api_setup_choices():
     data = _json()
+    if data.get('vpn_requested'):
+        import vpn_testing
+        import re
+        session=request.headers.get('X-VPN-Session','')
+        if not re.fullmatch('[a-f0-9]{32}',session):
+            return jsonify(error='Upload and test your VPN configuration before continuing.'),409
+        test=vpn_testing.latest(core.DB_PATH,core.DATA_DIR,session).get('test')
+        if not test or test['status']!='passed' or test['profile_changed']:
+            return jsonify(error='VPN tests must pass before continuing.'),409
     try:
         state = setup_wizard.save_choices(
             data.get("mode", ""),
         )
+        state=setup_wizard.save_state({'vpn':{'requested':bool(data.get('vpn_requested')),'profile_id':test['profile_id'] if data.get('vpn_requested') else None}})
+        if data.get('vpn_requested') and not vpn_runtime.required():
+            activation=vpn_runtime.queue(core.DB_PATH,core.DATA_DIR,test['profile_id'],phase='setup')
+            return jsonify(state=state,vpn=activation),202
+        if not data.get('vpn_requested') and not vpn_runtime.required():
+            if vpn_runtime.read(core.DB_PATH).get('status')=='applying':
+                return jsonify(error='Wait for the current VPN handoff to finish.'),409
+            vpn_runtime.write(core.DB_PATH,requested=False,feature_enabled=False,desired_on=False,status='not_applied')
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     return jsonify(state=state)
 
 
+@app.post('/api/setup/vpn-intent')
+def api_setup_vpn_intent():
+    import re
+    if not re.fullmatch('[a-f0-9]{32}',request.headers.get('X-VPN-Session','')):
+        return jsonify(error='Reload setup before choosing a VPN.'),400
+    enabled=_json().get('enabled') is True
+    if not enabled and vpn_runtime.read(core.DB_PATH).get('status')=='applying':
+        return jsonify(error='Wait for the current VPN handoff to finish.'),409
+    setup_wizard.save_state({'vpn':{'requested':enabled}})
+    if not vpn_runtime.required():
+        vpn_runtime.write(core.DB_PATH,requested=enabled,feature_enabled=enabled,desired_on=enabled,status='not_applied')
+    return jsonify(enabled=enabled)
+
+
 @app.post("/api/setup/provider")
 def api_setup_provider():
+    state=setup_wizard.load_state()
+    if vpn_runtime.protection_missing(core.DB_PATH,state.get('vpn',{}).get('requested')):
+        return jsonify(error='Connect the VPN before contacting your provider.'),409
     if _provider_configured():
         return jsonify(error="A provider is already configured in this setup workspace."), 409
     data = _json()
@@ -427,6 +468,12 @@ def api_setup_build():
     state = setup_wizard.load_state()
     if not state["channels"].get("saved"):
         return jsonify(error="Save at least one channel before building the configuration."), 409
+    if state.get('vpn',{}).get('requested') and not vpn_runtime.required():
+        try:activation=vpn_runtime.queue(core.DB_PATH,core.DATA_DIR,state['vpn']['profile_id'])
+        except ValueError as exc:return jsonify(error=str(exc)),409
+        return jsonify(state=state,vpn=activation,master_update={}),202
+    if vpn_runtime.required() and not vpn_runtime.healthy():
+        return jsonify(error='The VPN is disconnected. Restore it before building.'),409
     try:
         preview = setup_wizard.build_preview(state)
         _apply_full_app_configuration(state)
@@ -481,6 +528,9 @@ def api_setup_build():
 @app.get("/api/setup/build-status")
 def api_setup_build_status():
     state = setup_wizard.load_state()
+    activation=vpn_runtime.status(core.DB_PATH)
+    if activation.get('requested') and activation.get('status') in ('pending','applying','failed'):
+        return jsonify(state=state,vpn=activation,master_update={},launch_url='/')
     update = master_update_worker.payload()
     initial = state.get("initial_update") or {}
     if initial.get("status") in {"starting", "running"}:

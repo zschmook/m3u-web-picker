@@ -28,6 +28,36 @@ class _Process:
 
 
 class BrowserBridgeTests(unittest.TestCase):
+    def test_second_viewer_and_full_stream_limit_leave_first_worker_running(self):
+        app = Flask(__name__)
+        first, second = _Process(), _Process()
+        pipeline = browser.media_pipeline
+        with patch.object(pipeline, "settings", return_value={"max_sessions": 2}), patch.object(
+            pipeline, "_sessions", {}
+        ), patch.object(browser.subprocess, "Popen", side_effect=[first, second]) as spawn, patch.object(
+            browser, "normalized_live_input_args", return_value=["ffmpeg", "pipe:1"]
+        ), patch.object(browser, "terminate", side_effect=lambda worker: worker.stopped.set()):
+            with app.test_request_context("/guide/play/first"):
+                response_one = browser.response_for("http://source.test/first")
+                with app.test_request_context("/guide/play/second"):
+                    response_two = browser.response_for("http://source.test/second")
+                    self.assertFalse(first.stopped.is_set())
+                    self.assertEqual(pipeline.active_session_count(), 2)
+                    with app.test_request_context("/guide/play/third"):
+                        rejected = browser.response_for("http://source.test/third")
+                        self.assertEqual(rejected.status_code, 503)
+                        self.assertIn(b"stream limit reached", rejected.get_data())
+                        rejected.close()
+                    self.assertFalse(first.stopped.is_set())
+                    self.assertFalse(second.stopped.is_set())
+                    self.assertEqual(spawn.call_count, 2)
+                    response_two.close()
+                    self.assertTrue(second.stopped.is_set())
+                    self.assertFalse(first.stopped.is_set())
+                    self.assertEqual(pipeline.active_session_count(), 1)
+                response_one.close()
+                self.assertEqual(pipeline.active_session_count(), 0)
+
     def test_remux_only_preserves_pre_normalized_av_timestamps(self):
         app = Flask(__name__)
         process = _Process()

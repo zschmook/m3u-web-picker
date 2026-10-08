@@ -88,8 +88,12 @@ def find_release(api, tag):
 def prepare(api, sha):
     tag = reserve_tag(api, sha)
     if find_release(api, tag) is None:
-        api.request("releases", {"tag_name": tag, "target_commitish": sha,
-            "name": tag, "draft": True, "generate_release_notes": True})
+        payload = {"tag_name": tag, "target_commitish": sha,
+            "name": tag, "draft": True, "generate_release_notes": True}
+        notes = Path(__file__).resolve().parents[1] / "docs" / "releases" / f"{tag}.md"
+        if notes.is_file():
+            payload["body"] = notes.read_text(encoding="utf-8")
+        api.request("releases", payload)
     return tag
 
 

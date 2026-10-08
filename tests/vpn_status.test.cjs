@@ -1,0 +1,27 @@
+const fs = require('fs'), vm = require('vm'), assert = require('assert');
+const attributes = {}, classes = {}, handlers = {}, messageClasses = {}, message = {textContent:'',classList:{toggle(key,value){messageClasses[key]=value;},remove(key){messageClasses[key]=false;}}};
+const button = {disabled:false, classList:{toggle(key,value){classes[key]=value;}},setAttribute(key,value){attributes[key]=value;},addEventListener(key,value){handlers[key]=value;}};
+let calls=[], reloads=0;
+let next={enabled:true,desired_on:true,network_protected:true,app_vpn_active:true,configured:true,control_available:true,vpn_public_ip:'195.181.163.29'};
+const context={document:{getElementById:id=>id==='uiVpnStatus'?button:message,body:{dataset:{}}},window:{setInterval(){},location:{reload(){reloads++;}}},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>next};}};
+vm.createContext(context);
+let source=fs.readFileSync('static/js/ui_vpn_power.js','utf8');
+source=source.replace('  poll(); window.setInterval(poll, 4000);','  window.test = {render,poll};');
+vm.runInContext(source,context);
+(async()=>{
+ next={...next,enabled:false};await context.window.test.poll();assert.equal(button.hidden,true);assert.equal(message.hidden,true);assert.equal(button.disabled,true);
+ next={...next,enabled:true};
+ await context.window.test.poll(); assert.equal(classes['is-active'],true); assert.equal(classes['is-warning'],false); assert.equal(button.disabled,false);
+ assert.equal(button.hidden,false);assert.equal(message.hidden,false);
+ assert.equal(message.textContent,'195.181.163.29');assert.equal(messageClasses['is-active'],true);
+ next={...next,app_vpn_active:false};await context.window.test.poll();assert.equal(classes['is-active'],false);assert.equal(classes['is-warning'],true);assert.match(attributes['aria-label'],/disconnected/);
+ assert.equal(message.textContent,'');assert.equal(messageClasses['is-active'],false);
+ next={...next,desired_on:false,network_protected:false};await context.window.test.poll();assert.equal(classes['is-active'],false);assert.equal(classes['is-warning'],false);assert.match(attributes['aria-label'],/normal internet/);
+ next={...next,desired_on:true,control_status:'pending'};
+ await handlers.click({stopPropagation(){}});assert.equal(JSON.parse(calls.at(-1).options.body).enabled,true);assert.equal(button.disabled,true);assert.equal(classes['is-warning'],true);
+ assert.equal(message.textContent,'Switching…');assert.equal(messageClasses['is-active'],false);
+ next={...next,network_protected:true,app_vpn_active:true,control_status:'applied'};await context.window.test.poll();assert.equal(classes['is-active'],true);assert.equal(button.disabled,false);assert.equal(reloads,2);
+ context.fetch=async()=>{throw Error('network down');};await context.window.test.poll();assert.equal(classes['is-active'],false);assert.equal(classes['is-warning'],true);assert.equal(button.disabled,true);
+ assert.equal(message.textContent,'');assert.equal(messageClasses['is-active'],false);
+ console.log('PASS: Settings visibility, green connected, red power-off, yellow disconnected, queued power switch, recovery and stale health');
+})().catch(error=>{console.error(error);process.exitCode=1;});

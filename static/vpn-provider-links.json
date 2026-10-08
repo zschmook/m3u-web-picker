@@ -1,0 +1,150 @@
+{
+  "checked_at": "2026-10-08",
+  "providers": {
+    "custom": {
+      "name": "Custom WireGuard",
+      "website": "https://www.wireguard.com/",
+      "guide": "https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/custom.md#wireguard",
+      "pricing": null,
+      "note": "Import a standard WireGuard configuration from your provider.",
+      "guide_label": "Gluetun setup"
+    },
+    "mullvad": {
+      "name": "Mullvad",
+      "website": "https://mullvad.net/",
+      "guide": "https://mullvad.net/en/help/easy-wireguard-mullvad-setup-linux",
+      "pricing": "https://mullvad.net/en/pricing",
+      "note": "Generate a WireGuard file in your account. Gluetun supplies the firewall; configuration hooks are not accepted.",
+      "guide_label": "Setup guide"
+    },
+    "protonvpn": {
+      "name": "Proton VPN",
+      "website": "https://protonvpn.com/",
+      "guide": "https://protonvpn.com/support/wireguard-configurations",
+      "pricing": "https://protonvpn.com/pricing",
+      "note": "Download a WireGuard .conf file from your account. The guide includes free-plan limitations.",
+      "guide_label": "Setup guide"
+    },
+    "nordvpn": {
+      "name": "NordVPN",
+      "website": "https://nordvpn.com/",
+      "guide": "https://support.nordvpn.com/hc/en-us/articles/51264943286545-WireGuard-connection-on-NordVPN",
+      "pricing": "https://nordvpn.com/pricing/",
+      "note": "The guide covers manual WireGuard setup. This preview requires a standard .conf file, rather than app settings.",
+      "guide_label": "Setup guide"
+    },
+    "surfshark": {
+      "name": "Surfshark",
+      "website": "https://surfshark.com/",
+      "guide": "https://support.surfshark.com/hc/en-us/articles/19262406140306-How-to-set-up-a-manual-WireGuard-reg-connection-on-Linux",
+      "pricing": "https://surfshark.com/pricing",
+      "note": "The manual setup guide explains how to generate keys and download a server configuration.",
+      "guide_label": "Setup guide"
+    },
+    "airvpn": {
+      "name": "AirVPN",
+      "website": "https://airvpn.org/",
+      "guide": "https://airvpn.org/generator/",
+      "pricing": "https://airvpn.org/buy/",
+      "note": "Sign in to the configuration generator and choose WireGuard.",
+      "guide_label": "Config generator"
+    },
+    "ivpn": {
+      "name": "IVPN",
+      "website": "https://www.ivpn.net/",
+      "guide": "https://www.ivpn.net/knowledgebase/general/do-you-offer-openvpn-wireguard-config-files/",
+      "pricing": "https://www.ivpn.net/en/pricing/",
+      "note": "The WireGuard configuration generator is in the client area.",
+      "guide_label": "Setup guide"
+    },
+    "windscribe": {
+      "name": "Windscribe",
+      "website": "https://windscribe.com/",
+      "guide": "https://windscribe.com/knowledge-base/articles/where-do-i-access-my-wireguard-configs",
+      "pricing": "https://windscribe.com/upgrade",
+      "note": "WireGuard configuration downloads require a paid account and are limited to locations included in your plan.",
+      "guide_label": "Setup guide"
+    },
+    "private internet access": {
+      "name": "Private Internet Access",
+      "website": "https://www.privateinternetaccess.com/",
+      "guide": "https://github.com/pia-foss/manual-connections",
+      "pricing": "https://www.privateinternetaccess.com/buy-vpn-online",
+      "note": "Manual WireGuard uses PIA’s official generation scripts. OpenVPN files cannot be imported into this preview.",
+      "guide_label": "Manual setup"
+    },
+    "cyberghost": {
+      "name": "CyberGhost",
+      "website": "https://www.cyberghostvpn.com/",
+      "guide": "https://support.cyberghostvpn.com/hc/en-us/articles/360015810460-Discover-More-About-the-WireGuard-VPN-Protocol",
+      "pricing": "https://www.cyberghostvpn.com/buy3",
+      "note": "CyberGhost states that manual WireGuard configuration is not supported. Its OpenVPN setup needs an adapter that this preview does not yet include.",
+      "guide_label": "WireGuard support"
+    },
+    "expressvpn": {
+      "name": "ExpressVPN",
+      "website": "https://www.expressvpn.com/",
+      "guide": "https://www.expressvpn.com/support/vpn-setup/",
+      "pricing": "https://www.expressvpn.com/pricing",
+      "note": "The official manual setup guides primarily cover OpenVPN. Those files are not accepted by this WireGuard-only preview.",
+      "guide_label": "Setup guides"
+    },
+    "ipvanish": {
+      "name": "IPVanish",
+      "website": "https://www.ipvanish.com/",
+      "guide": "https://www.ipvanish.com/blog/generate-wireguard-configurations/",
+      "pricing": "https://www.ipvanish.com/",
+      "note": "Follow the account guide to generate a WireGuard configuration. Confirm that your plan supports configuration downloads.",
+      "guide_label": "Setup guide",
+      "pricing_label": "Plans on website"
+    },
+    "privado": {
+      "name": "PrivadoVPN",
+      "website": "https://privadovpn.com/",
+      "guide": "https://support.privadovpn.com/kb/article/1130-how-to-generate-a-wireguard-or-openvpn-configuration-file-for-manual-setups/",
+      "pricing": "https://privadovpn.com/pricing/",
+      "note": "Manual configuration downloads require a Premium account. Choose WireGuard when generating the file.",
+      "guide_label": "Setup guide"
+    },
+    "privatevpn": {
+      "name": "PrivateVPN",
+      "website": "https://privatevpn.com/",
+      "guide": "https://help.privatevpn.com/en/articles/302391-wireguard-setup-guides",
+      "pricing": "https://privatevpn.com/prices",
+      "note": "Use the manual WireGuard section and generate a configuration in your account.",
+      "guide_label": "Setup guide"
+    },
+    "purevpn": {
+      "name": "PureVPN",
+      "website": "https://www.purevpn.com/",
+      "guide": "https://support.purevpn.com/en_US/windows-manual-articles/setup-wireguard-on-windows",
+      "pricing": "https://www.purevpn.com/order",
+      "note": "The manual guide explains how to download a WireGuard configuration from your account.",
+      "guide_label": "Setup guide"
+    },
+    "torguard": {
+      "name": "TorGuard",
+      "website": "https://torguard.net/",
+      "guide": "https://torguard.net/support/articles/OS-and-Apps/wireguard-official-app-windows-setup.php",
+      "pricing": "https://torguard.net/buy-vpn/",
+      "note": "Generate a WireGuard configuration using the provider’s config generator.",
+      "guide_label": "Setup guide"
+    },
+    "vpnunlimited": {
+      "name": "VPN Unlimited",
+      "website": "https://www.vpnunlimited.com/",
+      "guide": "https://www.vpnunlimited.com/help/manuals/wireguard/windows",
+      "pricing": "https://www.vpnunlimited.com/pricing",
+      "note": "The guide covers generation of a WireGuard configuration from your User Office.",
+      "guide_label": "Setup guide"
+    },
+    "vyprvpn": {
+      "name": "VyprVPN",
+      "website": "https://www.vyprvpn.com/",
+      "guide": "https://support.vyprvpn.com/hc/en-us/sections/360007434532-VyprVPN-Manual-Connections-Setup",
+      "pricing": "https://www.vyprvpn.com/offer",
+      "note": "These are general manual-connection guides. Verify that your account provides a standard WireGuard .conf; OpenVPN files are not accepted here.",
+      "guide_label": "Setup guides"
+    }
+  }
+}

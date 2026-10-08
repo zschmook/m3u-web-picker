@@ -20,6 +20,8 @@ services:
       M3U_ONBOARDING_ENABLED: "false"
       M3U_PORT: "9998"
       M3U_EXTERNAL_PORT: "9998"
+      M3U_LAN_HOST: "${M3U_LAN_HOST:-}"
+      M3U_LAN_SUBNET: "${M3U_LAN_SUBNET:-}"
       M3U_REMOTE_URL: "${M3U_REMOTE_URL:-}"
       M3U_DVR_CONTAINER_DIR: /recordings
       M3U_JELLYFIN_CACHE_CONTAINER_DIR: /jellyfin-cache

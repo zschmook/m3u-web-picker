@@ -37,6 +37,7 @@ DEFAULT_STATE: dict[str, Any] = {
         "error": "",
     },
     "completed": False,
+    "vpn": {"requested": False, "profile_id": None, "provider": ""},
 }
 
 _LOCK = threading.RLock()
