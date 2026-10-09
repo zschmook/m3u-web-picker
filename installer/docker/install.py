@@ -470,10 +470,18 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install the Docker edition of M3U Web Picker")
+    parser.add_argument('--credits', action='store_true', help='Print bundled Python and PyInstaller license notices without installing')
     parser.add_argument("--install-dir", type=Path, default=default_install_dir())
     parser.add_argument("--source-ref", default=SOURCE_REF, help=argparse.SUPPRESS)
     parser.add_argument("--mode", choices=(UPGRADE, CLEAN), help="UP preserves saved setup; CL starts clean")
     arguments = parser.parse_args()
+    if arguments.credits:
+        bundled = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'third-party-notices.txt'
+        if bundled.is_file():
+            print(bundled.read_text(encoding='utf-8'))
+        else:
+            print('Python: https://docs.python.org/3/license.html\nPyInstaller: https://pyinstaller.org/en/stable/license.html\nApp credits: Settings > Open Source & Credits')
+        return 0
     install(arguments.install_dir, arguments.source_ref, arguments.mode or "")
     return 0
 

@@ -66,7 +66,7 @@ def manifest(app, glue, image, volume):
     # Persist public network settings, never provider keys or control passwords.
     glue_env = {key: value for key, value in glue_env.items() if key.startswith(("VPN_", "HEALTH_", "FIREWALL_", "DNS_", "BLOCK_"))}
     glue_env["HEALTH_RESTART_VPN"] = "on"
-    ports = sorted({value["HostPort"] + ":" + key.split("/")[0]
+    ports = sorted({(('['+value['HostIp']+']' if ':' in value['HostIp'] else value['HostIp']) + ":" if value.get("HostIp") not in (None, "", "0.0.0.0", "::") else "") + value["HostPort"] + ":" + (key.split('/')[0] if key.endswith('/tcp') else key)
                     for key, values in glue["NetworkSettings"]["Ports"].items() for value in (values or [])})
     glue_service = {"image": glue["Config"]["Image"], "container_name": glue["Name"].lstrip("/"),
                     "cap_add": ["NET_ADMIN"], "devices": ["/dev/net/tun:/dev/net/tun"],
@@ -102,16 +102,19 @@ def connection_mode(configuration, enabled):
 def startup_manifest(info, image, glue_name, volume, digest, subnets):
     app = copy.deepcopy(info)
     env = dict(value.split("=", 1) for value in app["Config"]["Env"])
+    port = env.get('M3U_PORT', '9999')
+    if port not in ('9998', '9999'):
+        raise ValueError('Unsupported Picker VPN port.')
     env.update(M3U_VPN_REQUIRED="true", M3U_VPN_CONTAINER=glue_name)
     app["Config"]["Env"] = [key + "=" + value for key, value in env.items()]
     if app["Config"].get("Entrypoint") != ["/bin/sh"]:
         app["Config"]["Cmd"] = ["-c", 'printf "nameserver 127.0.0.1\\n" > /etc/resolv.conf; exec "$@"', "picker", *app["Config"]["Cmd"]]
         app["Config"]["Entrypoint"] = ["/bin/sh"]
     glue_env = {"VPN_SERVICE_PROVIDER": "custom", "VPN_TYPE": "wireguard", "HEALTH_SERVER_ADDRESS": "127.0.0.1:9990",
-                "HEALTH_RESTART_VPN": "on", "FIREWALL_INPUT_PORTS": "9998", "FIREWALL_OUTBOUND_SUBNETS": ",".join(subnets),
+                "HEALTH_RESTART_VPN": "on", "FIREWALL_INPUT_PORTS": port, "FIREWALL_OUTBOUND_SUBNETS": ",".join(subnets),
                 "BLOCK_MALICIOUS": "off", "DNS_UPDATE_PERIOD": "0"}
     glue = {"Name": "/" + glue_name, "Config": {"Image": digest, "Env": [key + "=" + value for key, value in glue_env.items()]},
-            "NetworkSettings": {"Ports": {"9998/tcp": [{"HostPort": "9998"}]}}}
+            "NetworkSettings": {"Ports": info['HostConfig'].get('PortBindings') or {port+'/tcp': [{'HostPort': port}]}}}
     return manifest(app, glue, image, volume)
 
 

@@ -1,16 +1,20 @@
-# VPN branch: setup tests and port-9998 startup activation
+# VPN development preview: setup tests and selected-instance activation
 
-Development target: port **9998** (`m3u-picker-setup`). Port 9999 remains on v41.
+Development targets: port **9998** (`m3u-picker-setup`) and explicitly selected port **9999** (`m3u-picker`). Each host worker validates the selected instance and uses a separate deployment graph.
+
+After a connection test passes, the host worker saves the verified WireGuard profile in a private Docker volume, stores only its identity and public preferences in SQLite, and queues activation. The connection manager consumes that handoff and verifies actual Picker egress before reporting a connected VPN. Unverified uploads remain in temporary memory. A saved verified profile can be used after the temporary copy expires or the app restarts. A passing result alone does not mean the app is connected; activation can still fail and protected provider traffic remains blocked in that case.
+
+For this production target, `vpn_test_host.py --watch --port 9999` handles isolated tests. The separately authorized connection manager uses `vpn_startup_host.py --watch --port 9999 --allow-restart-9999 --image m3u-web-picker:TAG`. It retains production volumes and port bindings and does not operate on 9998. Its default separate graph is `runtime/vpn-9999/docker-compose.vpn.json`; use `--manifest INSTALL_DIR/runtime/vpn/docker-compose.vpn.json` for an installer-managed production deployment so UP retains the graph. The selected-port restart flag is required, and the manager refuses to switch while playback is active. General installer supervision of these host workers remains release work.
 
 Implemented in this milestone:
 
 - Settings / Network and the first-run source screen can import a WireGuard configuration.
 - SQLite stores provider selection, LAN subnet exceptions, profile identity, and timestamps.
-- Secret uploads live only in Linux tmpfs (`/dev/shm`), with mode 0600, scoped to the current page session. They expire after 20 minutes, are removed on replacement/clear, and disappear on container recreation. The browser keeps its selected File in page memory; no localStorage, sessionStorage, or IndexedDB is used. SQLite stores no keys. Refreshing requires uploading again.
+- Unverified secret uploads live only in Linux tmpfs (`/dev/shm`), with mode 0600, scoped to the current page session. They expire after 20 minutes, are removed on replacement/clear, and disappear on container recreation. The browser keeps its selected File in page memory; no localStorage, sessionStorage, or IndexedDB is used. SQLite stores no keys. After a passing test, the private Docker volume preserves the verified configuration across refreshes and restarts.
 - Imports accept one peer with a public IPv4 endpoint and a full IPv4 route. Hooks and unknown options are rejected. IPv6 addresses and imported DNS are omitted for this IPv4-only preview; Gluetun owns DNS. LAN exceptions cannot be public ranges or overlap the tunnel address.
 - `scripts/prepare_vpn_test.py` produces a Compose overlay for port 9998 only. It does not run Docker or restart anything. The overlay moves port publishing to Gluetun, moves its internal health listener to 9990, and preserves application mounts inherited from the base Compose definition.
 
-Selecting a file uploads and validates it, then automatically queues an isolated connection test. The wizard shows a spinner, then **VPN tests passed** on success, and keeps Continue disabled until the current file passes. Changes invalidate previous results; failed tests can be retried. Passing a test alone **does not enable the app VPN**. Continuing setup with VPN selected queues a host-side handoff before provider validation. The authorized startup helper attaches Picker to Gluetun’s network, moves port 9998 publishing to Gluetun, and keeps existing data volumes. It checks real Picker egress before declaring activation successful.
+Selecting a file uploads and validates it, then automatically queues an isolated connection test. The wizard shows a spinner, then **VPN tests passed — configuration saved** on success, and keeps Continue disabled until the current file passes. Changes invalidate previous results; failed tests can be retried. The passing test saves the verified profile and queues a host-side activation handoff. The authorized startup helper attaches Picker to Gluetun’s network, moves the selected port's publishing to Gluetun, and keeps existing data volumes. It checks real Picker egress before declaring activation successful. A missing connection manager or failed handoff cannot produce a connected green status.
 
 ## Preparing a real tunnel test
 
@@ -28,9 +32,9 @@ This manual preparation command explicitly writes private output files; it is se
 
 ## Startup activation on the isolated test host
 
-`scripts/vpn_startup_host.py --watch --allow-restart-9998 --image m3u-web-picker:TAG` consumes non-secret startup handoffs from SQLite. It requires explicit authorization for port-9998 restarts, checks active playback, and never touches port 9999. The web app does not have a Docker socket. A passing current upload is required before a handoff is queued. Requested but unapplied or disconnected VPN playback is blocked.
+`scripts/vpn_startup_host.py --watch --port 9998 --allow-restart-9998 --image m3u-web-picker:TAG` consumes non-secret startup handoffs from SQLite for the isolated instance. Production uses `--port 9999 --allow-restart-9999` and an installer-managed manifest as described above. Each manager checks active playback and operates only on its explicitly selected instance. The web app does not have a Docker socket. A passing current upload or its verified saved configuration is required before a handoff is queued. Requested but unapplied or disconnected VPN playback is blocked.
 
-Test uploads remain temporary. Applying a passing configuration copies the canonical WireGuard profile and private control authentication through stdin into an owned Docker volume. Its directories have mode 0700 and files 0600. Only Gluetun mounts this volume. The app, SQLite, Compose manifest, environment variables, command arguments and host deployment logs contain no WireGuard keys. Applied credentials intentionally survive container recreation and updates; explicit installer CL removes its owned credential volume. Recording volumes are retained.
+Unverified uploads remain temporary. A passing test copies the canonical WireGuard profile and private control authentication through stdin into an owned Docker volume; activation reuses that verified volume. Its directories have mode 0700 and files 0600. Only Gluetun mounts this volume during normal operation. The app, SQLite, Compose manifest, environment variables, command arguments and host deployment logs contain no WireGuard keys. Verified credentials intentionally survive container recreation and updates; explicit installer CL removes its owned credential volume. Recording volumes are retained.
 
 The complete managed graph is `runtime/vpn/docker-compose.vpn.json`. It uses existing external app volumes, the private credential volume, an updated image supplied by `.env`, and `unless-stopped` restart policies. In VPN mode, Compose waits for Gluetun health before starting Picker; Docker engine restarts may start both together, so the WSGI gate blocks provider work until the tunnel is healthy. Gluetun automatically retries failed connections. UP retains this graph and its volumes and rejects VPN-incapable images before interrupting the existing deployment.
 
@@ -64,7 +68,7 @@ The helper checks healthy connectivity, public-IP change against normal host egr
 
 Tests and results are stored in `vpn_connection_tests` in SQLite, separate from VPN activation. Changing the saved profile or LAN exceptions marks old results stale. Passing a test never changes Picker's network or implies media-relay coverage. Tailscale checks the host's tailnet address from the probe; it does not establish a remote-device playback session or verify MagicDNS.
 
-Run a single test against the saved port-9998 profile:
+Run a single test against the uploaded port-9998 profile:
 
 ```powershell
 python scripts/vpn_test_host.py
@@ -76,4 +80,4 @@ For the wizard’s automatic connection tests, start the narrowly scoped host he
 python scripts/vpn_test_host.py --watch
 ```
 
-The browser only queues tests and reads results; it cannot execute Docker commands. The helper requires the `m3u-picker-setup` instance to advertise port 9998 and only removes its own uniquely labelled probe containers. Start it on the Docker host, not inside Picker. The VPN modules and routes must be deployed before using automatic tests. Gluetun must already be pulled; each test resolves and records its image digest before creating the probe.
+The browser only queues tests and reads results; it cannot execute Docker commands. By default the helper requires `m3u-picker-setup` on port 9998. `--port 9999` explicitly selects `m3u-picker` with `/app/data`; mismatched names, ports and data directories are rejected. It only removes its own uniquely labelled probe containers. Start it on the Docker host, not inside Picker. The VPN modules and routes must be deployed before using automatic tests. Gluetun must already be pulled; each test resolves and records its image digest before creating the probe.

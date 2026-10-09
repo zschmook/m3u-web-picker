@@ -294,6 +294,13 @@ async def refresh_schedule_api_if_due_async(
     settings = _s.get_settings(db_path)
     timezone = ZoneInfo(str(settings.get("timezone", "America/New_York")))
     local_now = (scan_anchor or datetime.now().astimezone()).astimezone(timezone)
+    from .schedule_coverage import refresh_coverage
+    coverage_warnings = []
+    if settings.get('schedule_api_enabled'):
+        saved_key = _s._schedule_api_secret(db_path)
+        if saved_key:
+            coverage_warnings = await asyncio.to_thread(refresh_coverage, db_path,
+                api_key=saved_key, now=local_now, cancel_check=cancel_check, force=force)
     state = _s.schedule_api_status(db_path)
     plan = state.get("plan") or _s.schedule_api_request_plan(db_path)
     if not state.get("effective"):
@@ -315,7 +322,7 @@ async def refresh_schedule_api_if_due_async(
             "cached": [],
             "failures": [],
             "reference_failures": [],
-            "warning": "",
+            "warning": ' '.join(coverage_warnings),
             "plan": plan,
             "message": (
                 "No API-backed sports are selected; legacy matching remains active."
@@ -329,7 +336,7 @@ async def refresh_schedule_api_if_due_async(
     fetched: list[dict] = []
     cached: list[dict] = []
     failures: list[dict] = []
-    warnings: list[str] = []
+    warnings: list[str] = list(coverage_warnings)
     reference: list[dict] = []
     reference_failures: list[dict] = []
     work_items: list[ScheduleFetchWork] = []

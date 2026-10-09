@@ -13,8 +13,10 @@ def _schedule_api_current_cache_coverage(
     dataset_id: str,
     *,
     now: datetime | None = None,
+    dataset: dict | None = None,
 ) -> dict:
-    dataset = _s.SCHEDULE_API_DATASETS.get(str(dataset_id or ""))
+    from .schedule_coverage import available_datasets
+    dataset = dataset or _s.SCHEDULE_API_DATASETS.get(str(dataset_id or '')) or available_datasets(db_path).get(str(dataset_id or ""))
     if not dataset:
         return {"required_dates": [], "current_dates": [], "current": False}
 
@@ -73,6 +75,7 @@ def schedule_api_status_payload(
     health_by_dataset = dict(health.get("datasets") or {})
     reference_datasets = set((api.get("plan") or {}).get("reference_datasets") or [])
     entries = []
+    planned = {item['id']: item for item in (api.get('plan') or {}).get('datasets', [])}
 
     for raw in api.get("apis") or []:
         entry = dict(raw)
@@ -82,6 +85,7 @@ def schedule_api_status_payload(
             db_path,
             dataset_id,
             now=now,
+            dataset=planned.get(dataset_id),
         )
         entry["last_attempt_at"] = attempt.get("last_attempt_at")
         entry["last_attempt_dates"] = list(attempt.get("last_attempt_dates") or [])

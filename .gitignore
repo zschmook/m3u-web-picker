@@ -32,6 +32,7 @@ exports/*
 .env
 .vscode/
 .idea/
+static/licenses/generated/
 
 installer/**/build/
 installer/**/dist/

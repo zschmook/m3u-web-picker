@@ -130,12 +130,47 @@ def status(db_path, data_dir, session=None):
             except ValueError:pass
         import vpn_runtime
         activation=vpn_runtime.status(db_path)
+        temporary_present=present
+        if not present and activation.get('profile_saved'):
+            identity=activation['saved_profile_id'];present=True
+            saved={**saved,'provider':activation['saved_provider'],'lan_subnets':activation['saved_lan_subnets']}
         return {'provider':saved['provider'],'protocol':'wireguard','lan_subnets':saved['lan_subnets'],
                 'configuration_present':present,'profile_id':identity if present else None,
                 'updated_at':saved.get('updated_at'),'activation':activation['status'],'vpn_runtime':activation,'providers':PROVIDERS,'requires_host_apply':True,
                 'suggested_lan_subnet':detected or suggested_lan_subnet(host),
                 'lan_subnet_detection':'detected' if detected else 'estimated' if suggested_lan_subnet(host) else 'unavailable',
-                'temporary_upload':True,'expires_at':saved.get('expires_at') if present else None}
+                'temporary_upload':temporary_present,'configuration_saved':bool(activation.get('profile_saved')),
+                'expires_at':saved.get('expires_at') if temporary_present else None}
+
+def retain_verified_profile(db_path, data_dir, data):
+    """Commit only host-verified private-volume metadata, never WireGuard keys."""
+    import re
+    job=data.get('id','');identity=data.get('profile_id','');volume=data.get('volume','');image=data.get('image','')
+    if not re.fullmatch('[a-f0-9]{32}',job) or not re.fullmatch('[a-f0-9]{64}',identity):raise ValueError('Invalid verified configuration identity.')
+    if volume!='m3u-picker-vpn-config-'+job or not re.fullmatch(r'qmcgaw/gluetun@sha256:[a-f0-9]{64}',image):raise ValueError('Invalid private configuration volume or image.')
+    result=data.get('results') or {};checks=result.get('checks') or {}
+    required=('tunnel_healthy','egress_changed','dns_resolved','internet_blocked_when_vpn_down','tunnel_recovers')
+    if result.get('passed') is not True or any(checks.get(key) is not True for key in required) or any(value is not True for value in checks.values()):raise ValueError('VPN checks must pass before saving configuration.')
+    with _LOCK:
+        current=_read(db_path)
+        if current.get('profile_id')!=identity:raise ValueError('The upload changed during testing. Test the current file again.')
+        profile_for_test(db_path,identity)
+        with closing(connect(db_path)) as conn:
+            row=conn.execute('SELECT profile_id,status,settings_json,results_json FROM vpn_connection_tests WHERE id=?',(job,)).fetchone()
+        if not row or row[0]!=identity or row[1] not in ('running','passed'):raise ValueError('The configuration does not belong to a verified test.')
+        settings=json.loads(row[2])
+        if row[1]=='passed':
+            verified=json.loads(row[3])
+            if verified.get('passed') is not True or verified.get('checks')!=checks:raise ValueError('The passing result does not match the verified test.')
+        if settings['provider']!=current['provider'] or sorted(settings['lan_subnets'])!=sorted(current['lan_subnets']):raise ValueError('The VPN settings changed during testing.')
+        import vpn_runtime,vpn_testing
+        vpn_runtime.write(db_path,profile_saved=True,saved_profile_id=identity,saved_test_id=job,
+                          saved_provider=current['provider'],saved_lan_subnets=current['lan_subnets'],
+                          saved_credential_volume=volume,saved_gluetun_image=image)
+        result={**result,'configuration_saved':True}
+        vpn_testing.update(db_path,job,'passed','VPN tests passed; configuration saved',result)
+        if data.get('activate',True):vpn_runtime.queue(db_path,data_dir,identity,phase='settings')
+        return status(db_path,data_dir)
 
 def discard(db_path, data_dir, session=None, identity=None):
     with _LOCK:

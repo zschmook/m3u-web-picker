@@ -8,13 +8,15 @@ from vpn_config import parse_wireguard,lan_networks
 TARGET='m3u-picker-setup'
 DB='/app/setup-data/m3u_picker.db'
 DATA='/app/setup-data'
-REMOTE='''import json,sys,vpn_testing
-p=json.load(sys.stdin);op=p['operation'];db='/app/setup-data/m3u_picker.db';data='/app/setup-data'
+PORT=9998
+REMOTE='''import json,sys,vpn_testing,vpn_config
+p=json.load(sys.stdin);op=p['operation'];db=p['db'];data=p['data']
 if op=='create':r=vpn_testing.create(db,data)
 elif op=='claim':r=vpn_testing.claim(db)
 elif op=='latest':r=vpn_testing.latest(db,data)
 elif op=='heartbeat':vpn_testing.heartbeat(db);r={}
 elif op=='update':vpn_testing.update(db,p['id'],p['status'],p['stage'],p.get('results'));r={}
+elif op=='save_profile':r=vpn_config.retain_verified_profile(db,data,p)
 else:raise ValueError('Unknown operation')
 print(json.dumps(r))'''
 
@@ -24,7 +26,26 @@ def run(args,body=None,timeout=30):
  if result.returncode:raise RuntimeError('A Docker or host probe command failed; inspect the local test environment.')
  return result.stdout.strip()
 
-def remote(operation,**data):return json.loads(run(['docker','exec','-i',TARGET,'python','-c',REMOTE],json.dumps({'operation':operation,**data})))
+def configure_target(port):
+ global TARGET,DB,DATA,PORT
+ if port not in (9998,9999):raise ValueError('Choose the setup port 9998 or production port 9999.')
+ PORT=port;TARGET='m3u-picker-setup' if port==9998 else 'm3u-picker'
+ DATA='/app/setup-data' if port==9998 else '/app/data';DB=DATA+'/m3u_picker.db'
+
+def validate_target(info):
+ env=dict(v.split('=',1) for v in info['Config']['Env'])
+ expected='m3u-picker-setup' if PORT==9998 else 'm3u-picker'
+ expected_data='/app/setup-data' if PORT==9998 else '/app/data'
+ if info.get('Name')!='/'+expected or TARGET!=expected or DATA!=expected_data or DB!=expected_data+'/m3u_picker.db':
+  raise ValueError('VPN test target does not match the selected instance.')
+ if env.get('M3U_PORT','9999')!=str(PORT) or env.get('M3U_DATA_DIR')!=expected_data:
+  raise ValueError('VPN test port or data directory does not match the selected instance.')
+ shared=info['HostConfig'].get('NetworkMode','').startswith('container:') and env.get('M3U_VPN_REQUIRED')=='true'
+ if PORT==9999 and not shared and not any(str(p.get('HostPort'))=='9999' for p in info['HostConfig'].get('PortBindings',{}).get('9999/tcp',[]) or []):
+  raise ValueError('Production container is not published on port 9999.')
+ return env
+
+def remote(operation,**data):return json.loads(run(['docker','exec','-i',TARGET,'python','-c',REMOTE],json.dumps({'operation':operation,'db':DB,'data':DATA,**data})))
 def stage(job,message):
  remote('update',id=job,status='running',stage=message);print(message,flush=True)
 
@@ -44,13 +65,12 @@ def tailnet_ip():
 def execute(job):
  if not re.fullmatch('[a-f0-9]{32}',job['id']) or not re.fullmatch('[a-f0-9]{64}',job['profile_id']):raise ValueError('Invalid test identity')
  inspect=json.loads(run(['docker','inspect',TARGET]))[0]
- env=dict(v.split('=',1) for v in inspect['Config']['Env'])
- if env.get('M3U_PORT')!='9998':raise ValueError('The test helper only supports the port-9998 setup instance.')
+ env=validate_target(inspect)
  image=inspect['Config']['Image'];lan=env.get('M3U_LAN_HOST','')
  subnets=lan_networks(job['lan_subnets']);local={}
- if lan and ipaddress.ip_address(lan).version==4 and any(ipaddress.ip_address(lan) in ipaddress.ip_network(n) for n in subnets):local['lan']='http://'+lan+':9998/api/vpn-config'
+ if lan and ipaddress.ip_address(lan).version==4 and any(ipaddress.ip_address(lan) in ipaddress.ip_network(n) for n in subnets):local['lan']='http://'+lan+':'+str(PORT)+'/api/vpn-config'
  tail=tailnet_ip()
- if tail:local['tailscale_host']='http://'+tail+':9998/api/vpn-config';subnets.append(tail+'/32')
+ if tail:local['tailscale_host']='http://'+tail+':'+str(PORT)+'/api/vpn-config';subnets.append(tail+'/32')
  glue='m3u-vpn-probe-'+job['id'];client='m3u-vpn-client-'+job['id'];owned=[]
  def cleanup():
   # Only the uniquely labelled containers created by this test are removed.
@@ -112,7 +132,18 @@ def execute(job):
   required=['tunnel_healthy','egress_changed','dns_resolved','internet_blocked_when_vpn_down','tunnel_recovers']
   required += [name+suffix for name in local for suffix in ('_reachable','_reachable_when_vpn_down')]
   report['passed']=all(report['checks'].get(name) is True for name in required)
-  remote('update',id=job['id'],status='passed' if report['passed'] else 'failed',stage='Connection test finished; app VPN is still not applied',results=report)
+  if report['passed']:
+   stage(job['id'],'Saving the verified configuration in private Docker storage')
+   import vpn_deployment
+   canonical,_=parse_wireguard(run(['docker','exec',TARGET,'python','-c',source]))
+   auth='[[roles]]\nname = "picker-host"\nroutes = ["PUT /v1/vpn/status"]\nauth = "apikey"\napikey = "'+key+'"\n'
+   volume=vpn_deployment.create_credentials(job['id'],canonical,auth,digest)
+   canonical='';auth=''
+   try:remote('save_profile',id=job['id'],profile_id=job['profile_id'],volume=volume,image=digest,results=report)
+   except Exception:
+    run(['docker','volume','rm',volume]);raise
+   report['configuration_saved']=True
+  else:remote('update',id=job['id'],status='failed',stage='Connection test failed; app networking is unchanged',results=report)
   print(json.dumps(report,indent=2),flush=True)
  except Exception as error:
   report['passed']=False;report['error']=str(error) if isinstance(error,(ValueError,RuntimeError)) else type(error).__name__
@@ -122,7 +153,10 @@ def execute(job):
  return report
 
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--watch',action='store_true');args=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--watch',action='store_true');p.add_argument('--port',type=int,choices=[9998,9999],default=9998);args=p.parse_args()
+ configure_target(args.port)
+ validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
+ print('Watching isolated VPN tests for port '+str(PORT)+'. Picker networking is unchanged.',flush=True)
  stop=threading.Event()
  def beat():
   while not stop.is_set():

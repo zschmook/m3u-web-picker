@@ -11,6 +11,7 @@ from flask import Response, request, stream_with_context
 
 from .ffmpeg import normalized_live_input_args, terminate
 import media_pipeline
+import stream_monitor
 
 
 _LOCK = threading.RLock()
@@ -171,4 +172,4 @@ def response_for(target: str) -> Response:
         "Content-Disposition": 'inline; filename="live.ts"',
         "X-Content-Type-Options": "nosniff",
     })
-    return response
+    return stream_monitor.attach(response, target, 'encoding', 'MPEG-TS', stream.pipeline_token)

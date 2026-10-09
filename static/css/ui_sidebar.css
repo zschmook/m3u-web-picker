@@ -318,7 +318,8 @@ body {
 
 .ui-settings-grid {
   display: grid;
-  max-width: 860px;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
 }
 
 .ui-settings-form {

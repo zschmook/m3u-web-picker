@@ -2,7 +2,7 @@
   "use strict";
 
   const PAGE_IDS = ["overview", "providers", "channels", "sports", "settings"];
-  const SETTINGS_PANEL_IDS = ["encoding", "dvr", "network", "lighting", "jellyfin", "epg", "devices", "custom-channels"];
+  const SETTINGS_PANEL_IDS = ["encoding", "streams", "dvr", "network", "lighting", "jellyfin", "epg", "devices", "custom-channels", "credits"];
   const state = {
     status: null,
     activePage: "overview",
@@ -200,6 +200,7 @@
     settings.innerHTML += `
       <div class="ui-settings-tabs" role="tablist">
         <button class="ui-settings-tab is-active" type="button" data-settings-panel="encoding">Encoding</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="streams">Streams</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="dvr">DVR</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="lighting">Movie Lighting</button>
@@ -207,6 +208,7 @@
         <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="devices">Devices</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="custom-channels">Custom Channels</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="credits">Open Source &amp; Credits</button>
       </div>
       <div class="ui-settings-grid">
         <section class="ui-modern-card ui-settings-panel is-active" data-settings-panel-content="encoding" aria-labelledby="uiEncodingTitle">
@@ -362,6 +364,10 @@
     settings.querySelector(".ui-settings-grid")?.append(epgPanel, devicesPanel);
     const customTemplate = document.getElementById('uiCustomChannelsTemplate');
     if (customTemplate) settings.querySelector('.ui-settings-grid').append(customTemplate.content.cloneNode(true));
+    const streamsTemplate = document.getElementById('uiStreamsTemplate');
+    if (streamsTemplate) settings.querySelector('.ui-settings-grid').append(streamsTemplate.content.cloneNode(true));
+    const creditsTemplate = document.getElementById('uiCreditsTemplate');
+    if (creditsTemplate) settings.querySelector('.ui-settings-grid').append(creditsTemplate.content.cloneNode(true));
     root.appendChild(settings);
 
     settings.querySelectorAll("[data-settings-panel]").forEach(button => button.addEventListener("click", () => {
@@ -459,6 +465,7 @@
     });
     document.body.classList.remove("ui-sidebar-open");
     if (settingsPanel) showSettingsPanel(settingsPanel);
+    window.dispatchEvent(new CustomEvent('ui:page', {detail: {page: target}}));
     const hash = `#${target}`;
     if (location.hash !== hash) {
       if (replaceHash) history.replaceState(null, "", hash);
@@ -475,6 +482,7 @@
     document.querySelectorAll("#uiPage-settings [data-settings-panel-content]").forEach(item => {
       item.classList.toggle("is-active", item.dataset.settingsPanelContent === panel);
     });
+    window.dispatchEvent(new CustomEvent('ui:settings-panel', {detail: {panel}}));
   }
 
   function bindNavigation() {

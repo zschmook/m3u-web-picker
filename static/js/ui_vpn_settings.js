@@ -24,13 +24,17 @@
   document.addEventListener('drop',event=>{if(isFileDrag(event))event.preventDefault();});
   async function request(options={},path='/api/vpn-config'){
     const response=await fetch(path,{cache:'no-store',...options,headers:{...options.headers,'X-VPN-Session':session}});
-    const data=await response.json();if(!response.ok){const error=Error(data.error||'VPN request failed.');error.status=response.status;throw error;}return data;
+    let data;
+    try{data=JSON.parse(await response.text());}
+    catch{const error=Error(`The VPN service returned an unexpected response (HTTP ${response.status}). Reload the page and try again.`);error.status=response.status;throw error;}
+    if(!data||typeof data!=='object'||Array.isArray(data)){const error=Error(`The VPN service returned an unexpected response (HTTP ${response.status}).`);error.status=response.status;throw error;}
+    if(!response.ok){const error=Error(typeof data.error==='string'?data.error:'VPN request failed.');error.status=response.status;throw error;}return data;
   }
   window.mountVpnConfiguration=()=>{
     for(const host of document.querySelectorAll('[data-vpn-config]:not([data-mounted])')){
       host.dataset.mounted='true';host.classList.add('vpn-config-card');
       host.innerHTML=`<label class="vpn-choice"><input type="checkbox" data-vpn-choice><span><strong>Use a VPN</strong><small>Optional · connection test</small></span></label>
-      <p data-vpn-live class="vpn-help" role="status" hidden></p><div data-vpn-fields hidden><p class="vpn-help">Drag and drop your WireGuard configuration anywhere in this VPN box, or use Choose File. We’ll identify the provider when possible and test it automatically. Test uploads stay in temporary memory for up to 20 minutes. Applying the VPN saves its configuration privately for automatic startup.</p>
+      <p data-vpn-live class="vpn-help" role="status" hidden></p><div data-vpn-fields hidden><p class="vpn-help">Drag and drop your WireGuard configuration anywhere in this VPN box, or use Choose File. We’ll identify the provider when possible and test it automatically. Unverified uploads stay in temporary memory for up to 20 minutes. After the test passes, the verified configuration is saved privately and the app connects automatically. Use the VPN power button to turn it on or off.</p>
       <form class="vpn-form">
         <label class="vpn-field vpn-provider-field"><span>VPN provider</span><select name="provider"><option value="">Choose a VPN provider</option></select></label>
         <div class="vpn-field"><label for="vpnUpload">WireGuard configuration file</label><strong class="vpn-drop-prompt">Drag and drop your config file here</strong><div class="vpn-upload"><input id="vpnUpload" name="profile" type="file" accept=".conf,.config,.ini"><span data-vpn-indicator role="img" aria-label="No configuration selected"></span><button type="button" data-vpn-clear aria-label="Clear VPN configuration" title="Clear configuration" hidden>×</button></div></div>
@@ -77,10 +81,10 @@
         indicator.className=running?'vpn-spinner':passed?'vpn-passed':'';indicator.textContent=passed?'✓':draft.error?'!':'';
         indicator.setAttribute('aria-label',running?'Testing VPN':passed?'VPN tests passed':draft.error?'VPN test failed':'No configuration selected');
         message.classList.toggle('vpn-success',passed);
-        message.textContent=draft.error||(passed?'VPN tests passed':running?(draft.test?.stage||'Uploading and testing VPN configuration…'):draft.test?.status==='failed'?'VPN tests failed. Check your configuration and try again.':'Choose a WireGuard configuration file to test the VPN.');
+        message.textContent=draft.error||(passed?(draft.test?.results?.configuration_saved?'VPN tests passed — configuration saved':'VPN tests passed'):running?(draft.test?.stage||'Uploading and testing VPN configuration…'):draft.test?.status==='failed'?'VPN tests failed. Check your configuration and try again.':runtime?.profile_saved?(runtime.app_vpn_active?'Verified VPN configuration saved and active.':'Verified VPN configuration saved.'):'Choose a WireGuard configuration file to test the VPN.');
         const next=document.getElementById('setupNext');if(next){const disabled=!window.vpnWizard.canContinue();next.dataset.modeDisabled=String(disabled);next.disabled=disabled;}
         results.replaceChildren();const note=document.createElement('p');note.className='vpn-help';
-        note.textContent='Tests run in an isolated tunnel. Your app’s connection has not been changed.';results.append(note);
+        note.textContent='Tests run in an isolated tunnel. The app connects through the VPN after its tests pass and the saved configuration is applied.';results.append(note);
         if(!helper&&running){const info=document.createElement('p');info.className='vpn-help';info.textContent='Waiting for the VPN test service to become available.';results.append(info);}
         if(draft.test?.results?.checks){const list=document.createElement('ul');for(const [key,label] of Object.entries(labels)){if(!(key in draft.test.results.checks))continue;const item=document.createElement('li'),marker=document.createElement('span'),passed=draft.test.results.checks[key]===true;marker.className=passed?'vpn-check-pass':'vpn-check-fail';marker.textContent=passed?'✓':'✕';marker.setAttribute('role','img');marker.setAttribute('aria-label',passed?'Passed':'Failed');item.append(marker,document.createTextNode(' '+label));list.append(item);}results.append(list);}
       };

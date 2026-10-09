@@ -2810,7 +2810,7 @@ def validate_sports_cycle_trace(actual: list[str]) -> dict:
     }
 
 
-def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> dict:
+def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True, force_api_refresh: bool = False) -> dict:
     settings = sports.get_settings(DB_PATH)
     if not settings.get("enabled"):
         raise SportsScanError("Turn on Sports Automation before updating sports channels.")
@@ -2844,6 +2844,7 @@ def run_sports_scan(*, trigger: str = "manual", refresh_source: bool = True) -> 
         schedule_api_result = sports.refresh_schedule_api_if_due(
             DB_PATH,
             cancel_check=cancel_check,
+            **({'force': True} if force_api_refresh else {}),
         )
         cycle_trace.append("schedule_api")
 

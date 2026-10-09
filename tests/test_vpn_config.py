@@ -7,6 +7,7 @@ from unittest.mock import patch
 from flask import Flask
 import core
 import vpn_config
+import vpn_runtime
 from api.vpn import register_vpn_routes
 
 PRIVATE=base64.b64encode(b'A'*32).decode();PUBLIC=base64.b64encode(b'B'*32).decode()
@@ -63,6 +64,27 @@ class VpnConfigTests(unittest.TestCase):
   self.assertEqual(vpn_config.status(self.db,self.root)['profile_id'],before['profile_id'])
  def test_status_has_no_config_by_default(self):
   self.assertFalse(vpn_config.status(self.db,self.root)['configuration_present'])
+ def test_first_settings_opt_in_without_activation_returns_json_and_uploads(self):
+  app=Flask(__name__);register_vpn_routes(app)
+  with patch.multiple(core,DB_PATH=self.db,DATA_DIR=self.root),patch.object(vpn_runtime,'required',return_value=False):
+   client=app.test_client();client.environ_base['HTTP_X_VPN_SESSION']='a'*32
+   response=client.post('/api/vpn-preference',json={'enabled':True})
+   self.assertEqual(response.status_code,200);self.assertEqual(response.json['status'],'not_applied')
+   for endpoint in ['/api/vpn-config','/api/vpn-test']:
+    response=client.get(endpoint)
+    self.assertEqual(response.status_code,200);self.assertTrue(response.is_json)
+   response=client.patch('/api/vpn-config',json={'provider':'protonvpn','lan_subnets':['10.0.0.0/24'],'wireguard_config':PROFILE})
+   self.assertEqual(response.status_code,200);self.assertTrue(response.json['configuration_present'])
+   self.assertEqual(response.json['activation'],'not_applied');self.assertNotIn(PRIVATE,response.text)
+   response=client.post('/api/vpn-test')
+   self.assertEqual(response.status_code,202);self.assertTrue(response.is_json)
+   self.assertEqual(response.json['test']['status'],'pending')
+ def test_status_defaults_for_existing_preference_only_row_preserve_fields(self):
+  vpn_runtime.write(self.db,feature_enabled=True)
+  self.assertEqual(vpn_config.status(self.db,self.root)['activation'],'not_applied')
+  self.assertTrue(vpn_runtime.status(self.db)['enabled'])
+  vpn_runtime.write(self.db,status='failed',error='Previous activation failed')
+  self.assertEqual(vpn_runtime.status(self.db)['status'],'failed')
  def test_provider_resource_catalog_matches_supported_options(self):
   resources=json.loads((Path(__file__).resolve().parents[1]/'static/vpn-provider-links.json').read_text())['providers']
   self.assertEqual(set(resources),set(vpn_config.PROVIDERS))

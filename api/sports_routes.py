@@ -67,7 +67,10 @@ def register_sports_routes(app):
     @app.post("/api/sports/schedule-api/refresh")
     def api_refresh_sports_schedule_api():
         try:
-            result = sports.refresh_schedule_api_if_due(core.DB_PATH, force=True)
+            scan_result = core.run_sports_scan(trigger='manual', force_api_refresh=True)
+            result = scan_result.get('schedule_api') or {}
+        except core.SportsScanError as exc:
+            return jsonify(error=str(exc)), 409
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except Exception as exc:
@@ -75,6 +78,10 @@ def register_sports_routes(app):
             return jsonify(error="Could not refresh schedule API."), 500
         return jsonify(
             result=result,
+            scan_result=scan_result,
+            sports=core.enrich_sports_status(sports.status_payload(core.DB_PATH)),
+            channels=core.combined_channels_for_api(),
+            selected_ids=core.selected_ids_payload(),
             schedule_api=sports.schedule_api_status_payload(core.DB_PATH),
         )
 

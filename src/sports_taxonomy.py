@@ -42,8 +42,8 @@ SCHEDULE_API_SOURCE = "api-sports-baseball"  # backward-compatible MLB constant
 SCHEDULE_API_LEAGUE_ID = "mlb"               # backward-compatible MLB constant
 SCHEDULE_API_REMOTE_LEAGUE_ID = 1             # backward-compatible MLB constant
 
-# Schedule API support is deliberately explicit. Sports/leagues not listed
-# here continue through the existing provider + XMLTV matcher with no API call.
+# Stable initial adapters; selected basketball, hockey and volleyball leagues
+# are also resolved against the cached API-SPORTS coverage catalogues.
 # One API-SPORTS key works across these products, but each product has its own
 # host and response shape.
 SCHEDULE_API_DATASETS = {
@@ -85,12 +85,25 @@ SCHEDULE_API_DATASETS = {
     },
 }
 
+# Verified current competition IDs. Cached coverage expands these automatically.
+for _league, _label, _product, _remote in (
+    ('nba', 'NBA', 'basketball', 12), ('nhl', 'NHL', 'hockey', 57),
+    ('ahl', 'AHL', 'hockey', 58), ('echl', 'ECHL', 'hockey', 59),
+    ('sphl', 'SPHL', 'hockey', 60), ('fphl', 'FPHL', 'hockey', 260),
+):
+    SCHEDULE_API_DATASETS[_league] = dict(id=_league, label=_label, product=_product,
+        source='api-sports-' + _product, base_url=f'https://v1.{_product}.api-sports.io',
+        league_id=_league, remote_league_id=_remote, sport_id=_product,
+        season_mode='winter', request_mode='standard_games')
+
 SCHEDULE_API_DATASET_BY_LEAGUE = {
     value["league_id"]: key for key, value in SCHEDULE_API_DATASETS.items()
 }
 SCHEDULE_API_DATASETS_BY_SPORT = {
     "baseball": ("mlb",),
     "football": ("nfl", "ncaa"),
+    "basketball": ("nba",),
+    "hockey": ("nhl", "ahl", "echl", "sphl", "fphl"),
 }
 
 SCOPE_TYPES = {"league", "team", "conference", "sport"}

@@ -1,0 +1,33 @@
+<template id="uiCreditsTemplate">
+  <section class="ui-settings-panel ui-settings-collection" data-settings-panel-content="credits" aria-labelledby="uiCreditsTitle">
+    <section class="ui-modern-card">
+      <div class="ui-card-heading"><div><span id="uiCreditsTitle">Open Source &amp; Credits</span><small>Thanks to the people and projects that make M3U Web Picker possible.</small></div></div>
+      <p>Original copyright and license notices are retained below. Each dependency keeps its own license.</p>
+      <p><a href="/static/licenses/generated/third-party-notices.zip" download>Download all bundled notices</a> · <a href="https://github.com/zschmook/m3u-web-picker" target="_blank" rel="noopener noreferrer">M3U Web Picker source</a></p>
+      <div class="ui-credits-list">
+        <details open><summary>Interface, media and VPN</summary>
+          <p><strong>Bootstrap 5.3.3</strong> — MIT. Copyright © 2011–2024 The Bootstrap Authors. <a href="/static/licenses/upstream/bootstrap-5.3.3.txt">Full license</a> · <a href="https://github.com/twbs/bootstrap/tree/v5.3.3" target="_blank" rel="noopener noreferrer">Source</a></p>
+          <p><strong>Popper 2.11.8</strong> (included in Bootstrap's JavaScript bundle) — MIT. <a href="/static/licenses/upstream/popper-2.11.8.txt">Full license and copyright</a> · <a href="https://github.com/floating-ui/floating-ui/tree/v2.x" target="_blank" rel="noopener noreferrer">Source</a></p>
+          <p><strong>FFmpeg and Comskip</strong> — the Debian builds included in Docker use GPL-2.0-or-later. Their exact versions, package copyright notices and corresponding Debian source links are in the installed inventory below. <a href="https://ffmpeg.org/" target="_blank" rel="noopener noreferrer">FFmpeg</a> · <a href="https://github.com/erikkaashoek/Comskip" target="_blank" rel="noopener noreferrer">Comskip</a></p>
+          <p><strong>Gluetun</strong> (optional VPN sidecar) — MIT. Copyright © 2018 Quentin McGaw. <a href="/static/licenses/upstream/gluetun.txt">Full license</a> · <a href="https://github.com/qdm12/gluetun" target="_blank" rel="noopener noreferrer">Source</a>. The separately supplied sidecar image retains its own component notices.</p>
+          <p><strong>Google Cast Web Sender SDK</strong> — loaded from Google when available; subject to <a href="https://developers.google.com/cast/docs/terms" target="_blank" rel="noopener noreferrer">Google's SDK terms</a>.</p>
+          <p><strong>PyInstaller</strong> packages the downloadable installers. Its bootloader uses GPL-2.0-or-later with the Bootloader Exception; runtime hooks use Apache-2.0. <a href="/static/licenses/upstream/pyinstaller-6.16.0.txt">License and exception</a> · <a href="https://github.com/pyinstaller/pyinstaller" target="_blank" rel="noopener noreferrer">Project</a>. New installers include their exact build notices; run the installer with <code>--credits</code> to read them.</p>
+        </details>
+        <details><summary>Data, services and artwork</summary>
+          <p><strong>IPTV-org</strong> supplies the optional public test playlist (Unlicense). <a href="/static/licenses/upstream/iptv-org.txt">License</a> · <a href="https://github.com/iptv-org/iptv" target="_blank" rel="noopener noreferrer">Project</a>. Playlist licensing does not grant rights to the channels' broadcasts.</p>
+          <p><strong>Free-TV/IPTV</strong> is an optional public lineup source. <a href="https://github.com/Free-TV/IPTV" target="_blank" rel="noopener noreferrer">Project and terms</a>.</p>
+          <p><strong>IPTV-EPG.org</strong> supplies optional public guide data and channel logos. <a href="https://iptv-epg.org/" target="_blank" rel="noopener noreferrer">Service</a>.</p>
+          <p><strong>ESPN</strong> supplies sports metadata and team/league artwork; <strong>API-SPORTS</strong> supplies optional authenticated schedules. <a href="https://www.espn.com/" target="_blank" rel="noopener noreferrer">ESPN</a> · <a href="https://api-sports.io/" target="_blank" rel="noopener noreferrer">API-SPORTS</a>.</p>
+          <p>League, team, broadcaster and organization names, logos and trademarks belong to their respective owners. These assets are credited separately from open-source software; attribution does not grant a reuse license or imply endorsement.</p>
+          <p><a href="/static/icons/leagues/sources.json">Every bundled league logo and its source</a> · <a href="/static/icons/hockey/sources.json">Every bundled hockey logo and its source</a></p>
+          <p>Provider playlists, XMLTV listings and channel logos supplied by users remain the property of their respective creators.</p>
+        </details>
+      </div>
+    </section>
+    <section class="ui-modern-card">
+      <div class="ui-card-heading"><div><span>Installed software and full licenses</span><small>Generated from this image's installed packages, including indirect dependencies.</small></div></div>
+      <div id="uiCreditsInventory">Open this tab to load the installed inventory.</div>
+      <p id="uiCreditsStatus" role="status" aria-live="polite"></p>
+    </section>
+  </section>
+</template>

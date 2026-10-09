@@ -1749,18 +1749,27 @@ async function forceSportsScheduleApiRefresh() {
     button.disabled = true;
     button.textContent = "Refreshing…";
   }
+  sportsState.scan = {running:true, started_at:new Date().toISOString(), stage:'Refreshing API schedules and matching streams', trigger:'manual'};
+  applySportsState();
+  scheduleSportsStatusPoll(1000);
   try {
     const response = await fetch("/api/sports/schedule-api/refresh", {method: "POST"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not refresh schedule API.");
     sportsState.schedule_api = data.schedule_api || sportsState.schedule_api || {};
+    if (data.sports) sportsState = data.sports;
+    applyChannelPayload(data);
+    applySportsState();
+    if (data.scan_result?.message) setStatus(data.scan_result.message);
     const warning = data.result?.warning || "";
     setSportsError(warning ? `Schedule API refresh warning: ${warning}` : "");
   } catch (error) {
+    await pollSportsStatus({reschedule:false});
     setSportsError(`Could not refresh schedule API. ${error.message}`);
   } finally {
     if (button) button.textContent = "Force Schedule Refresh";
     renderSportsScheduleApi();
+    scheduleSportsStatusPoll();
   }
 }
 

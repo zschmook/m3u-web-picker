@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
+# Preserve exact installed-package license texts, copyrights and source links.
+RUN python scripts/build_third_party_notices.py
+
 ARG APP_VERSION=development
 LABEL org.opencontainers.image.source="https://github.com/zschmook/m3u-web-picker" \
     org.opencontainers.image.version="${APP_VERSION}"

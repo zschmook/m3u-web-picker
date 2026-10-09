@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import urllib.parse
+import urllib.error
 import urllib.request
 from collections import defaultdict
 from contextlib import closing
@@ -43,6 +44,9 @@ def _schedule_api_rule_league_id(rule: dict, catalog_by_key: dict) -> str:
 def schedule_api_request_plan(db_path: Path | str) -> dict:
     """Collapse rules into the minimum API-SPORTS schedule datasets."""
     settings = _s.get_settings(db_path)
+    from .schedule_coverage import available_datasets
+    available = available_datasets(db_path)
+    by_league = {dataset['league_id']: key for key, dataset in available.items()}
     rules = [rule for rule in _s.get_rules(db_path) if rule.get("enabled")]
     catalog = _s.catalog_payload(db_path)
     catalog_by_key = {(item["scope_type"], item["id"]): item for item in catalog}
@@ -53,7 +57,7 @@ def schedule_api_request_plan(db_path: Path | str) -> dict:
     reference_datasets: set[str] = set()
 
     if settings.get("everything_mode"):
-        dataset_ids.update(_s.SCHEDULE_API_DATASETS)
+        dataset_ids.update(available)
         mixed_rules.append("Everything Mode")
 
     for rule in rules:
@@ -65,12 +69,12 @@ def schedule_api_request_plan(db_path: Path | str) -> dict:
 
         if scope_type == "sport":
             matched_datasets.update(
-                _s.SCHEDULE_API_DATASETS_BY_SPORT.get(scope_id, ())
+                key for key, dataset in available.items() if dataset['sport_id'] == scope_id
             )
             mixed = bool(matched_datasets)
         else:
             league_id = _schedule_api_rule_league_id(rule, catalog_by_key)
-            dataset_id = _s.SCHEDULE_API_DATASET_BY_LEAGUE.get(league_id)
+            dataset_id = by_league.get(league_id)
             if dataset_id:
                 matched_datasets.add(dataset_id)
                 if scope_type == "conference" and dataset_id == "ncaa":
@@ -86,8 +90,8 @@ def schedule_api_request_plan(db_path: Path | str) -> dict:
             legacy_rules.append(label)
 
     datasets = [
-        dict(_s.SCHEDULE_API_DATASETS[key])
-        for key in _s.SCHEDULE_API_DATASETS
+        dict(available[key])
+        for key in available
         if key in dataset_ids
     ]
     return {
@@ -106,6 +110,8 @@ def schedule_api_request_plan(db_path: Path | str) -> dict:
 
 
 def _schedule_api_dataset_season(dataset: dict, local_now: datetime) -> int:
+    if dataset.get('season_mode') == 'winter':
+        return local_now.year - 1 if local_now.month <= 6 else local_now.year
     if dataset.get("season_mode") == "start_year":
         return local_now.year - 1 if local_now.month <= 2 else local_now.year
     return local_now.year
@@ -282,6 +288,10 @@ def _schedule_api_request_key(
     if dataset.get("request_mode") == "american_football":
         parameters["league"] = str(dataset["remote_league_id"])
         parameters["season"] = str(season)
+    if dataset.get('request_mode') == 'standard_games':
+        parameters['league'] = str(dataset['remote_league_id'])
+        # League/year distinguish local caches even though the API query is date-only.
+        parameters['season'] = str(season)
     payload = {
         "provider": "api_sports",
         "product": str(dataset.get("product") or ""),
@@ -305,6 +315,9 @@ def _schedule_api_dataset_games_url(
     path = parsed.path.rstrip("/")
     path = f"{path}/games" if path else "/games"
     query = {"date": schedule_date.isoformat(), "timezone": timezone}
+    # The standard game products accept date as a complete filter. Adding
+    # league requires season and can reject current-season data on free plans.
+    # Filter the returned day by remote_league_id in the existing parser.
     if dataset.get("request_mode") == "american_football":
         query["league"] = str(dataset["remote_league_id"])
         query["season"] = str(season)
@@ -454,6 +467,7 @@ def _fetch_schedule_api_dataset_date(
     timezone: str,
     fetched_on: str,
     cancel_check: _s.CancelCheck = None,
+    _open_request=None,
 ) -> dict:
     _s._raise_if_cancelled(cancel_check)
     url = _schedule_api_dataset_games_url(
@@ -473,7 +487,7 @@ def _fetch_schedule_api_dataset_date(
         headers={"x-apisports-key": api_key},
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with (_open_request or urllib.request.urlopen)(request, timeout=30) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
             if len(raw) > 8 * 1024 * 1024:
                 raise ValueError(
@@ -485,10 +499,16 @@ def _fetch_schedule_api_dataset_date(
             minute_remaining_header = response.headers.get(
                 "X-RateLimit-Remaining"
             )
+    except urllib.error.HTTPError as exc:
+        from .schedule_api_requests import _read_http_error
+        detail=_read_http_error(exc,api_key=api_key)
+        raise ValueError(f"Could not fetch {dataset['label']} schedule for {schedule_date.isoformat()} ({detail}).") from exc
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(
             f"Could not fetch {dataset['label']} schedule for "
-            f"{schedule_date.isoformat()}."
+            f"{schedule_date.isoformat()} ({type(exc).__name__})."
         ) from exc
     _s._raise_if_cancelled(cancel_check)
     try:
@@ -497,7 +517,9 @@ def _fetch_schedule_api_dataset_date(
         raise ValueError("Schedule API returned invalid JSON.") from exc
     errors = payload.get("errors") if isinstance(payload, dict) else None
     if errors:
-        raise ValueError("Schedule API reported an error.")
+        from .schedule_api_requests import _api_error_text
+        detail=_api_error_text(errors,api_key=api_key)
+        raise ValueError('Schedule API reported an error'+(': '+detail if detail else '.'))
     games = payload.get("response") if isinstance(payload, dict) else None
     if not isinstance(games, list):
         raise ValueError("Schedule API did not return a games list.")
@@ -913,11 +935,8 @@ def schedule_api_events_for_window(
             < window_end + timedelta(hours=18)
         ):
             continue
-        dataset_id = _s.SCHEDULE_API_DATASET_BY_LEAGUE.get(
-            str(row["league_id"]),
-            "",
-        )
-        dataset = _s.SCHEDULE_API_DATASETS.get(dataset_id, {})
+        dataset = next((value for value in datasets if value['league_id'] == str(row['league_id'])), {})
+        dataset_id = dataset.get('id', '')
         output.append(
             {
                 "api_source": str(row["source"]),

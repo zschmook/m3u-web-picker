@@ -44,6 +44,11 @@
 3. Consolidate persisted application settings into the shared `data/config.json` document.
 4. Split oversized modules and tests (`core.py`, `static/js/app.js`, `static/js/ui_sidebar.js`, and `tests/test_sports.py`) along existing domain boundaries.
 
+## Sports API follow-up
+
+- [x] Show selected API-covered competitions, request current basketball/hockey schedules by date with local league filtering, and cross-reference provider streams during a refresh.
+- [ ] Harden API quota handling, including per-product minute limits and retries. The nine-dataset production verification required a cache-aware retry for one rate-limited FPHL date.
+
 ## Deferred device work
 
 - Roku manual IP entry and multiple-device behavior are deferred until a Roku stick is available for end-to-end testing. When resumed, distinguish a missing LAN relay configuration from a completed scan that found no Roku devices.

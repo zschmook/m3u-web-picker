@@ -305,6 +305,7 @@ def _fetch_schedule_api_dataset_date(
     API-NFL/API-NCAA request envelope is specialized here.
     """
     if dataset.get("request_mode") != "american_football":
+        extra = {'_open_request': _open_api_nfl} if dataset.get('request_mode') == 'standard_games' else {}
         return _base._fetch_schedule_api_dataset_date(
             db_path,
             dataset=dataset,
@@ -314,6 +315,7 @@ def _fetch_schedule_api_dataset_date(
             timezone=timezone,
             fetched_on=fetched_on,
             cancel_check=cancel_check,
+            **extra,
         )
     return _fetch_american_football_dataset_date(
         db_path,

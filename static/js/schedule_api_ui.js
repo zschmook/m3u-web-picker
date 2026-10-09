@@ -135,7 +135,7 @@
       element.textContent.includes("Normal Master Update and Update Now reuse")
     );
     if (help) {
-      help.textContent = "Normal Master Update and Update Now reuse a valid same-day schedule cache. Refresh API schedules deliberately bypasses that cache for planned API-backed datasets. Team/conference selections are filtered locally from the minimum unique datasets; unsupported sports continue through provider/EPG matching without an API call.";
+      help.textContent = "Covered sports selections automatically appear here. Refresh API schedules fetches their schedules, cross-references provider streams, and rebuilds sports channels. Normal updates reuse a valid same-day schedule cache. Teams in the same competition share a dataset; competitions without API coverage keep provider/EPG matching.";
     }
   }
 
@@ -168,7 +168,7 @@
 
     if (refreshButton) {
       refreshButton.textContent = "Refresh API schedules";
-      refreshButton.title = "Bypass the same-day cache and refetch every planned API-backed schedule dataset.";
+      refreshButton.title = "Refresh schedules for covered selections, cross-reference provider streams, and rebuild sports channels.";
     }
 
     if (!api.enabled) {
@@ -231,6 +231,8 @@
   function renderScheduleApiDatasetTable(api) {
     const target = document.getElementById("sportsScheduleApiList");
     if (!target) return;
+    const heading = target.closest('table')?.querySelector('thead th:last-child');
+    if (heading) heading.textContent = 'Cached games';
     const entries = scheduleApiEntries(api);
     if (!entries.length) return;
 

@@ -9,7 +9,10 @@ def _db(path):
 
 def read(path):
  with closing(_db(path)) as c:row=c.execute('SELECT payload FROM vpn_activation WHERE id=1').fetchone()
- return json.loads(row[0]) if row else {'requested':False,'status':'not_applied'}
+ # A settings-only opt-in can exist before a configuration is applied.
+ # Keep the same defaults for that saved state as for a new installation.
+ defaults={'requested':False,'status':'not_applied'}
+ return {**defaults,**json.loads(row[0])} if row else defaults
 
 def write(path,**fields):
  with closing(_db(path)) as c:
@@ -47,13 +50,15 @@ def healthy():
 
 def status(path):
  data=read(path);data.pop('profile_id',None)
- data['app_vpn_active']=healthy();data['memory_only']=not bool(data.get('persistent'))
+ data['app_vpn_active']=healthy();data['memory_only']=not bool(data.get('persistent') or data.get('profile_saved'))
  data['desired_on']=bool(data.get('desired_on',data.get('requested') or required()))
  data['network_protected']=required()
- data['configured']=bool(data.get('persistent'))
+ data['configured']=bool(data.get('persistent') or data.get('profile_saved'))
  data['enabled']=feature_enabled(data)
  data['control_available']=data['configured'] and time.time()-data.get('control_heartbeat',0)<20
- if data.get('control_status') in ('pending','applying'):data['status']='switching'
+ if data.get('status') in ('pending','applying'):
+  data['control_status']=data['status'];data['status']='switching'
+ elif data.get('control_status') in ('pending','applying'):data['status']='switching'
  elif required():data['status']='active' if data['desired_on'] and data['app_vpn_active'] else 'disconnected' if data['desired_on'] else 'switching'
  elif data['configured']:data['status']='disconnected' if data['desired_on'] else 'off'
  return data
@@ -68,10 +73,11 @@ def set_enabled(path, enabled):
   c.execute('BEGIN IMMEDIATE');row=c.execute('SELECT payload FROM vpn_activation WHERE id=1').fetchone();data=json.loads(row[0]) if row else {}
   previous=feature_enabled(data)
   if data.get('control_status') in ('pending','applying'):raise ValueError('Wait for the current connection change to finish.')
-  switching=bool(data.get('persistent')) and ((enabled and not previous and not required()) or (not enabled and required()))
+  configured=bool(data.get('persistent') or data.get('profile_saved'))
+  switching=configured and ((enabled and not previous and not required()) or (not enabled and required()))
   if switching and time.time()-data.get('control_heartbeat',0)>=20:raise ValueError('VPN connection manager is unavailable. The setting has not changed.')
   data.update(feature_enabled=enabled,updated_at=time.time())
-  if not enabled or (enabled and not previous and data.get('persistent')):data['desired_on']=enabled
+  if not enabled or (enabled and not previous and configured):data['desired_on']=enabled
   if switching:data.update(control_id=uuid.uuid4().hex,control_status='pending',control_error='')
   elif not enabled:data.update(control_status='applied',control_error='')
   c.execute('INSERT INTO vpn_activation VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(json.dumps(data),));c.commit()
@@ -86,7 +92,7 @@ def request_control(path, enabled):
  if type(enabled) is not bool:raise ValueError('Choose VPN on or off.')
  with closing(_db(path)) as c:
   c.execute('BEGIN IMMEDIATE');row=c.execute('SELECT payload FROM vpn_activation WHERE id=1').fetchone();data=json.loads(row[0]) if row else {}
-  if not data.get('persistent'):raise ValueError('Apply a VPN configuration before using the power button.')
+  if not (data.get('persistent') or data.get('profile_saved')):raise ValueError('Pass the VPN test and save a configuration before using the power button.')
   if not feature_enabled(data):raise ValueError('Enable Use a VPN in Settings before using the power button.')
   if time.time()-data.get('control_heartbeat',0)>=20:raise ValueError('VPN connection manager is unavailable. Try again when it is running.')
   if data.get('control_status') in ('pending','applying'):raise ValueError('The connection is already switching.')

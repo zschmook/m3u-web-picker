@@ -72,7 +72,7 @@ Team-specific selections can expand to preferred home/away/national feeds. Broad
 
 ### Sports schedule API
 
-API-SPORTS integration is optional. The current adapters support canonical schedules for MLB, NFL, and NCAA Football. Unsupported sports continue using provider/XMLTV matching.
+API-SPORTS integration is optional. Enabled selections with coverage automatically appear in the schedule dataset list. MLB, NFL, NCAA Football, NBA, NHL, AHL, ECHL, SPHL and FPHL are mapped directly. The app also checks cached basketball, hockey and volleyball competition catalogues during refresh and uses unambiguous matches with recent season coverage. Normal updates cache catalogue checks for seven days; Refresh API schedules rechecks coverage, fetches the planned schedules, cross-references provider streams and rebuilds sports channels. Overlapping league/team selections share a dataset. Unsupported or ambiguous competitions retain provider/XMLTV matching. The cached-games count includes all retained dates.
 
 ### Jellyfin
 
@@ -145,6 +145,18 @@ When encoding is enabled under **Settings → Encoding**, `/playlist/channels.m3
 Encoding is disabled by default. Enabling it runs a functional hardware check. Supported Docker acceleration can use NVIDIA NVENC, Intel QSV, or VA-API when passed through successfully; otherwise CPU `libx264` fallback requires an explicit performance-risk acknowledgement. Browser fragmented MP4, shared MPEG-TS, and shared HLS are separate sessions, so different client types can open separate FFmpeg processes for the same channel.
 
 ## 9. TV Guide and LAN playback
+
+### Live stream monitor
+
+Open **Settings → Streams** to see media currently served by Picker. The tab shows the configured LAN IP, last verified VPN exit IP, internet route, channel, connected client address/player type, delivery type, elapsed time, and transfer rate. Direct relay copies provider bytes through Picker; FFmpeg passthrough remuxes without encoding; FFmpeg encoding processes the media.
+
+CPU and RAM percentages show Picker container usage where Docker exposes its resource counters, with the measurement scope printed below each value. RAM excludes reclaimable inactive file cache. Without container counters, the values cover the Docker host or VM. GPU usage covers the busiest exposed GPU, including other applications using it; it displays **Unavailable** when GPU telemetry is not accessible. CPU needs two samples before its first percentage appears.
+
+**Settings → Open Source & Credits** lists software, data and artwork credits. Expand the installed inventory for exact package versions, full license/copyright notices and source links, or download all bundled notices as a ZIP.
+
+Each stream reports **MB/s** (megabytes per second) and **Mbps** (megabits per second), averaged over the last ten seconds. **Traffic by client** combines the observed connections for each address/player type and shows data served. HLS requests are grouped into stream observations and remain listed for thirty seconds after the last request. Shared addresses and reverse proxies can represent several devices; untrusted forwarded headers are not used to identify viewers.
+
+The monitor is passive and polls only while its tab is visible. It never opens a provider probe. Direct playback outside Picker cannot be observed, and the session counts cover Picker rather than the provider account's total usage. Recent response closures and HLS inactivity stay in bounded memory until the app restarts; a closure alone does not distinguish stopping playback from a network disconnect. Provider URLs and credentials are not returned by the monitor API.
 
 The built-in TV Guide displays the curated lineup and program windows. Provider URLs and credentials remain server-side; browser/Cast/Roku/HDHomeRun playback uses Picker-owned routes.
 

@@ -2,6 +2,8 @@
 
 `install.py` is the single source for the Windows, macOS, and Linux Docker installers. It uses only the Python standard library. Release builds freeze it into platform-native executables so the target machine does not need Python.
 
+Run a packaged installer with `--credits` to print its bundled Python and PyInstaller license notices without installing or changing any containers. Application dependency and artwork credits are in **Settings → Open Source & Credits**.
+
 All three installers:
 
 - require an installed and running Docker-compatible Linux container engine with Docker Compose v2;

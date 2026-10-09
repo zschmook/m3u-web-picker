@@ -23,7 +23,7 @@
   max-width: 34rem;
   font-size: 0.76rem;
   line-height: 1.3;
-  color: var(--bs-secondary-color);
+  color: var(--ui-muted, #adb5bd);
   white-space: normal;
 }
 

@@ -34,9 +34,11 @@ from .movie_channels import register_movie_channel_routes
 from .roku_app import register_roku_app_routes
 from .ui_status import register_ui_status_routes
 from .vpn import register_vpn_routes
+from .stream_monitor import register_stream_monitor_routes
 
 
 def register_routes(app):
+    register_stream_monitor_routes(app)
     from media.upstream_relay import register_routes as register_relay
     register_relay(app)
     register_custom_channel_routes(app)

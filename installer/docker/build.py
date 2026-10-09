@@ -28,6 +28,7 @@ def run(arguments: list[str]) -> None:
 
 
 def main() -> int:
+    from notices import write_notices
     name = artifact_name()
     run(
         [
@@ -54,6 +55,11 @@ def main() -> int:
         "--name",
         name,
     ]
+    BUILD.mkdir(parents=True, exist_ok=True)
+    notices = BUILD / 'third-party-notices.txt'
+    write_notices(notices)
+    separator = ';' if platform.system() == 'Windows' else ':'
+    command.extend(['--add-data', f'{notices}{separator}.'])
     if platform.system() == "Darwin":
         command.extend(["--target-arch", "universal2"])
     command.append(str(ROOT / "install.py"))

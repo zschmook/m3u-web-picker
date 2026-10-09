@@ -1,5 +1,7 @@
 # M3U Web Picker
 
+Third-party software, data and artwork credits are available in **Settings → Open Source & Credits**, with a downloadable archive of the installed image's full license and copyright notices. This image includes Debian's GPL-licensed FFmpeg and Comskip builds. See [third-party notices and source-distribution details](docs/THIRD-PARTY-NOTICES.md).
+
 Turn a large IPTV catalog into the channels you actually watch. M3U Web Picker combines a curated M3U/XMLTV lineup, sports event channels, a browser TV guide, DVR, and Roku/Cast playback. It can also build continuous TV and movie channels from an accessible Plex library.
 
 The app runs in Docker on Windows, macOS, and Linux. Start with a [packaged installer](#install-recommended) or the [published Compose configuration](#install-with-docker-compose). Git and a local image build are only needed for development.
@@ -166,7 +168,7 @@ Hockey includes **AHL, ECHL, SPHL, and FPHL** league and team subscriptions, wit
 
 League artwork is bundled for the major leagues and many named competitions, including shared NCAA and Olympic marks. The picker displays these icons without fetching images from outside services; entries without verified artwork keep their letter fallback.
 
-Ordered fallback providers are tried when the primary provider has no usable sports feed. Optional [API-SPORTS](https://api-sports.io/) adapters provide canonical schedules for MLB, NFL, and NCAA Football; other sports use provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
+Ordered fallback providers are tried when the primary provider has no usable sports feed. With optional [API-SPORTS](https://api-sports.io/) schedules enabled, covered selections automatically appear in the API dataset list. MLB, NFL, NCAA Football, NBA, NHL, AHL, ECHL, SPHL and FPHL are mapped directly; cached basketball, hockey and volleyball league catalogues expand coverage for matching competitions. Refresh API schedules fetches schedules and cross-references provider streams before rebuilding channels. Competitions without API coverage retain provider/XMLTV matching. Sports Updates and Master Updates refresh the generated lineup, with a postgame grace period to accommodate games that run long.
 
 Get an API key through the [API-SPORTS signup/dashboard](https://dashboard.api-football.com/).
 

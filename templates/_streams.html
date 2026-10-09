@@ -1,0 +1,42 @@
+<template id="uiStreamsTemplate">
+  <section class="ui-settings-panel ui-settings-collection" data-settings-panel-content="streams" aria-labelledby="uiStreamsTitle">
+    <section class="ui-modern-card">
+      <div class="ui-card-heading">
+        <div><span id="uiStreamsTitle">Live streams</span><small>See what Picker is serving and where it is going.</small></div>
+        <button class="btn ui-btn-secondary" type="button" id="uiStreamsRefresh">Refresh</button>
+      </div>
+      <div class="ui-stream-network">
+        <div><span>LAN IP</span><strong id="uiStreamsLan">—</strong></div>
+        <div><span>VPN IP <small>(last verified)</small></span><strong id="uiStreamsVpn">—</strong></div>
+        <div><span>Internet route</span><strong id="uiStreamsRoute">—</strong></div>
+      </div>
+      <div class="ui-stream-totals" id="uiStreamsTotals"></div>
+      <div class="ui-stream-network ui-stream-resources" aria-label="Resource usage">
+        <div><span>CPU</span><strong id="uiStreamsCpu">—</strong><small id="uiStreamsCpuScope"></small></div>
+        <div><span>GPU</span><strong id="uiStreamsGpu">—</strong><small id="uiStreamsGpuScope"></small></div>
+        <div><span>RAM</span><strong id="uiStreamsRam">—</strong><small id="uiStreamsRamScope"></small></div>
+      </div>
+      <div class="ui-stream-table-wrap">
+        <table class="ui-stream-table">
+          <thead><tr><th>Channel</th><th>Streaming to</th><th>Type</th><th>Duration</th><th>Transfer rate</th><th>State</th></tr></thead>
+          <tbody id="uiStreamsRows"><tr><td colspan="6">Open this tab to load stream activity.</td></tr></tbody>
+        </table>
+      </div>
+      <p class="ui-stream-note">Transfer rate measures bytes served by Picker over the last 10 seconds. MB/s is megabytes per second; Mbps is megabits per second. HLS clients stay listed for 30 seconds after their last request.</p>
+      <p class="ui-stream-note">Direct playback that bypasses Picker cannot be observed here. Session counts cover this app; they do not include connections made by other apps.</p>
+      <div id="uiStreamsMonitorStatus" class="ui-settings-status" role="status" aria-live="polite"></div>
+    </section>
+    <section class="ui-modern-card">
+      <div class="ui-card-heading"><div><span>Traffic by client</span><small>Combined transfer rate across each client's active connections.</small></div></div>
+      <div class="ui-stream-table-wrap"><table class="ui-stream-table">
+        <thead><tr><th>Streaming to</th><th>Connections</th><th>Total transfer rate</th><th>Data served</th></tr></thead>
+        <tbody id="uiStreamsClients"><tr><td colspan="4">No active client traffic.</td></tr></tbody>
+      </table></div>
+      <p class="ui-stream-note">Grouped by connected client address and player type. A shared address or reverse proxy may represent more than one device.</p>
+    </section>
+    <section class="ui-modern-card">
+      <div class="ui-card-heading"><div><span>Recent activity</span><small>Recent stream closures and HLS inactivity, retained until Picker restarts.</small></div></div>
+      <div id="uiStreamsEvents" class="ui-stream-events">No recent activity.</div>
+    </section>
+  </section>
+</template>

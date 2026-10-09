@@ -15,6 +15,7 @@ from .ffmpeg import (
 )
 from .audio_source import prefer_live_playlist
 import media_pipeline
+import stream_monitor
 
 AUDIO_RECONNECT_ATTEMPTS = 3
 AUDIO_RECONNECT_DELAY_SECONDS = 1.0
@@ -31,6 +32,7 @@ def response_for(
 ) -> Response:
     """Transcode one curated IPTV stream for browser playback."""
     session_token = ""
+    monitor_target = target
     output_name = "browser-audio" if audio_only else "browser"
     media_label = "audio" if audio_only else "video"
     remote_source = str(target).lower().startswith(("http://", "https://"))
@@ -303,4 +305,6 @@ def response_for(
     response.headers["Access-Control-Allow-Headers"] = "Range, Content-Type"
     response.headers["Access-Control-Expose-Headers"] = "Content-Type"
     response.call_on_close(cleanup_process)
+    stream_monitor.attach(response, monitor_target, 'passthrough' if remux_only else 'encoding',
+                          'MP3' if audio_only else 'MP4', session_token)
     return response

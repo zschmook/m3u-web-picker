@@ -1,0 +1,5 @@
+.ui-credits-list details {margin:16px 0;border:1px solid var(--ui-border,#374151);border-radius:10px;padding:14px;}
+.ui-credits-list summary {cursor:pointer;font-weight:700;}
+.ui-credits-list p {font-size:.85rem;line-height:1.7;margin:14px 0 0;overflow-wrap:anywhere;}
+[data-settings-panel-content="credits"] a {color:var(--ui-accent,#93c5fd);text-decoration:underline;}
+[data-settings-panel-content="credits"] > section > p {font-size:.85rem;line-height:1.6;}

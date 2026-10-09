@@ -2,6 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert'),crypto=require(
 const source=fs.readFileSync('static/js/ui_vpn_settings.js','utf8');
 let server={enabled:true,desired_on:false,configured:true,persistent:true,app_vpn_active:false,network_protected:false,control_status:'applied'};
 let posts=[],reject=false;
+function response(data,status=200){return {ok:status>=200&&status<300,status,json:async()=>data,text:async()=>JSON.stringify(data)};}
 function element(){return {hidden:false,disabled:false,textContent:'',dataset:{},children:[],classList:{add(){},remove(){},toggle(){}},setAttribute(){},append(...nodes){this.children.push(...nodes)},replaceChildren(){this.children=[]},addEventListener(){}};}
 function mount(){
  const provider=element();provider.value='';provider.options=[{value:'',textContent:'Choose a VPN provider'}];provider.append=function(option){this.options.push(option)};
@@ -13,15 +14,15 @@ function mount(){
  const window={refreshVpnPowerStatus:()=>refreshes.push(1)};
  const document={querySelector:()=>({}),querySelectorAll:()=>[host],getElementById:()=>null,addEventListener(){},createElement:()=>element(),createTextNode:text=>({textContent:text})};
  const fetch=async(path,options={})=>{
-  if(path.includes('vpn-provider-links'))return {ok:true,json:async()=>({providers:{}})};
+  if(path.includes('vpn-provider-links'))return response({providers:{}});
   if(path==='/api/vpn-preference'){
    const body=JSON.parse(options.body);posts.push(body);
-   if(reject)return {ok:false,status:409,json:async()=>({error:'Manager unavailable'})};
-   server={...server,enabled:body.enabled};return {ok:true,json:async()=>({...server})};
+   if(reject)return response({error:'Manager unavailable'},409);
+   server={...server,enabled:body.enabled};return response({...server});
   }
-  if(path==='/api/vpn-state')return {ok:true,json:async()=>({...server})};
-  if(path==='/api/vpn-test')return {ok:true,json:async()=>({helper_available:true,test:null})};
-  assert.equal(path,'/api/vpn-config');return {ok:true,json:async()=>({provider:'protonvpn',providers:['custom','protonvpn'],lan_subnets:['10.0.0.0/24'],suggested_lan_subnet:'10.0.0.0/24',lan_subnet_detection:'detected',vpn_runtime:{...server}})};
+  if(path==='/api/vpn-state')return response({...server});
+  if(path==='/api/vpn-test')return response({helper_available:true,test:null});
+  assert.equal(path,'/api/vpn-config');return response({provider:'protonvpn',providers:['custom','protonvpn'],lan_subnets:['10.0.0.0/24'],suggested_lan_subnet:'10.0.0.0/24',lan_subnet_detection:'detected',vpn_runtime:{...server}});
  };
  vm.runInNewContext(source,{document,window,fetch,crypto,Uint8Array,URL,setTimeout:fn=>{scheduled.push(fn);return scheduled.length},clearTimeout(){}});
  return {host,choice:nodes['[data-vpn-choice]'],fields:nodes['[data-vpn-fields]'],live:nodes['[data-vpn-live]'],scheduled,refreshes,provider};
