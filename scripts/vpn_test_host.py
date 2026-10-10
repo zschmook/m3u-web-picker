@@ -152,12 +152,12 @@ def execute(job):
  finally:cleanup();atexit.unregister(cleanup)
  return report
 
-def main():
+def main(stop_event=None):
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--watch',action='store_true');p.add_argument('--port',type=int,choices=[9998,9999],default=9998);args=p.parse_args()
  configure_target(args.port)
  validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
  print('Watching isolated VPN tests for port '+str(PORT)+'. Picker networking is unchanged.',flush=True)
- stop=threading.Event()
+ stop=stop_event or threading.Event()
  def beat():
   while not stop.is_set():
    try:remote('heartbeat')
@@ -166,13 +166,13 @@ def main():
  thread=threading.Thread(target=beat,daemon=True);thread.start()
  try:
   if not args.watch:remote('create')
-  while True:
+  while not stop.is_set():
    try:job=remote('claim')
    except (RuntimeError,subprocess.TimeoutExpired,json.JSONDecodeError):
     if not args.watch:raise
-    time.sleep(3);continue
+    stop.wait(3);continue
    if job:result=execute(job)
    if not args.watch:return 0 if job and result.get('passed') else 1
-   time.sleep(2)
+   stop.wait(2)
  finally:stop.set()
 if __name__=='__main__':raise SystemExit(main())

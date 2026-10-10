@@ -33,6 +33,9 @@ class CrossPlatformDockerInstallerTests(unittest.TestCase):
             self.assertEqual(command, ['docker', 'compose', '--env-file', str(folder/'.env'), '-f', str(path)])
 
     def setUp(self):
+        for name in ('prepare_helper','stop_helper','install_helper'):
+            helper=patch.object(installer,name)
+            helper.start();self.addCleanup(helper.stop)
         detected=patch.object(installer,"detect_lan_subnet",return_value="192.168.1.0/24")
         detected.start();self.addCleanup(detected.stop)
     def compose_config(self, _command, *, cwd, **_kwargs):

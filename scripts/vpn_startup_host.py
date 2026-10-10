@@ -17,6 +17,11 @@ def configure_target(port):
 def manifest_path():
  return MANIFEST_OVERRIDE or ROOT/('runtime/vpn/docker-compose.vpn.json' if PORT==9998 else 'runtime/vpn-9999/docker-compose.vpn.json')
 
+def compose_command(path):
+ args=['docker','compose']
+ if PORT==9999 and (ROOT/'.env').is_file():args+=['--env-file',str(ROOT/'.env')]
+ return args+['-f',str(path)]
+
 def remote(operation,**fields):
  source=(ROOT/'src/vpn_runtime.py').read_text(encoding='utf-8-sig')
  source+='\nimport sys\np=json.loads(sys.stdin.read());op=p.pop("operation");db='+repr(DB)+'\n'
@@ -75,10 +80,11 @@ def apply(job,canonical,image):
  subnets=lan_networks(job['lan_subnets']);tail=tailnet_ip()
  if tail:subnets.append(tail+'/32')
  key=secrets.token_urlsafe(24);auth='[[roles]]\nname="picker-host"\nroutes=["PUT /v1/vpn/status"]\nauth="apikey"\napikey="'+key+'"\n'
- baseline=public_baseline();digest=json.loads(run(['docker','image','inspect','qmcgaw/gluetun:latest']))[0]['RepoDigests'][0]
+ baseline=public_baseline();digest=job.get('saved_gluetun_image') or json.loads(run(['docker','image','inspect','qmcgaw/gluetun:latest']))[0]['RepoDigests'][0]
+ if not re.fullmatch(r'qmcgaw/gluetun@sha256:[a-f0-9]{64}',digest):raise ValueError('Invalid verified VPN image.')
  before=json.loads(run(['docker','exec',TARGET,'python','-c','import setup_wizard,json;print(json.dumps(setup_wizard.load_state()))'])) if PORT==9998 else {'completed':True}
  path=manifest_path();previous_manifest=path.read_bytes() if path.exists() else None
- compose=['docker','compose','-f',str(path)];compose_started=False
+ compose=compose_command(path);compose_started=False
  try:
   if job.get('profile_saved') and job.get('saved_credential_volume'):
    volume=job['saved_credential_volume']
@@ -140,7 +146,7 @@ def switch_connection(job):
  if service['container_name']!=TARGET or str(service['environment'].get('M3U_PORT','9999'))!=str(PORT) or service['environment'].get('M3U_DATA_DIR')!=DATA:raise ValueError('VPN graph does not match the selected instance.')
  validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
  enabled=job['desired_on'];configuration=vpn_deployment.connection_mode(previous,enabled)
- compose=['docker','compose','-f',str(path)];changed=False
+ compose=compose_command(path);changed=False
  try:
   check_idle()
   print('Port '+str(PORT)+': switching to '+('VPN' if enabled else 'normal internet')+'; playback will be briefly unavailable.',flush=True)
@@ -169,7 +175,10 @@ def switch_connection(job):
   remote('write',**fields)
   raise
 
-def main():
+def valid_app_image(value):
+ return bool(re.fullmatch(r'(?:m3u-web-picker|ghcr.io/zschmook/m3u-web-picker):[a-zA-Z0-9_.-]+',value))
+
+def main(stop_event=None):
  global MANIFEST_OVERRIDE
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--watch',action='store_true');p.add_argument('--apply-current',action='store_true');p.add_argument('--allow-restart-9998',action='store_true');p.add_argument('--allow-restart-9999',action='store_true');p.add_argument('--port',type=int,choices=[9998,9999],default=9998);p.add_argument('--manifest');p.add_argument('--image',required=True);args=p.parse_args()
  configure_target(args.port)
@@ -178,7 +187,7 @@ def main():
   if PORT!=9999 or not selected.is_absolute() or selected.name!='docker-compose.vpn.json' or selected.parent.name!='vpn':p.error('Use the selected production installation runtime/vpn/docker-compose.vpn.json path.')
   MANIFEST_OVERRIDE=selected
  if not (args.allow_restart_9998 if PORT==9998 else args.allow_restart_9999):p.error('Explicit restart authorization for the selected port is required.')
- if not re.fullmatch(r'm3u-web-picker:[a-zA-Z0-9_.-]+',args.image):p.error('Use a local Picker image tag.')
+ if not valid_app_image(args.image):p.error('Use a Picker local or official release image tag.')
  if args.apply_current:
   job=queue_current();canonical=read_upload(job)
   print('Passing upload captured in process memory for the startup handoff.',flush=True)
@@ -191,7 +200,9 @@ def main():
   apply(job,canonical,args.image)
   canonical=''
  if not args.watch:return
- while True:
+ import threading
+ stop=stop_event or threading.Event()
+ while not stop.is_set():
   try:
    validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
    remote('write',control_heartbeat=time.time())
@@ -204,5 +215,5 @@ def main():
    job=remote('claim')
    if job:apply(job,read_upload(job),args.image)
   except Exception:print('Startup helper waiting for an available test instance or a corrected upload.',flush=True)
-  time.sleep(3)
+  stop.wait(3)
 if __name__=='__main__':main()

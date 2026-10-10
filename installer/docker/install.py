@@ -18,6 +18,9 @@ import webbrowser
 import zipfile
 from pathlib import Path, PurePosixPath
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from helper_service import prepare_helper, stop_helper, install_helper, verify_bundle
+
 
 REPOSITORY = "zschmook/m3u-web-picker"
 SOURCE_REF = "latest"
@@ -434,10 +437,14 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
         prepare_install_environment(staging, image_tag)
         staging_compose = compose_command(docker, staging)
         prepare_bind_mount_directories(staging_compose, staging)
+        prepare_helper(staging, install_dir, docker, f'{IMAGE}:{image_tag}')
         # A failed image download must leave an existing installation running.
         run_compose(staging_compose, staging, "pull")
         verify_vpn_upgrade_image(docker, staging_compose, staging)
         if existing_install:
+            # Finish any owned helper work before moving its source/runtime.
+            # Failed downloads above never interrupt the current helper or app.
+            stop_helper(install_dir)
             install_dir.replace(previous)
         try:
             staging.replace(install_dir)
@@ -456,6 +463,7 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
         run_compose(compose, install_dir, "ps")
         print("Waiting for the setup guide...")
         wait_for_setup_page()
+        install_helper(install_dir)
     except Exception:
         if previous.exists():
             print(f"The previous source remains available at {previous}.")
@@ -471,10 +479,14 @@ def install(install_dir: Path, source_ref: str, mode: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install the Docker edition of M3U Web Picker")
     parser.add_argument('--credits', action='store_true', help='Print bundled Python and PyInstaller license notices without installing')
+    parser.add_argument('--verify-vpn-helper',action='store_true',help='Verify the bundled helper without installing or changing Docker')
     parser.add_argument("--install-dir", type=Path, default=default_install_dir())
     parser.add_argument("--source-ref", default=SOURCE_REF, help=argparse.SUPPRESS)
     parser.add_argument("--mode", choices=(UPGRADE, CLEAN), help="UP preserves saved setup; CL starts clean")
     arguments = parser.parse_args()
+    if arguments.verify_vpn_helper:
+        print(json.dumps(verify_bundle()))
+        return 0
     if arguments.credits:
         bundled = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'third-party-notices.txt'
         if bundled.is_file():

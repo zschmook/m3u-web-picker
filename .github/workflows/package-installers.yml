@@ -24,7 +24,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Build Windows Docker installer
-        run: python installer/docker/build.py
+        # Lifecycle tests are stdlib-only and do not touch the runner's Docker.
+        run: |
+          python -m unittest tests.test_packaged_vpn_helper tests.test_cross_platform_docker_installer
+          python installer/docker/build.py
       - uses: actions/upload-artifact@v4
         with:
           name: M3U-Web-Picker-Windows-Setup
@@ -41,7 +44,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Build universal macOS Docker installer
-        run: python installer/docker/build.py
+        run: |
+          python -m unittest tests.test_packaged_vpn_helper tests.test_cross_platform_docker_installer
+          python installer/docker/build.py
       - name: Package macOS installer DMG
         shell: bash
         run: |
@@ -73,13 +78,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Build Linux Docker installer
-        run: python installer/docker/build.py
+        run: |
+          python -m unittest tests.test_packaged_vpn_helper tests.test_cross_platform_docker_installer
+          python installer/docker/build.py
       - name: Include readable Python fallback
         run: cp installer/docker/install.py installer/docker/dist/M3U-Web-Picker-Linux-Setup.py
       - name: Package Linux installer
         run: |
           tar -C installer/docker/dist -czf installer/docker/M3U-Web-Picker-Linux.tar.gz \
-            M3U-Web-Picker-Linux-Setup M3U-Web-Picker-Linux-Setup.py
+            M3U-Web-Picker-Linux-Setup M3U-Web-Picker-Linux-Setup.py M3U-Web-Picker-VPN-Helper helper_service.py vpn_helper.py
       - uses: actions/upload-artifact@v4
         with:
           name: M3U-Web-Picker-Linux-Setup
