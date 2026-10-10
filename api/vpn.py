@@ -7,24 +7,35 @@ import vpn_runtime
 from .http import no_cache
 
 def register_vpn_routes(app):
+    def activity():
+        from media import hls,upstream_relay
+        import media_pipeline
+        with hls._LOCK:
+            streams=sum(1 for value in hls._SESSIONS.values() if value.process.poll() is None)
+        return dict(active_streams=streams+upstream_relay.active_count(),active_sessions=media_pipeline.status()['runtime']['active_sessions'])
+    def confirm_interruption(data, switching):
+        if type(data.get('allow_interrupt',False)) is not bool:
+            return no_cache(jsonify(error='Confirm whether playback may be interrupted.')),409
+        if switching and not data.get('allow_interrupt',False):
+            current=activity()
+            if current['active_streams'] or current['active_sessions']:
+                return no_cache(jsonify(error='Playback is active. Switching the connection briefly interrupts streams. Continue?',confirmation_required=True,**current)),409
     @app.get('/api/vpn-state')
     def vpn_runtime_status():
         return no_cache(jsonify(vpn_runtime.status(core.DB_PATH)))
     @app.get('/api/vpn-activity')
     def vpn_activity():
         # Local registries only: safe even while provider traffic is blocked.
-        from media import hls,upstream_relay
-        import media_pipeline
-        with hls._LOCK:
-            streams=sum(1 for value in hls._SESSIONS.values() if value.process.poll() is None)
-        return no_cache(jsonify(active_streams=streams+upstream_relay.active_count(),active_sessions=media_pipeline.status()['runtime']['active_sessions']))
+        return no_cache(jsonify(activity()))
     @app.post('/api/vpn-control')
     def vpn_power():
         origin=request.headers.get('Origin')
         if origin and origin.rstrip('/')!=request.host_url.rstrip('/'):
             return no_cache(jsonify(error='Use the power button from this app.')),403
         data=request.get_json(silent=True) or {}
-        try: result=vpn_runtime.request_control(core.DB_PATH,data.get('enabled'))
+        confirmation=confirm_interruption(data,data.get('enabled') is not vpn_runtime.required())
+        if confirmation:return confirmation
+        try: result=vpn_runtime.request_control(core.DB_PATH,data.get('enabled'),data.get('allow_interrupt',False))
         except ValueError as exc:return no_cache(jsonify(error=str(exc))),409
         return no_cache(jsonify(result)),202
     @app.post('/api/vpn-preference')
@@ -33,7 +44,11 @@ def register_vpn_routes(app):
         if origin and origin.rstrip('/')!=request.host_url.rstrip('/'):
             return no_cache(jsonify(error='Change VPN settings from this app.')),403
         data=request.get_json(silent=True) or {}
-        try: result=vpn_runtime.set_enabled(core.DB_PATH,data.get('enabled'))
+        current=vpn_runtime.read(core.DB_PATH)
+        switching=bool(current.get('persistent') or current.get('profile_saved')) and ((data.get('enabled') is True and not vpn_runtime.feature_enabled(current) and not vpn_runtime.required()) or (data.get('enabled') is False and vpn_runtime.required()))
+        confirmation=confirm_interruption(data,switching)
+        if confirmation:return confirmation
+        try: result=vpn_runtime.set_enabled(core.DB_PATH,data.get('enabled'),data.get('allow_interrupt',False))
         except ValueError as exc:return no_cache(jsonify(error=str(exc))),409
         return no_cache(jsonify(result)),202 if result.get('control_status')=='pending' else 200
     def session():

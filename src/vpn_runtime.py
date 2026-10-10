@@ -67,8 +67,9 @@ def feature_enabled(data):
  # Existing applied installations opted into VPN before this separate setting existed.
  return bool(data.get('feature_enabled',data.get('persistent') or data.get('requested') or required()))
 
-def set_enabled(path, enabled):
+def set_enabled(path, enabled, allow_interrupt=False):
  if type(enabled) is not bool:raise ValueError('Choose whether to use a VPN.')
+ if type(allow_interrupt) is not bool:raise ValueError('Confirm whether playback may be interrupted.')
  with closing(_db(path)) as c:
   c.execute('BEGIN IMMEDIATE');row=c.execute('SELECT payload FROM vpn_activation WHERE id=1').fetchone();data=json.loads(row[0]) if row else {}
   previous=feature_enabled(data)
@@ -78,7 +79,7 @@ def set_enabled(path, enabled):
   if switching and time.time()-data.get('control_heartbeat',0)>=20:raise ValueError('VPN connection manager is unavailable. The setting has not changed.')
   data.update(feature_enabled=enabled,updated_at=time.time())
   if not enabled or (enabled and not previous and configured):data['desired_on']=enabled
-  if switching:data.update(control_id=uuid.uuid4().hex,control_status='pending',control_error='')
+  if switching:data.update(control_id=uuid.uuid4().hex,control_status='pending',control_error='',allow_interrupt=allow_interrupt)
   elif not enabled:data.update(control_status='applied',control_error='')
   c.execute('INSERT INTO vpn_activation VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(json.dumps(data),));c.commit()
  return status(path)
@@ -88,15 +89,16 @@ def protection_missing(path, wizard_requested=False):
  wanted=data.get('desired_on',data.get('requested') or wizard_requested or required())
  return (bool(wanted) and not required()) or (required() and not healthy())
 
-def request_control(path, enabled):
+def request_control(path, enabled, allow_interrupt=False):
  if type(enabled) is not bool:raise ValueError('Choose VPN on or off.')
+ if type(allow_interrupt) is not bool:raise ValueError('Confirm whether playback may be interrupted.')
  with closing(_db(path)) as c:
   c.execute('BEGIN IMMEDIATE');row=c.execute('SELECT payload FROM vpn_activation WHERE id=1').fetchone();data=json.loads(row[0]) if row else {}
   if not (data.get('persistent') or data.get('profile_saved')):raise ValueError('Pass the VPN test and save a configuration before using the power button.')
   if not feature_enabled(data):raise ValueError('Enable Use a VPN in Settings before using the power button.')
   if time.time()-data.get('control_heartbeat',0)>=20:raise ValueError('VPN connection manager is unavailable. Try again when it is running.')
   if data.get('control_status') in ('pending','applying'):raise ValueError('The connection is already switching.')
-  data.update(desired_on=enabled,control_id=uuid.uuid4().hex,control_status='pending',control_error='',updated_at=time.time())
+  data.update(desired_on=enabled,control_id=uuid.uuid4().hex,control_status='pending',control_error='',allow_interrupt=allow_interrupt,updated_at=time.time())
   c.execute('UPDATE vpn_activation SET payload=? WHERE id=1',(json.dumps(data),));c.commit()
  return status(path)
 

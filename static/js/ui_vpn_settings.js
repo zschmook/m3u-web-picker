@@ -28,7 +28,7 @@
     try{data=JSON.parse(await response.text());}
     catch{const error=Error(`The VPN service returned an unexpected response (HTTP ${response.status}). Reload the page and try again.`);error.status=response.status;throw error;}
     if(!data||typeof data!=='object'||Array.isArray(data)){const error=Error(`The VPN service returned an unexpected response (HTTP ${response.status}).`);error.status=response.status;throw error;}
-    if(!response.ok){const error=Error(typeof data.error==='string'?data.error:'VPN request failed.');error.status=response.status;throw error;}return data;
+    if(!response.ok){const error=Error(typeof data.error==='string'?data.error:'VPN request failed.');error.status=response.status;error.confirmationRequired=data.confirmation_required===true;throw error;}return data;
   }
   window.mountVpnConfiguration=()=>{
     for(const host of document.querySelectorAll('[data-vpn-config]:not([data-mounted])')){
@@ -59,7 +59,12 @@
           intentReady.catch(error=>{draft.error=error.message;render();});
         }else{
           preferenceBusy=true;preferenceError='';choice.disabled=true;
-          intentReady=request({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})},'/api/vpn-preference');
+          const send=allow_interrupt=>request({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,allow_interrupt})},'/api/vpn-preference');
+          intentReady=send(false).catch(error=>{
+            if(!error.confirmationRequired)throw error;
+            if(!window.confirm(error.message))throw Error('Connection change cancelled.');
+            return send(true);
+          });
           intentReady.then(state=>{runtime=state;window.refreshVpnPowerStatus?.();}).catch(error=>{
             preferenceError=error.message;draft.enabled=Boolean(runtime?.enabled);choice.checked=draft.enabled;fields.hidden=!draft.enabled;
           }).finally(()=>{preferenceBusy=false;renderLive(runtime);render();});

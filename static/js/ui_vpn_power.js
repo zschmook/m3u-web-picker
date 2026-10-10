@@ -18,12 +18,12 @@
     button.classList.toggle('is-warning', !active && !off);
     button.setAttribute('aria-pressed', String(wanted));
     button.setAttribute('aria-label', label + (vpn?.configured ? (wanted ? '. Turn VPN off.' : '. Turn VPN on.') : ''));
-    button.title = label + '. Switching briefly interrupts playback; stop streams first.';
+    button.title = label + '. Switching briefly interrupts playback.';
     button.disabled = !enabled || busy || stale || switching || !vpn?.control_available;
     if (message) {
       const ip = active ? vpn?.vpn_public_ip : '';
-      message.textContent = ip || vpn?.control_error || (switching ? 'Switching…' : '');
-      message.classList.toggle('is-active', Boolean(ip));
+      message.textContent = vpn?.control_error || ip || (switching ? 'Switching…' : '');
+      message.classList.toggle('is-active', Boolean(ip) && !vpn?.control_error);
       message.title = ip ? 'VPN public IP: ' + ip : message.textContent;
     }
   }
@@ -51,8 +51,13 @@
     busy = true; render(previous);
     try {
       const retry = previous.control_status === 'failed' && previous.network_protected !== previous.desired_on;
-      const response = await fetch('/api/vpn-control', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: retry ? previous.desired_on : !previous.desired_on})});
-      const result = await response.json();
+      const enabled = retry ? previous.desired_on : !previous.desired_on;
+      const send = allow_interrupt => fetch('/api/vpn-control', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled, allow_interrupt})});
+      let response = await send(false), result = await response.json();
+      if (!response.ok && result.confirmation_required) {
+        if (!window.confirm(result.error)) return;
+        response = await send(true); result = await response.json();
+      }
       if (!response.ok) throw new Error(result.error || 'Unable to switch connection.');
       previous = result; render(result);
     } catch (error) {

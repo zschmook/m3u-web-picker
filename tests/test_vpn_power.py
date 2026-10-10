@@ -65,6 +65,27 @@ class PowerTests(unittest.TestCase):
         response=self.client.get('/api/vpn-activity')
         self.assertEqual(response.status_code,200);self.assertEqual(response.json['active_streams'],0)
 
+    def test_active_switch_requires_confirmation_without_changing_intent(self):
+        with patch('media.upstream_relay.active_count',return_value=1),patch.object(vpn_runtime,'required',return_value=True):
+            for endpoint in ('/api/vpn-control','/api/vpn-preference'):
+                response=self.client.post(endpoint,json={'enabled':False})
+                self.assertEqual(response.status_code,409)
+                self.assertTrue(response.json['confirmation_required'])
+                self.assertTrue(vpn_runtime.read(self.db)['desired_on'])
+                self.assertTrue(vpn_runtime.feature_enabled(vpn_runtime.read(self.db)))
+            response=self.client.post('/api/vpn-control',json={'enabled':False,'allow_interrupt':True})
+            self.assertEqual(response.status_code,202)
+            self.assertTrue(vpn_runtime.claim_control(self.db)['allow_interrupt'])
+
+    def test_active_disable_confirmation_is_per_request(self):
+        with patch('media.upstream_relay.active_count',return_value=1),patch.object(vpn_runtime,'required',return_value=True):
+            response=self.client.post('/api/vpn-preference',json={'enabled':False,'allow_interrupt':True})
+            self.assertEqual(response.status_code,202)
+            self.assertTrue(vpn_runtime.claim_control(self.db)['allow_interrupt'])
+            vpn_runtime.write(self.db,control_status='applied',feature_enabled=True,desired_on=True)
+            self.assertEqual(self.client.post('/api/vpn-preference',json={'enabled':False}).status_code,409)
+            self.assertEqual(self.client.post('/api/vpn-control',json={'enabled':False,'allow_interrupt':'true'}).status_code,409)
+
     def test_legacy_applied_setting_is_enabled_even_when_power_is_off(self):
         vpn_runtime.write(self.db,desired_on=False)
         with patch.object(vpn_runtime,'required',return_value=False):

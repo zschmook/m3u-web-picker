@@ -19,7 +19,8 @@ def manifest_path():
 
 def compose_command(path):
  args=['docker','compose']
- if PORT==9999 and (ROOT/'.env').is_file():args+=['--env-file',str(ROOT/'.env')]
+ install_root=path.parents[2] if path.parent.name=='vpn' and path.parent.parent.name=='runtime' else ROOT
+ if PORT==9999 and (install_root/'.env').is_file():args+=['--env-file',str(install_root/'.env')]
  return args+['-f',str(path)]
 
 def remote(operation,**fields):
@@ -45,7 +46,7 @@ def validate_target(info):
   raise ValueError('VPN handoff target does not match the explicitly selected Picker instance.')
  return env
 
-def check_idle():
+def check_idle(allow_interrupt=False):
  try:
   try:
    with urllib.request.urlopen('http://localhost:'+str(PORT)+'/api/vpn-activity',timeout=5) as r:data=json.load(r)
@@ -53,12 +54,12 @@ def check_idle():
    if exc.code!=404:raise
    with urllib.request.urlopen('http://localhost:'+str(PORT)+'/api/ui/status',timeout=5) as r:previous=json.load(r)
    data={'active_streams':previous.get('devices',{}).get('active_streams',0),'active_sessions':previous.get('playback',{}).get('runtime',{}).get('active_sessions',0)}
-  if data.get('active_streams',0) or data.get('active_sessions',0):raise RuntimeError('Playback is active on '+str(PORT)+'. Stop playback before applying the VPN.')
+  if (data.get('active_streams',0) or data.get('active_sessions',0)) and not allow_interrupt:raise RuntimeError('Playback is active on '+str(PORT)+'. Confirm its interruption before changing the connection.')
  except urllib.error.HTTPError as exc:
   raise RuntimeError('Playback status on '+str(PORT)+' is unavailable; no restart was performed.') from exc
  top=run(['docker','top',TARGET])
- if re.search(r'\bffmpeg\b',top):raise RuntimeError('Playback is active on '+str(PORT)+'. Stop playback before applying the VPN.')
- print('Port '+str(PORT)+': no active playback detected; applying its authorized restart.',flush=True)
+ if re.search(r'\bffmpeg\b',top) and not allow_interrupt:raise RuntimeError('Playback is active on '+str(PORT)+'. Confirm its interruption before changing the connection.')
+ print('Port '+str(PORT)+': playback checked; '+('active-playback interruption explicitly authorized.' if allow_interrupt else 'no active playback detected; applying its authorized restart.'),flush=True)
 
 def app_arguments(info,image,glue,job):
  env=validate_target(info);env.update(M3U_VPN_REQUIRED='true',M3U_VPN_CONTAINER=glue)
@@ -84,6 +85,11 @@ def apply(job,canonical,image):
  if not re.fullmatch(r'qmcgaw/gluetun@sha256:[a-f0-9]{64}',digest):raise ValueError('Invalid verified VPN image.')
  before=json.loads(run(['docker','exec',TARGET,'python','-c','import setup_wizard,json;print(json.dumps(setup_wizard.load_state()))'])) if PORT==9998 else {'completed':True}
  path=manifest_path();previous_manifest=path.read_bytes() if path.exists() else None
+ previous_configuration=json.loads(previous_manifest) if previous_manifest else None
+ managed=bool(previous_configuration and (info['Config'].get('Labels') or {}).get('com.docker.compose.project')==previous_configuration.get('name'))
+ if managed:
+  old_service=previous_configuration['services'][previous_configuration['x-m3u-vpn']['service']]
+  if old_service['container_name']!=TARGET or str(old_service['environment'].get('M3U_PORT','9999'))!=str(PORT):raise ValueError('Saved VPN deployment does not belong to this instance.')
  compose=compose_command(path);compose_started=False
  try:
   if job.get('profile_saved') and job.get('saved_credential_volume'):
@@ -98,7 +104,12 @@ def apply(job,canonical,image):
   if PORT==9998:run(['docker','exec',TARGET,'python','-c','import setup_wizard;setup_wizard.save_state({"completed":False})'])
   # Retain only preferences and the passing test result in SQLite; hand off the key in RAM.
   run(['docker','exec',TARGET,'python','-c','import vpn_config;vpn_config.discard('+repr(DB)+','+repr(DATA)+')'])
-  run(['docker','stop','--time','15',TARGET],timeout=30);run(['docker','rename',TARGET,backup]);renamed=True
+  if managed:
+   # Compose owns this instance already. A renamed container retains Compose labels
+   # and cannot serve as a backup in the same project; retain its graph instead.
+   run(compose+['down'],timeout=60);compose_started=True
+  else:
+   run(['docker','stop','--time','15',TARGET],timeout=30);run(['docker','rename',TARGET,backup]);renamed=True
   configuration=vpn_deployment.startup_manifest(info,image,glue,volume,digest,subnets)
   vpn_deployment.save_manifest(path,configuration)
   compose_started=True
@@ -125,7 +136,7 @@ def apply(job,canonical,image):
    with urllib.request.urlopen(urllib.request.Request('http://localhost:'+str(PORT)+'/api/setup/build',data=b'{}',headers={'Content-Type':'application/json'}),timeout=30) as r:
     if r.status!=200:raise RuntimeError('Initial guide preparation could not resume.')
   # Backup is stopped and contains no VPN upload; keep it for manual rollback, with no auto-restart.
-  run(['docker','update','--restart','no',backup])
+  if renamed:run(['docker','update','--restart','no',backup])
   return True
  except Exception as exc:
   print('VPN startup failed; restoring the setup screen. '+type(exc).__name__,flush=True)
@@ -134,6 +145,7 @@ def apply(job,canonical,image):
   else:path.unlink(missing_ok=True)
   if volume and volume!=job.get('saved_credential_volume'):run(['docker','volume','rm',volume])
   if renamed:run(['docker','rename',backup,TARGET]);run(['docker','start',TARGET])
+  elif managed and compose_started:run(compose+['up','-d','--no-build'],timeout=150)
   remote('write',requested=True,status='failed',error='VPN startup failed. Upload and test the file again; playback remains blocked.')
   source='import setup_wizard;setup_wizard.save_state({"completed":False,"current_step":"choices","vpn":{"requested":True}})'
   if PORT==9998:run(['docker','exec',TARGET,'python','-c',source])
@@ -148,7 +160,7 @@ def switch_connection(job):
  enabled=job['desired_on'];configuration=vpn_deployment.connection_mode(previous,enabled)
  compose=compose_command(path);changed=False
  try:
-  check_idle()
+  check_idle(allow_interrupt=job.get('allow_interrupt') is True)
   print('Port '+str(PORT)+': switching to '+('VPN' if enabled else 'normal internet')+'; playback will be briefly unavailable.',flush=True)
   baseline=public_baseline()
   run(compose+['down'],timeout=60);changed=True
@@ -164,12 +176,16 @@ def switch_connection(job):
    time.sleep(2)
   actual=run(['docker','exec',TARGET,'python','-c','import urllib.request;print(urllib.request.build_opener(urllib.request.ProxyHandler({})).open("https://api.ipify.org",timeout=15).read().decode().strip())'])
   if (enabled and actual==baseline) or (not enabled and actual!=baseline):raise RuntimeError('Connection switch failed egress verification.')
-  remote('write',control_status='applied',control_error='',status='active' if enabled else 'off',control_heartbeat=time.time(),**({'vpn_public_ip':actual} if enabled else {}))
+  remote('write',control_status='applied',control_error='',allow_interrupt=False,status='active' if enabled else 'off',control_heartbeat=time.time(),**({'vpn_public_ip':actual} if enabled else {}))
   print('Port '+str(PORT)+' connection verified: '+('VPN connected.' if enabled else 'VPN off; normal internet active.'),flush=True)
  except Exception:
   if changed:
    run(compose+['down'],timeout=60);vpn_deployment.save_manifest(path,previous);run(compose+['up','-d','--no-build'],timeout=150)
-  fields={'control_status':'failed','control_error':'Connection switch failed or playback is active. Stop streams and try again.'}
+  was_on=service['environment'].get('M3U_VPN_REQUIRED')=='true'
+  fields={'control_status':'failed','control_error':'Connection change failed. The previous connection has been restored; try again.', 'status':'active' if was_on else 'off','allow_interrupt':False}
+  # Restore Off intent when a failed Off request leaves the protected graph running.
+  # Failed On requests retain On intent so provider traffic remains blocked.
+  if not enabled:fields['desired_on']=was_on
   # A failed settings disable restored the protected graph: keep its control visible.
   if not enabled and job.get('feature_enabled') is False:fields['feature_enabled']=True
   remote('write',**fields)
@@ -203,8 +219,9 @@ def main(stop_event=None):
  import threading
  stop=stop_event or threading.Event()
  while not stop.is_set():
+  control=None;env=None
   try:
-   validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
+   env=validate_target(json.loads(run(['docker','inspect',TARGET]))[0])
    remote('write',control_heartbeat=time.time())
    control=remote('claim_control')
    if control:
@@ -214,6 +231,18 @@ def main(stop_event=None):
     else:remote('write',requested=False,desired_on=False,status='off',control_status='applied',control_error='')
    job=remote('claim')
    if job:apply(job,read_upload(job),args.image)
-  except Exception:print('Startup helper waiting for an available test instance or a corrected upload.',flush=True)
+  except Exception:
+   # A claimed request must reach a terminal state even if graph validation fails
+   # before switch_connection's rollback block. Never leave the UI applying forever.
+   if control and env:
+    try:
+     state=remote('read')
+     if state.get('control_id')==control.get('control_id') and state.get('control_status')=='applying':
+      was_on=env.get('M3U_VPN_REQUIRED')=='true'
+      fields={'control_status':'failed','control_error':'Connection change failed. Check the saved deployment and try again.','status':'active' if was_on else 'off','allow_interrupt':False}
+      if not control.get('desired_on'):fields.update(desired_on=was_on,feature_enabled=was_on or control.get('feature_enabled',True))
+      remote('write',**fields)
+    except Exception:pass
+   print('Startup helper waiting for an available test instance or a corrected upload.',flush=True)
   stop.wait(3)
 if __name__=='__main__':main()
