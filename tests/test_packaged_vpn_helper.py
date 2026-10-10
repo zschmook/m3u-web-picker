@@ -22,7 +22,7 @@ import vpn_helper as helper
 class PackagedVpnHelperTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name)/'Picker with spaces';self.root.mkdir()
+        self.root=Path(self.temp.name).resolve()/'Picker with spaces';self.root.mkdir()
         (self.root/'src').mkdir();(self.root/'src/vpn_runtime.py').write_text('')
         (self.root/'docker-compose.release.yml').write_text('services: {}')
         self.docker=self.root/'docker';self.docker.write_text('')
