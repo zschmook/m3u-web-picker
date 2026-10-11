@@ -37,6 +37,15 @@ class PackagedVpnHelperTests(unittest.TestCase):
             with self.assertRaises(ValueError):helper.read_configuration(self.root)
             path.write_text(original)
 
+    def test_helper_accepts_local_picker_build_without_accepting_other_images(self):
+        path=helper.directory(self.root)/'config.json'
+        value=json.loads(path.read_text());value['image']='m3u-web-picker:roku-relay-20261010'
+        helper.write_json(path,value)
+        self.assertEqual(helper.read_configuration(self.root)['image'],value['image'])
+        for image in ('other-picker:test','m3u-web-picker:bad tag','m3u-web-picker:tag;command'):
+            value['image']=image;helper.write_json(path,value)
+            with self.assertRaises(ValueError):helper.read_configuration(self.root)
+
     def test_source_bundle_is_copied_privately_into_versioned_runtime(self):
         bundle=self.root/'bundle';bundle.mkdir()
         suffix='.exe' if os.name=='nt' else ''

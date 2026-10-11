@@ -61,8 +61,8 @@ def read_configuration(root):
     if config.get('port') != 9999 or config.get('root') != str(root):
         raise ValueError('Helper configuration does not match this production installation.')
     import re
-    if not re.fullmatch(r'ghcr.io/zschmook/m3u-web-picker:(?:v\d+|latest)',config.get('image','')):
-        raise ValueError('The helper requires an official Picker release image.')
+    if not re.fullmatch(r'(?:ghcr.io/zschmook/m3u-web-picker:(?:v\d+|latest)|m3u-web-picker:[a-zA-Z0-9_.-]+)',config.get('image','')):
+        raise ValueError('The helper requires an official release or local Picker image.')
     docker = Path(config.get('docker',''))
     if not docker.is_absolute() or not docker.is_file():
         raise ValueError('The installed Docker executable is unavailable.')
