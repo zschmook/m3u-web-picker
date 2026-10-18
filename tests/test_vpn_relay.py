@@ -1,8 +1,10 @@
 """Relay integration checks with a real local upstream HTTP server."""
-import threading,unittest
+import threading,unittest,tempfile
+from pathlib import Path
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from unittest.mock import patch
-from flask import Flask,Response
+from flask import Flask,Response,send_file
 from media import upstream_relay as relay
 
 class Handler(BaseHTTPRequestHandler):
@@ -59,3 +61,34 @@ class RelayTests(unittest.TestCase):
   with patch.object(relay.vpn_runtime,'required',return_value=False):self.assertEqual(self.client.get('/guide/stream/manual/wgal').status_code,503)
  def test_unsupported_hls_does_not_expose_provider_uris(self):
   with self.assertRaises(ValueError):relay.rewrite_hls('#EXTM3U\n#EXT-X-CONTENT-STEERING:SERVER-URI="secret"',self.url)
+ def test_file_backed_roku_playlist_preserves_get_head_range_and_cache_validation(self):
+  # A WSGI file wrapper can be finite while still requiring direct passthrough.
+  class FiniteFileWrapper:
+   def __init__(self,file,block_size=8192):
+    self.file=file
+    self.chunks=list(iter(lambda:file.read(block_size),b''))
+    files.callback(self.close)
+   def __len__(self):return len(self.chunks)
+   def __iter__(self):return iter(self.chunks)
+   def close(self):self.file.close()
+  with tempfile.TemporaryDirectory() as directory, ExitStack() as files:
+   path=Path(directory)/'stream.m3u8'
+   payload=b'#EXTM3U\n#EXTINF:2,\nsegment_000001.ts\n'
+   path.write_bytes(payload)
+   self.app.add_url_rule('/guide/roku/test/stream.m3u8','roku_file',
+    lambda:send_file(path,mimetype='application/x-mpegurl',conditional=True))
+   options={'environ_overrides':{'wsgi.file_wrapper':FiniteFileWrapper}}
+   response=self.client.get('/guide/roku/test/stream.m3u8',**options)
+   self.assertEqual(response.status_code,200)
+   self.assertEqual(response.data,payload)
+   etag=response.headers['ETag'];response.close()
+   head=self.client.head('/guide/roku/test/stream.m3u8',**options)
+   self.assertEqual(head.status_code,200)
+   self.assertEqual(head.data,b'')
+   self.assertEqual(head.headers['Content-Length'],str(len(payload)));head.close()
+   partial=self.client.get('/guide/roku/test/stream.m3u8',headers={'Range':'bytes=0-6'},**options)
+   self.assertEqual(partial.status_code,206)
+   self.assertEqual(partial.data,payload[:7]);partial.close()
+   cached=self.client.get('/guide/roku/test/stream.m3u8',headers={'If-None-Match':etag},**options)
+   self.assertEqual(cached.status_code,304)
+   self.assertEqual(cached.data,b'');cached.close()

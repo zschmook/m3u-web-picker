@@ -112,7 +112,9 @@ def register_routes(app):
   location=response.headers.get('Location','')
   if 300<=response.status_code<400 and external(location):return response_for(location)
   if 'mpegurl' not in response.content_type.lower() or response.headers.get('X-Picker-Relay'):return response
-  if response.is_streamed:return response
+  # File-backed receiver manifests must keep WSGI passthrough, including ranges.
+  # A finite file wrapper is not necessarily a buffered response sequence.
+  if response.direct_passthrough or response.is_streamed:return response
   lines=[]
   for line in response.get_data(as_text=True).splitlines():
    if external(line.strip()):line=base+register(line.strip())

@@ -3,8 +3,10 @@ from datetime import date
 import hashlib
 import math
 from pathlib import PureWindowsPath, PurePosixPath
+from contextlib import closing
 import re
 import secrets
+import sqlite3
 import threading
 import time
 
@@ -36,6 +38,24 @@ def read(name, default):
     import json
     path = root() / name
     return json.loads(path.read_text(encoding='utf-8')) if path.exists() else default
+
+
+def save_server_counts(rows, now):
+    root().mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(root() / 'scan-status.sqlite')) as connection, connection:
+        connection.execute('CREATE TABLE IF NOT EXISTS server_scans (id TEXT PRIMARY KEY, status TEXT, movies INTEGER, updated_at REAL)')
+        connection.execute('DELETE FROM server_scans')
+        connection.executemany('INSERT INTO server_scans VALUES (?, ?, ?, ?)',
+            [(row['id'], row['status'], row['movies'], now) for row in rows])
+
+
+def server_counts():
+    path = root() / 'scan-status.sqlite'
+    if not path.exists():
+        return []
+    with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True)) as connection:
+        return [dict(id=row[0], status=row[1], movies=row[2], updated_at=row[3])
+                for row in connection.execute('SELECT id, status, movies, updated_at FROM server_scans')]
 
 
 def enabled():
@@ -139,13 +159,18 @@ def refresh(servers, now=None):
     if not servers:
         return dict(status='warning', count=len(read('channels.json', [])), warnings=['No Plex servers available for movie scanning.'])
     metadata = read('metadata.json', {})
-    movies, warnings = [], []
+    movies, warnings, server_rows = [], [], []
     for server in servers:
         try:
             plex.JOB['message'] = 'Scanning movies on ' + server['name'] + '…'
-            movies.extend(scan_server(server, metadata))
+            scanned = scan_server(server, metadata)
+            movies.extend(scanned)
+            server_rows.append(dict(id=server['id'], status='available', movies=len({movie['id'] for movie in scanned})))
         except Exception as exc:
+            server_rows.append(dict(id=server['id'], status='unavailable', movies=0))
             warnings.append(server['name'] + ': movie scan unavailable (' + type(exc).__name__ + ').')
+    with LOCK:
+        save_server_counts(server_rows, now)
     # An incomplete refresh must not replace running channels with partial pools.
     if warnings:
         return dict(status='warning', count=len(read('channels.json', [])), warnings=warnings)
@@ -193,7 +218,7 @@ def payload():
         state=read(row['id']+'.json',{}) if row['id']=='just-released' else {}
         films=[dict(title=m['title'],year=m.get('year',''),release_date=m.get('release_date','')) for m in state.get('episodes',[])]
         channels.append({**row,'movies':films})
-    return dict(enabled=enabled(), catalog=read('catalog.json', {}), channels=channels)
+    return dict(enabled=enabled(), catalog=read('catalog.json', {}), channels=channels, servers=server_counts())
 
 
 def toggle(identity, value):

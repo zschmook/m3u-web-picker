@@ -61,6 +61,18 @@ class MovieChannelTests(unittest.TestCase):
         self.assertEqual(movies.read('drama.json',{}),old)
         self.assertNotIn('private-token',str(result))
 
+    def test_server_counts_include_successful_and_unavailable_scans(self):
+        servers=self.servers+[dict(id='offline',name='Offline')]
+        with patch.object(movies,'scan_server',side_effect=[[film('one',['Drama']),film('one',['Drama'])],OSError('private-token')]):
+            movies.refresh(servers,now=200)
+        counts={row['id']:row for row in movies.payload()['servers']}
+        self.assertEqual(counts['server']['movies'],1)
+        self.assertEqual(counts['server']['status'],'available')
+        self.assertEqual(counts['offline']['status'],'unavailable')
+        self.assertEqual(counts['offline']['movies'],0)
+        self.assertEqual(counts['server']['updated_at'],200)
+        self.assertNotIn('private-token',str(counts))
+
     def test_scan_checks_files_uses_external_types_and_skips_tv_and_unavailable(self):
         sections=ET.fromstring('<MediaContainer><Directory key="1" type="movie"/><Directory key="2" type="show"/></MediaContainer>')
         page=ET.fromstring('<MediaContainer totalSize="4"><Video ratingKey="1"/><Video ratingKey="2"/><Video ratingKey="3"/><Video ratingKey="4"/></MediaContainer>')

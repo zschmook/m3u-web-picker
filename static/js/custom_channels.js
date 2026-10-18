@@ -157,7 +157,18 @@
     if(!state.servers.length&&(!state.plex_account||state.discovered_servers?.length))el('ccConnectionPanel').open=true;
     const observed=state.catalog.updated_at?new Date(state.catalog.updated_at*1000).toLocaleString():'';
     el('ccLastChecked').textContent=observed?`Catalog snapshot from ${observed}. Unavailable servers contribute zero series.`:'No Plex catalog snapshot yet.';
-    el('ccServers').replaceChildren(...state.servers.map(s=>{const result=state.catalog.servers?.find(v=>v.id===s.id);let value;if(!result)value=s.name+' (not checked)';else if(result.status==='unavailable')value=s.name+' (scan unavailable, 0 current series)';else value=s.name+` (${result.shows} series${result.unavailable_files?`, ${result.unavailable_files} unavailable files`:''})`;return text('div',value,'cc-server-status');}));
+    el('ccServers').replaceChildren(...state.servers.map(s=>{
+      const result=state.catalog.servers?.find(v=>v.id===s.id);
+      const movieResult=state.movies?.enabled?state.movies.servers?.find(v=>v.id===s.id):null;
+      const series=!result?'Series not checked':result.status==='unavailable'?'Series scan unavailable':`${result.shows.toLocaleString()} series`;
+      const movies=!state.movies?.enabled?'Movies disabled':!movieResult?'Movies not checked':movieResult.status==='unavailable'?'Movie scan unavailable':`${movieResult.movies.toLocaleString()} movies`;
+      const row=text('div','','cc-server-status');
+      const counts=text('span','','cc-server-counts');
+      counts.append(text('span',series),text('span',movies));
+      row.append(text('span',s.name),counts);
+      if(result?.unavailable_files)row.title=`${result.unavailable_files} unavailable TV files`;
+      return row;
+    }));
     el('ccStatusSummary').textContent=state.job.running?state.job.message:(observed?`Last refreshed ${observed}`:'Not scanned yet');
     if(state.job.running)el('ccStatusPanel').open=true;
     if(!state.job.running&&state.catalog.warnings?.length)status(state.catalog.warnings.join(' '),true);
