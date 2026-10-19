@@ -8,6 +8,8 @@ import secrets
 import threading
 import time
 import zipfile
+from sports.generated import generated_publish_lock
+import sports_map
 
 from flask import Response, jsonify, request, send_file
 import movie_restart
@@ -18,6 +20,8 @@ from .http import no_cache
 REPO = Path(__file__).resolve().parents[1]
 LIVE_LEASES = {}
 LEASE_LOCK = threading.Lock()
+SPORTS_MAP_LOCK = threading.Lock()
+SPORTS_MAP_CACHE = None
 SPORTS_DELAY_SECONDS = 4
 ENTERTAINMENT_DELAY_SECONDS = 30
 
@@ -134,6 +138,7 @@ def guide_payload(channels, now=None, hours=8):
             logo = '/static/icons/guide-192.png'
         rows.append(dict(number=str(channel.get('number', '')), name=channel.get('name', ''),
             group=channel.get('group', ''), logo=logo, play_url=channel.get('play_url', ''),
+            generated_id=channel.get('tvg_id', '') if sports_map.generated_channel(channel) else '',
             is_sports=is_sports_channel(channel), is_movie=is_movie_channel(channel), programmes=programmes))
     return dict(server_time=int(now), window_hours=hours, channels=rows)
 
@@ -143,9 +148,9 @@ def package(server=''):
     root = REPO / 'roku-receiver'
     with zipfile.ZipFile(data, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.write(root / 'manifest', 'manifest')
-        for folder in ('source', 'components'):
+        for folder in ('source', 'components', 'images'):
             for path in sorted((root / folder).rglob('*')):
-                if path.is_file() and path.suffix in ('.brs', '.xml'):
+                if path.is_file() and path.suffix in ('.brs', '.xml', '.png'):
                     archive.write(path, path.relative_to(root).as_posix())
         archive.write(REPO / 'static/icons/guide-512.png', 'images/icon.png')
         archive.writestr('server.json', json.dumps(dict(server=server)))
@@ -154,6 +159,33 @@ def package(server=''):
 
 
 def register_roku_app_routes(app):
+    @app.get('/api/roku/sports-map')
+    def roku_sports_map():
+        with SPORTS_MAP_LOCK:
+            if 'sports_map_daily_cache' not in app.extensions:
+                app.extensions['sports_map_daily_cache'] = sports_map.DailyMapCache(
+                    Path(guide.core.DB_PATH).parent / 'sports-map-daily.json')
+            cache = app.extensions['sports_map_daily_cache']
+        origin = request.url_root
+
+        def build():
+            global SPORTS_MAP_CACHE
+            with app.test_request_context(base_url=origin):
+                with generated_publish_lock:
+                    channels = app.view_functions['api_guide_channels']().get_json()['channels']
+                    records = guide.core.sports.generated_rows(guide.core.DB_PATH)
+                with SPORTS_MAP_LOCK:
+                    if SPORTS_MAP_CACHE is None:
+                        SPORTS_MAP_CACHE = sports_map.MetadataCache(Path(guide.core.DB_PATH).parent / 'sports-map-metadata.json')
+                    metadata_cache = SPORTS_MAP_CACHE
+                metadata = metadata_cache.snapshot(channels)
+                payload = sports_map.make_map(channels, records, metadata['events'], sports_map.TEAMS + metadata['teams'])
+                payload['metadataLoading'] = metadata.get('loading', False)
+                payload['metadataStale'] = metadata.get('stale', False)
+                return payload
+
+        return no_cache(jsonify(cache.snapshot(build)))
+
     @app.get('/api/roku/guide')
     def roku_guide():
         response = app.view_functions['api_guide_channels']()
@@ -185,7 +217,21 @@ def register_roku_app_routes(app):
                 return jsonify(error='Movie could not start. Try again or return to live.'), 502
             return no_cache(jsonify(token=session.token, kind='movie', is_live=False, can_pause=True, title=source['title'],
                 media_url=request.url_root.rstrip('/') + f'/roku/movie/{session.token}/stream.m3u8'))
-        targets, callback = guide._resolve_guide_hls_targets(play_url)
+        generated_id = data.get('generated_id')
+        if generated_id is not None and generated_id != '':
+            if not isinstance(generated_id, str) or not sports_map.ID_RE.fullmatch(generated_id):
+                return jsonify(error='Invalid generated channel identity.'), 400
+            # Reusable channel numbers are resolved only while publication is
+            # locked. A stale map must never silently play a different event.
+            with generated_publish_lock:
+                row = next((r for r in guide.core.sports.generated_rows(guide.core.DB_PATH)
+                            if r['tvg_id'] == generated_id), None)
+                if row is None:
+                    return jsonify(error='This generated feed has changed. Refresh the sports map.'), 410
+                play_url = f'/guide/play/sports/{int(row["assigned_number"])}'
+                targets, callback = guide._resolve_guide_hls_targets(play_url)
+        else:
+            targets, callback = guide._resolve_guide_hls_targets(play_url)
         if not targets:
             return jsonify(error='Channel unavailable.'), 404
         if play_url.startswith('/guide/play/movies/'):

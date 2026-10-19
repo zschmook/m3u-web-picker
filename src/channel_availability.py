@@ -28,13 +28,18 @@ def probe_stream(url):
             capture_output=True, timeout=10, check=False,
         )
         if result.returncode != 0:
+            # A short health check cannot prove that a slow live source is
+            # offline. Keep real playback available when the probe times out.
+            detail = (result.stderr or b"").decode("utf-8", errors="replace").lower()
+            if "timed out" in detail or "timeout" in detail:
+                return None
             return False
         payload = json.loads(result.stdout or b"{}")
         return any(int(packet.get("size") or 0) > 0 for packet in payload.get("packets", []))
     except (ValueError, TypeError):
         return False
     except subprocess.TimeoutExpired:
-        return False
+        return None
     except OSError:
         return None
 

@@ -2,7 +2,8 @@
 <component name="GuideGrid" extends="Group">
   <interface>
     <field id="active" type="boolean" value="true" onChange="onActiveChanged" />
-    <field id="content" type="node" onChange="onContentChanged" />
+    <field id="channels" type="array" onChange="onChannelsChanged" />
+    <field id="serverBase" type="string" />
     <field id="contentStartTime" type="integer" />
     <field id="duration" type="integer" value="10800" />
     <field id="numRows" type="integer" value="9" />
@@ -15,6 +16,8 @@
     <field id="jumpToTime" type="string" alwaysNotify="true" onChange="onJumpTime" />
   </interface>
   <script type="text/brightscript" uri="pkg:/components/GuideGrid.brs" />
+  <script type="text/brightscript" uri="pkg:/components/GuideRows.brs" />
+  <script type="text/brightscript" uri="pkg:/components/GuideDetails.brs" />
   <children>
     <Group id="canvas" clippingRect="[0,0,1760,838]" />
     <Timer id="clock" duration="30" repeat="true" />

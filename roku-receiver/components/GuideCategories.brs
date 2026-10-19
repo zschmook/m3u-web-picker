@@ -1,3 +1,14 @@
+function guideChannelIndices(channels as Object) as Object
+    groups = {ALL: []}
+    for i = 0 to channels.count() - 1
+        for each category in guideChannelCategories(channels[i])
+            if not groups.doesExist(category) then groups[category] = []
+            groups[category].push(i)
+        end for
+    end for
+    return groups
+end function
+
 function guideChannelCategories(channel as Object) as Object
     path = ""
     if channel.play_url <> invalid then path = channel.play_url

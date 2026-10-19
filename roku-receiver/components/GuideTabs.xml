@@ -5,6 +5,7 @@
     <field id="selectedIndex" type="integer" value="0" onChange="drawTabs" />
     <field id="focused" type="boolean" value="false" onChange="drawTabs" />
     <field id="gridRequested" type="boolean" alwaysNotify="true" />
+    <field id="topRequested" type="boolean" alwaysNotify="true" />
   </interface>
   <script type="text/brightscript" uri="pkg:/components/GuideTabs.brs" />
   <children><Group id="canvas" clippingRect="[0,0,1760,54]" /></children>

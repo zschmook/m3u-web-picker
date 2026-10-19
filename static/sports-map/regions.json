@@ -1,0 +1,464 @@
+[
+  {
+    "id": "YT",
+    "name": "Yukon",
+    "row": -2,
+    "col": 1,
+    "country": "CA"
+  },
+  {
+    "id": "NT",
+    "name": "Northwest Territories",
+    "row": -2,
+    "col": 3,
+    "country": "CA"
+  },
+  {
+    "id": "NU",
+    "name": "Nunavut",
+    "row": -2,
+    "col": 6,
+    "country": "CA"
+  },
+  {
+    "id": "NL",
+    "name": "Newfoundland and Labrador",
+    "row": -2,
+    "col": 11,
+    "country": "CA"
+  },
+  {
+    "id": "BC",
+    "name": "British Columbia",
+    "row": -1,
+    "col": 1,
+    "country": "CA"
+  },
+  {
+    "id": "AB",
+    "name": "Alberta",
+    "row": -1,
+    "col": 2,
+    "country": "CA"
+  },
+  {
+    "id": "SK",
+    "name": "Saskatchewan",
+    "row": -1,
+    "col": 3,
+    "country": "CA"
+  },
+  {
+    "id": "MB",
+    "name": "Manitoba",
+    "row": -1,
+    "col": 4,
+    "country": "CA"
+  },
+  {
+    "id": "ON",
+    "name": "Ontario",
+    "row": -1,
+    "col": 6,
+    "country": "CA"
+  },
+  {
+    "id": "QC",
+    "name": "Quebec",
+    "row": -1,
+    "col": 8,
+    "country": "CA"
+  },
+  {
+    "id": "NB",
+    "name": "New Brunswick",
+    "row": -1,
+    "col": 9,
+    "country": "CA"
+  },
+  {
+    "id": "PE",
+    "name": "Prince Edward Island",
+    "row": -1,
+    "col": 10,
+    "country": "CA"
+  },
+  {
+    "id": "NS",
+    "name": "Nova Scotia",
+    "row": -1,
+    "col": 11,
+    "country": "CA"
+  },
+  {
+    "id": "ME",
+    "name": "Maine",
+    "row": 0,
+    "col": 11,
+    "country": "US"
+  },
+  {
+    "id": "AK",
+    "name": "Alaska",
+    "row": 1,
+    "col": 0,
+    "country": "US"
+  },
+  {
+    "id": "WI",
+    "name": "Wisconsin",
+    "row": 1,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "VT",
+    "name": "Vermont",
+    "row": 1,
+    "col": 10,
+    "country": "US"
+  },
+  {
+    "id": "NH",
+    "name": "New Hampshire",
+    "row": 1,
+    "col": 11,
+    "country": "US"
+  },
+  {
+    "id": "WA",
+    "name": "Washington",
+    "row": 2,
+    "col": 1,
+    "country": "US"
+  },
+  {
+    "id": "ID",
+    "name": "Idaho",
+    "row": 2,
+    "col": 2,
+    "country": "US"
+  },
+  {
+    "id": "MT",
+    "name": "Montana",
+    "row": 2,
+    "col": 3,
+    "country": "US"
+  },
+  {
+    "id": "ND",
+    "name": "North Dakota",
+    "row": 2,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "MN",
+    "name": "Minnesota",
+    "row": 2,
+    "col": 5,
+    "country": "US"
+  },
+  {
+    "id": "IL",
+    "name": "Illinois",
+    "row": 2,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "MI",
+    "name": "Michigan",
+    "row": 2,
+    "col": 7,
+    "country": "US"
+  },
+  {
+    "id": "NY",
+    "name": "New York",
+    "row": 2,
+    "col": 9,
+    "country": "US"
+  },
+  {
+    "id": "MA",
+    "name": "Massachusetts",
+    "row": 2,
+    "col": 10,
+    "country": "US"
+  },
+  {
+    "id": "OR",
+    "name": "Oregon",
+    "row": 3,
+    "col": 1,
+    "country": "US"
+  },
+  {
+    "id": "NV",
+    "name": "Nevada",
+    "row": 3,
+    "col": 2,
+    "country": "US"
+  },
+  {
+    "id": "WY",
+    "name": "Wyoming",
+    "row": 3,
+    "col": 3,
+    "country": "US"
+  },
+  {
+    "id": "SD",
+    "name": "South Dakota",
+    "row": 3,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "IA",
+    "name": "Iowa",
+    "row": 3,
+    "col": 5,
+    "country": "US"
+  },
+  {
+    "id": "IN",
+    "name": "Indiana",
+    "row": 3,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "OH",
+    "name": "Ohio",
+    "row": 3,
+    "col": 7,
+    "country": "US"
+  },
+  {
+    "id": "PA",
+    "name": "Pennsylvania",
+    "row": 3,
+    "col": 8,
+    "country": "US"
+  },
+  {
+    "id": "NJ",
+    "name": "New Jersey",
+    "row": 3,
+    "col": 9,
+    "country": "US"
+  },
+  {
+    "id": "CT",
+    "name": "Connecticut",
+    "row": 3,
+    "col": 10,
+    "country": "US"
+  },
+  {
+    "id": "RI",
+    "name": "Rhode Island",
+    "row": 3,
+    "col": 11,
+    "country": "US"
+  },
+  {
+    "id": "CA",
+    "name": "California",
+    "row": 4,
+    "col": 1,
+    "country": "US"
+  },
+  {
+    "id": "UT",
+    "name": "Utah",
+    "row": 4,
+    "col": 2,
+    "country": "US"
+  },
+  {
+    "id": "CO",
+    "name": "Colorado",
+    "row": 4,
+    "col": 3,
+    "country": "US"
+  },
+  {
+    "id": "NE",
+    "name": "Nebraska",
+    "row": 4,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "MO",
+    "name": "Missouri",
+    "row": 4,
+    "col": 5,
+    "country": "US"
+  },
+  {
+    "id": "KY",
+    "name": "Kentucky",
+    "row": 4,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "WV",
+    "name": "West Virginia",
+    "row": 4,
+    "col": 7,
+    "country": "US"
+  },
+  {
+    "id": "VA",
+    "name": "Virginia",
+    "row": 4,
+    "col": 8,
+    "country": "US"
+  },
+  {
+    "id": "MD",
+    "name": "Maryland",
+    "row": 4,
+    "col": 9,
+    "country": "US"
+  },
+  {
+    "id": "DE",
+    "name": "Delaware",
+    "row": 4,
+    "col": 10,
+    "country": "US"
+  },
+  {
+    "id": "AZ",
+    "name": "Arizona",
+    "row": 5,
+    "col": 2,
+    "country": "US"
+  },
+  {
+    "id": "NM",
+    "name": "New Mexico",
+    "row": 5,
+    "col": 3,
+    "country": "US"
+  },
+  {
+    "id": "KS",
+    "name": "Kansas",
+    "row": 5,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "AR",
+    "name": "Arkansas",
+    "row": 5,
+    "col": 5,
+    "country": "US"
+  },
+  {
+    "id": "TN",
+    "name": "Tennessee",
+    "row": 5,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "NC",
+    "name": "North Carolina",
+    "row": 5,
+    "col": 7,
+    "country": "US"
+  },
+  {
+    "id": "SC",
+    "name": "South Carolina",
+    "row": 5,
+    "col": 8,
+    "country": "US"
+  },
+  {
+    "id": "HI",
+    "name": "Hawaii",
+    "row": 6,
+    "col": 0,
+    "country": "US"
+  },
+  {
+    "id": "OK",
+    "name": "Oklahoma",
+    "row": 6,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "LA",
+    "name": "Louisiana",
+    "row": 6,
+    "col": 5,
+    "country": "US"
+  },
+  {
+    "id": "MS",
+    "name": "Mississippi",
+    "row": 6,
+    "col": 6,
+    "country": "US"
+  },
+  {
+    "id": "AL",
+    "name": "Alabama",
+    "row": 6,
+    "col": 7,
+    "country": "US"
+  },
+  {
+    "id": "GA",
+    "name": "Georgia",
+    "row": 6,
+    "col": 8,
+    "country": "US"
+  },
+  {
+    "id": "TX",
+    "name": "Texas",
+    "row": 7,
+    "col": 4,
+    "country": "US"
+  },
+  {
+    "id": "FL",
+    "name": "Florida",
+    "row": 7,
+    "col": 9,
+    "country": "US"
+  },
+  {
+    "id": "DC",
+    "name": "District of Columbia",
+    "row": 5,
+    "col": 9,
+    "country": "US"
+  },
+  {
+    "id": "INTL",
+    "name": "Other countries",
+    "row": 7,
+    "col": 11,
+    "auxiliary": true
+  },
+  {
+    "id": "??",
+    "name": "Needs location",
+    "row": 6,
+    "col": 11,
+    "auxiliary": true
+  }
+]

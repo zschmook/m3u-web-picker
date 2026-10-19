@@ -74,6 +74,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         m.top.gridRequested = true
         return true
     else if key = "up"
+        m.top.topRequested = true
         return true
     end if
     return false

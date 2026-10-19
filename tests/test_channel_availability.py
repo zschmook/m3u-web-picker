@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,6 +119,26 @@ class AvailabilityTests(unittest.TestCase):
             self.assertEqual(cache.lookup(["primary", "fallback"]), (True, "fallback"))
             cache.remember(["primary", "fallback"], False)
             self.assertEqual(cache.lookup(["primary", "fallback"]), (False, ""))
+        finally:
+            cache.worker.shutdown()
+
+    def test_probe_timeouts_are_unknown_but_explicit_failures_remain_offline(self):
+        with patch("channel_availability.shutil.which", return_value="ffprobe"), patch("channel_availability.subprocess.run") as run:
+            run.side_effect = subprocess.TimeoutExpired("ffprobe", 10)
+            self.assertIsNone(probe_stream("http://example.test"))
+            run.side_effect = None
+            run.return_value.returncode = 1
+            run.return_value.stderr = b"http://example.test: Connection timed out"
+            self.assertIsNone(probe_stream("http://example.test"))
+            run.return_value.stderr = b"Server returned 404 Not Found"
+            self.assertFalse(probe_stream("http://example.test"))
+
+    def test_inconclusive_probe_allows_playback_and_still_prefers_confirmed_fallback(self):
+        cache = AvailabilityCache(lambda url: None if url == "slow" else True)
+        try:
+            self.assertEqual(cache.resolve(["slow"]), "slow")
+            self.assertEqual(cache.lookup(["slow"]), (None, "slow"))
+            self.assertEqual(cache.resolve(["slow", "healthy"]), "healthy")
         finally:
             cache.worker.shutdown()
 

@@ -17,6 +17,7 @@ sub init()
     m.channels = []
     m.guideChannels = []
     m.guideGroups = invalid
+    m.guideDrawn = false
     m.session = invalid
     m.currentChannel = invalid
     m.playing = false
@@ -40,6 +41,7 @@ sub init()
     end if
     initPlaybackDiagnostics(config)
     initMovieLighting(config)
+    initSportsMapView()
     m.video.observeField("state", "onVideoState")
     m.video.observeField("bufferingStatus", "onBufferingStatus")
     m.grid.observeField("programSelected", "onProgramSelected")
@@ -105,20 +107,26 @@ sub onApiResult(event as Object)
         m.guideLoading = false
         if result.ok
             m.channels = result.data.channels
-            m.guideGroups = invalid
+            m.guideGroups = result.data.guideGroups
             if m.currentChannel <> invalid
                 for each channel in m.channels
-                    if channel.play_url = m.currentChannel.play_url
+                    sameChannel = channel.play_url = m.currentChannel.play_url
+                    if m.currentChannel.generated_id <> invalid
+                        if m.currentChannel.generated_id <> "" then sameChannel = channel.generated_id = m.currentChannel.generated_id
+                    end if
+                    if sameChannel
                         m.currentChannel = channel
                         exit for
                     end if
                 end for
             end if
-            renderGuide(result.data.server_time)
+            if m.activeView = "guide" then renderGuide(result.data.server_time)
         else
             m.status.text = result.error + " Press * to change server."
             m.status.visible = true
         end if
+    else if result.purpose = "sports_map"
+        onSportsMapResult(result)
     else if result.purpose = "movie_lighting"
         onMovieLightingConfig(result)
     else if result.purpose = "play"
@@ -135,7 +143,7 @@ sub onApiResult(event as Object)
             if result.data.live_delay_seconds <> invalid then m.liveDelay = result.data.live_delay_seconds
             startVideo(result.data.media_url)
         else
-            m.playerStatus.text = result.error + " Press Back for the guide."
+            m.playerStatus.text = result.error + " Press Back to return."
         end if
     end if
 end sub
@@ -143,19 +151,13 @@ end sub
 sub renderGuide(serverTime as Integer)
     ' Keep ContentNode construction and hundreds of UI mutations off the
     ' render thread while the hidden guide sits underneath full-screen video.
-    if m.playing then return
+    if m.playing or m.activeView <> "guide" then return
     focusedPath = ""
     focusedChannel = selectedChannel()
     if focusedChannel <> invalid then focusedPath = focusedChannel.play_url
-    if m.guideGroups = invalid
-        m.guideGroups = {ALL: m.channels}
-        for each channel in m.channels
-            for each category in guideChannelCategories(channel)
-                if not m.guideGroups.doesExist(category) then m.guideGroups[category] = []
-                m.guideGroups[category].push(channel)
-            end for
-        end for
-    end if
+    ' ApiTask categorizes the lineup off the render thread. The grid only
+    ' materializes visible rows and keeps a bounded cache while scrolling.
+    if m.guideGroups = invalid then return
     if not m.guideGroups.doesExist(m.selectedCategory) then m.selectedCategory = "ALL"
     names = guideCategoryNames(m.guideGroups)
     selectedIndex = 0
@@ -164,31 +166,23 @@ sub renderGuide(serverTime as Integer)
     end for
     m.tabs.labels = names
     m.tabs.selectedIndex = selectedIndex
-    m.guideChannels = m.guideGroups[m.selectedCategory]
+    if m.selectedCategory = "ALL"
+        m.guideChannels = m.channels
+    else
+        m.guideChannels = []
+        for each index in m.guideGroups[m.selectedCategory]
+            m.guideChannels.push(m.channels[index])
+        end for
+    end if
     focused = 0
     for i = 0 to m.guideChannels.count() - 1
         if m.guideChannels[i].play_url = focusedPath then focused = i
     end for
-    root = CreateObject("roSGNode", "ContentNode")
-    for each channel in m.guideChannels
-        row = root.createChild("ContentNode")
-        row.title = channel.number + "  " + channel.name
-        logo = channel.logo
-        if Left(logo, 1) = "/" then logo = m.server + logo
-        row.addFields({number: channel.number, name: channel.name, groupName: channel.group, logoUrl: logo})
-        for each programme in channel.programmes
-            details = guideProgrammeDetails(channel, programme, serverTime)
-            cell = row.createChild("ContentNode")
-            cell.title = programme.title
-            cell.description = details.description
-            cell.playStart = programme.start
-            cell.playDuration = programme.stop - programme.start
-            cell.addFields({subtitle: programme.subtitle, detailsKind: details.kind, detailsFacts: details.facts})
-        end for
-    end for
-    firstLoad = m.grid.content = invalid
+    firstLoad = not m.guideDrawn
+    m.grid.serverBase = m.server
     m.grid.contentStartTime = serverTime - 1800
-    m.grid.content = root
+    m.grid.channels = m.guideChannels
+    m.guideDrawn = true
     m.grid.jumpToChannel = focused
     if firstLoad
         now = CreateObject("roDateTime")
@@ -198,7 +192,7 @@ sub renderGuide(serverTime as Integer)
     m.status.visible = m.guideChannels.count() = 0
     m.grid.visible = not m.status.visible
     if m.status.visible then m.status.text = "No channels in " + m.tabs.labels[m.tabs.selectedIndex] + ". Choose another category."
-    if m.top.dialog = invalid and not m.tabs.hasFocus()
+    if m.top.dialog = invalid and not m.tabs.hasFocus() and not m.viewTabs.hasFocus()
         if m.grid.visible then focusGuideGrid() else focusGuideTabs()
     end if
 end sub
@@ -280,6 +274,7 @@ sub releasePlayback()
 end sub
 
 sub playChannel(channel as Object, restartUrl = "" as String)
+    m.returnToSportsMap = m.activeView = "map"
     m.generation++
     releasePlayback()
     m.video.control = "stop"
@@ -298,6 +293,8 @@ sub playChannel(channel as Object, restartUrl = "" as String)
     m.playing = true
     m.grid.active = false
     m.panel.visible = false
+    m.sportsMap.visible = false
+    m.appHeader.visible = false
     m.video.visible = false
     m.playerStatus.visible = true
     m.playerStatus.text = "Loading " + channel.name + "..."
@@ -306,7 +303,9 @@ sub playChannel(channel as Object, restartUrl = "" as String)
     if m.movie then mode = "movie"
     lowLatency = false
     if channel.is_sports <> invalid then lowLatency = channel.is_sports
-    requestApi("/api/roku/playback", "POST", {play_url: channel.play_url, mode: mode, restart_url: restartUrl, low_latency: lowLatency}, "play", m.generation)
+    body = {play_url: channel.play_url, mode: mode, restart_url: restartUrl, low_latency: lowLatency}
+    if channel.generated_id <> invalid then body.generated_id = channel.generated_id
+    requestApi("/api/roku/playback", "POST", body, "play", m.generation)
 end sub
 
 sub startVideo(url as String)
@@ -354,7 +353,7 @@ sub onLiveBufferReady(event as Object)
         print "M3U live cushion seconds="; m.liveDelay; " available="; result.seconds
         beginVideo(result.playbackUrl)
     else
-        m.playerStatus.text = "Stream could not build a playback buffer. Press Back for the guide."
+        m.playerStatus.text = "Stream could not build a playback buffer. Press Back to return."
     end if
 end sub
 
@@ -380,12 +379,14 @@ end sub
 sub playUrl(url as String)
     if url = "" then return
     m.top.dialog = invalid
+    m.returnToSportsMap = false
     origin = CreateObject("roRegex", "^https?://[^/]+", "i").match(url)
     if origin.count() = 0 then return
     if m.server <> origin[0]
         m.guideGeneration++
         m.guideLoading = false
         m.server = origin[0]
+        resetSportsMapServer()
         saveServer()
         refreshGuide()
     end if
@@ -408,6 +409,8 @@ sub playUrl(url as String)
     m.grid.active = false
     m.currentChannel = invalid
     m.panel.visible = false
+    m.sportsMap.visible = false
+    m.appHeader.visible = false
     m.playerStatus.visible = true
     m.playerStatus.text = "Loading live TV..."
     if token.count() > 1
@@ -431,6 +434,19 @@ sub showGuide()
     m.video.visible = false
     m.playerStatus.visible = false
     releasePlayback()
+    m.appHeader.visible = true
+    if m.returnToSportsMap
+        m.activeView = "map"
+        m.viewTabs.selectedIndex = 1
+        m.panel.visible = false
+        m.sportsMap.visible = true
+        m.sportsMap.callFunc("activate")
+        refreshSportsMap()
+        return
+    end if
+    m.activeView = "guide"
+    m.viewTabs.selectedIndex = 0
+    m.sportsMap.visible = false
     m.panel.visible = true
     m.grid.active = true
     if m.channels.count() > 0
@@ -516,6 +532,7 @@ sub showOptions()
         end if
         buttons.push("TV Guide") : m.actions.push("guide")
     end if
+    buttons.push("Sports Map") : m.actions.push("sports_map")
     buttons.push("Refresh Guide") : m.actions.push("refresh")
     buttons.push("Change Server") : m.actions.push("server")
     buttons.push("Close") : m.actions.push("close")
@@ -532,7 +549,16 @@ sub onOptionsSelected(event as Object)
     else if action = "live"
         playChannel(m.currentChannel)
     else if action = "guide"
+        m.returnToSportsMap = false
         showGuide()
+    else if action = "sports_map"
+        if m.playing
+            m.returnToSportsMap = true
+            showGuide()
+        else
+            m.viewTabs.selectedIndex = 1
+            focusActiveView()
+        end if
     else if action = "refresh"
         refreshGuide()
     else if action = "server"
@@ -564,9 +590,13 @@ sub onServerSelected(event as Object)
         m.guideGeneration++
         m.guideLoading = false
         m.server = address
+        resetSportsMapServer()
+        m.returnToSportsMap = false
         saveServer()
         m.channels = []
         m.guideChannels = []
+        m.grid.channels = []
+        m.guideDrawn = false
         m.guideGroups = invalid
         showGuide()
     end if
@@ -582,6 +612,10 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
     if not press then return false
     if key = "options"
         showOptions()
+        return true
+    end if
+    if not m.playing and m.viewTabs.hasFocus() and key = "back"
+        focusActiveView()
         return true
     end if
     if m.playing

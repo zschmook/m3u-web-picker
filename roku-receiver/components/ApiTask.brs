@@ -30,6 +30,8 @@ sub runRequest()
             if data <> invalid
                 result.data = data
                 if code >= 200 and code < 300
+                    if m.top.purpose = "guide" and data.channels <> invalid then data.guideGroups = guideChannelIndices(data.channels)
+                    if m.top.purpose = "sports_map" then compactSportsMapData(data)
                     result.ok = true
                 else if data.error <> invalid
                     result.error = data.error
@@ -40,4 +42,22 @@ sub runRequest()
         end if
     end if
     m.top.result = result
+end sub
+
+sub compactSportsMapData(data as Object)
+    ' Keep long guide descriptions out of render-thread field transfers.
+    ' Playback resolves the generated ID on Picker; the map needs only timing.
+    if data.states = invalid then return
+    for each region in data.states
+        for each game in region.games
+            for each key in ["phase", "live", "kickoff", "sport", "region", "locationSource", "locationInferred"]
+                game.delete(key)
+            end for
+            for each feed in game.feeds
+                for each programme in feed.programmes
+                    programme.description = ""
+                end for
+            end for
+        end for
+    end for
 end sub
