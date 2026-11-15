@@ -8,6 +8,7 @@ import core
 import movie_restart
 import roku_devices
 import sports
+import sports_map
 from guide_epg import enrich_guide_channels
 from media import browser, director, hls
 from settings import load_settings
@@ -93,6 +94,15 @@ def _resolve_guide_play_target(play_url: str) -> str:
     generated = re.fullmatch(r"/guide/play/sports/(\d+)", value)
     if generated:
         return sports.generated_stream_target(core.DB_PATH, int(generated.group(1)))
+    identity = value.removeprefix('/guide/play/sports/id/')
+    if value.startswith('/guide/play/sports/id/') and sports_map.ID_RE.fullmatch(identity):
+        # Numbers can be reused after a scan. Resolve the selected feed's stable
+        # identity and its current stream together under the publication lock.
+        with generated_publish_lock:
+            row = next((row for row in sports.generated_rows(core.DB_PATH)
+                        if row['tvg_id'] == identity), None)
+            if row:
+                return sports.generated_stream_target(core.DB_PATH, int(row['assigned_number']))
     return ""
 
 
@@ -143,6 +153,11 @@ def _resolve_roku_host(data: dict) -> tuple[str, str]:
 
 
 def register_guide_routes(app):
+    @app.get('/api/guide/sports-map')
+    def guide_sports_map():
+        # Both clients use the same prepared daily cache and metadata refresh.
+        return app.view_functions['roku_sports_map']()
+
     @app.get("/guide-sw.js")
     def guide_service_worker():
         response = app.send_static_file("js/guide-sw.js")
@@ -440,6 +455,14 @@ def register_guide_routes(app):
         target = core.manual_stream_target(token)
         if not target:
             return Response("Curated stream not found.\n", status=404, content_type="text/plain; charset=utf-8")
+        return browser.response_for(target)
+
+    @app.get('/guide/play/sports/id/<generated_id>')
+    def guide_play_sports_identity(generated_id: str):
+        target = _resolve_guide_play_target('/guide/play/sports/id/' + generated_id)
+        if not target:
+            return Response('This generated feed has changed. Refresh the sports map.\n',
+                            status=410, content_type='text/plain; charset=utf-8')
         return browser.response_for(target)
 
     @app.get("/guide/play/sports/<int:assigned_number>")

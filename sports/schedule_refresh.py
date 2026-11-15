@@ -28,7 +28,7 @@ class ScheduleFetchWork:
 
 def schedule_api_refresh_health(db_path: Path | str) -> dict:
     """Return persisted, credential-free refresh-attempt health."""
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         row = conn.execute(
             "SELECT value FROM sports_settings WHERE key = ?",
@@ -47,7 +47,7 @@ def schedule_api_refresh_health(db_path: Path | str) -> dict:
 
 
 def _save_schedule_api_refresh_health(db_path: Path | str, health: dict) -> None:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO sports_settings(key, value) VALUES (?, ?)",

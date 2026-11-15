@@ -47,7 +47,7 @@ def begin_scan_state(
     started_at: str | None = None,
     stage: str = "Starting sports update",
 ) -> dict:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     started = started_at or _s._now_iso()
     updated = _s._now_iso()
     with closing(_s._connect(db_path)) as conn:
@@ -70,7 +70,7 @@ def begin_scan_state(
 
 
 def update_scan_stage(db_path: Path | str, stage: str) -> dict:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         conn.execute(
             """
@@ -85,7 +85,7 @@ def update_scan_stage(db_path: Path | str, stage: str) -> dict:
 
 
 def finish_scan_state(db_path: Path | str) -> None:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         conn.execute(
             """
@@ -99,7 +99,7 @@ def finish_scan_state(db_path: Path | str) -> None:
 
 
 def scan_state(db_path: Path | str, now: datetime | None = None) -> dict:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         row = conn.execute(
             """
@@ -190,7 +190,7 @@ def record_scan_failure(
 
 
 def last_scan(db_path: Path | str) -> dict | None:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         row = conn.execute(
             """

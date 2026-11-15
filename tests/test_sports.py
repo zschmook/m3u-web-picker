@@ -3475,7 +3475,7 @@ http://provider.test/phillies.ts
         self.assertIn("runMasterUpdate", javascript)
         self.assertIn("/playlist/channels.m3u", javascript)
         self.assertIn("/epg/epg.xml", javascript)
-        self.assertIn("v='server-state-1'", html)
+        self.assertRegex(html, r"url_for\('static', filename='js/app\.js', v='[^']+'\)")
         self.assertIn('id="masterUpdateEnabled"', html)
         self.assertIn('id="masterUpdateTime"', html)
         self.assertIn('id="masterUpdateNowBtn"', html)

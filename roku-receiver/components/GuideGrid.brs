@@ -5,6 +5,9 @@ sub init()
     m.stationWidth = 360
     m.headerHeight = 46
     m.rowHeight = 88
+    m.rawChannels = []
+    m.rowCache = {}
+    m.rowOrder = []
     m.firstRow = 0
     m.channel = 0
     m.programme = 0
@@ -49,8 +52,8 @@ sub repeatNavigation()
 end sub
 
 sub moveChannel(key as String, repeated = false as Boolean)
-    if m.top.content = invalid then return
-    count = m.top.content.getChildCount()
+    if m.rawChannels = invalid then return
+    count = m.rawChannels.count()
     if count = 0 then return
     if key = "up" and m.channel = 0
         stopNavigationRepeat()
@@ -148,10 +151,18 @@ sub drawProgrammeDetails(row as Object, y as Float, height as Float, currentTime
     synopsis.ellipsizeOnBoundary = true
 end sub
 
-sub onContentChanged()
-    if m.top.content = invalid then return
-    if m.top.content.getChildCount() = 0 then return
-    if m.channel >= m.top.content.getChildCount() then m.channel = 0
+sub onChannelsChanged()
+    m.rawChannels = m.top.channels
+    m.rowCache = {} : m.rowOrder = []
+    if m.rawChannels = invalid then m.rawChannels = []
+    if m.rawChannels.count() = 0
+        stopNavigationRepeat()
+        m.channel = 0 : m.programme = 0 : m.firstRow = 0
+        m.top.channelFocused = 0 : m.top.programFocused = 0
+        if m.canvas.getChildCount() > 0 then m.canvas.removeChildrenIndex(m.canvas.getChildCount(), 0)
+        return
+    end if
+    if m.channel >= m.rawChannels.count() then m.channel = 0
     if m.windowStart = 0 then m.windowStart = Int(m.top.contentStartTime / 1800) * 1800
     now = CreateObject("roDateTime")
     if m.focusTime = 0 then m.focusTime = now.asSeconds()
@@ -160,8 +171,8 @@ sub onContentChanged()
 end sub
 
 sub onJumpChannel()
-    if m.top.content = invalid then return
-    count = m.top.content.getChildCount()
+    if m.rawChannels = invalid then return
+    count = m.rawChannels.count()
     if count = 0 then return
     m.channel = m.top.jumpToChannel
     if m.channel < 0 or m.channel >= count then m.channel = 0
@@ -179,8 +190,8 @@ sub onJumpTime()
 end sub
 
 function rowContent() as Dynamic
-    if m.top.content = invalid then return invalid
-    return m.top.content.getChild(m.channel)
+    if m.rawChannels = invalid then return invalid
+    return guideRow(m.channel)
 end function
 
 sub chooseProgramme()
@@ -249,8 +260,8 @@ end function
 
 sub drawGuide()
     if not m.top.active then return
-    if m.top.content = invalid then return
-    count = m.top.content.getChildCount()
+    if m.rawChannels = invalid then return
+    count = m.rawChannels.count()
     if count = 0 then return
     rows = visibleChannelRows()
     if m.channel < m.firstRow then m.firstRow = m.channel
@@ -282,7 +293,7 @@ sub drawGuide()
     for visibleRow = 0 to rows - 1
         index = m.firstRow + visibleRow
         if index >= count then exit for
-        row = m.top.content.getChild(index)
+        row = guideRow(index)
         y = m.headerHeight + visibleRow * m.rowHeight
         if index > m.channel then y += detailsHeight
         stationColor = "0x1f2937ff"
@@ -371,8 +382,8 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
         return false
     end if
-    if not m.top.active or m.top.content = invalid then return false
-    count = m.top.content.getChildCount()
+    if not m.top.active or m.rawChannels = invalid then return false
+    count = m.rawChannels.count()
     if count = 0 then return false
     if key = "OK"
         stopNavigationRepeat()

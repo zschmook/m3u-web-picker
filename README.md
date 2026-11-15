@@ -9,13 +9,13 @@ The app runs in Docker on Windows, macOS, and Linux. Start with a [packaged inst
 ## What it does
 
 - **Channels and guide:** load an M3U URL/file or Xtream provider, choose and reorder channels, and combine provider XMLTV with optional public guide sources.
-- **Sports Automation:** follow teams and leagues, generate temporary event channels, and try ordered fallback providers when the primary provider has no usable feed.
+- **Sports Automation:** follow teams and leagues, generate temporary event channels, browse the sports map, and try ordered fallback providers when the primary provider has no usable feed.
 - **Browser playback:** watch live TV, use Picture-in-Picture, or listen to an audio-only stream. Android phones can hand playback to VLC.
 - **DVR:** record a program or series, browse completed recordings, and optionally remove commercials and convert recordings to H.265/MKV.
 - **TV devices:** browse the native Roku guide, send playback from the browser to Roku or Google Cast, or use the virtual HDHomeRun interface with compatible clients.
 - **Plex custom channels — experimental:** create continuous show channels, movie genre channels, and optional nostalgia commercial breaks from your own media.
 - **Movie lighting — experimental:** create named rooms, each with one Roku, several compatible lights, and separate playing and paused brightness settings.
-- **VPN — development preview:** import and test a WireGuard profile, relay provider streams through Gluetun, retain an applied configuration, and view VPN power/status/public IP. Automatic testing and switching currently require the port-9998 development host helpers; the packaged installer does not yet provision or supervise them. See [VPN development and limitations](docs/VPN-DEVELOPMENT.md) before enabling this option.
+- **VPN — development preview:** import and test a WireGuard profile, relay provider streams through Gluetun, retain an applied configuration, and view VPN power/status/public IP. Packaged installers bundle and supervise the production host helpers. Fresh-machine/reboot and additional-provider acceptance testing remain outstanding; see [VPN development and limitations](docs/VPN-DEVELOPMENT.md).
 
 ## Install (recommended)
 
@@ -233,17 +233,25 @@ For source updates, run `git pull --ff-only origin main` followed by the same bu
 
 The isolated setup stacks use port `9998` and separate data volumes; see [standalone wizard development](docs/STANDALONE-SETUP-WIZARD.md). They are separate from the normal port-`9999` installation.
 
-Run the Python suite inside a development image, which includes the required dependencies and FFmpeg tools:
+Run the full Python suite in a separate test image, which adds pinned development dependencies to the application and its FFmpeg tools:
 
 ```sh
-docker build -t m3u-web-picker-tests .
-docker run --rm --entrypoint python m3u-web-picker-tests -m unittest discover -s tests
+docker build -t m3u-web-picker-tests-base .
+docker run --rm --network none --entrypoint python m3u-web-picker-tests-base -m unittest tests.test_third_party_notices
+docker build -f Dockerfile.test --build-arg APP_IMAGE=m3u-web-picker-tests-base -t m3u-web-picker-tests .
+docker run --rm --network none m3u-web-picker-tests
 ```
 
-For the guide's JavaScript behavior checks, with Node installed:
+Runtime license-inventory checks run against the unmodified application image; the remaining Python tests run in the test image, so test-only packages are kept out of the product inventory.
+
+For the browser and Roku behavior checks, install the pinned development tools with Node.js 22 or newer:
 
 ```sh
-node --test tests/guide_stop_playback.test.cjs tests/guide_vlc.test.cjs
+npm ci --ignore-scripts
+npm test
+npm run check:roku
 ```
+
+The portable test runner includes the Roku interpreter tests. The separate `tests/vpn_settings.test.cjs` browser fixture requires Playwright and a local Chrome installation; it is not part of `npm test`.
 
 More documentation: [User guide](docs/USER-GUIDE.md), [installer packaging](installer/docker/README.md), and [project documentation](docs/README.md).

@@ -1,0 +1,1206 @@
+{
+  "verifiedAt": "2026-10-18",
+  "teams": [
+    {
+      "scope": "ahl",
+      "name": "Abbotsford Canucks",
+      "aliases": [],
+      "region": "BC",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Bakersfield Condors",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Belleville Senators",
+      "aliases": [],
+      "region": "ON",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Calgary Wranglers",
+      "aliases": [],
+      "region": "AB",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Charlotte Checkers",
+      "aliases": [],
+      "region": "NC",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Chicago Wolves",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Cleveland Monsters",
+      "aliases": [],
+      "region": "OH",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Coachella Valley Firebirds",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Colorado Eagles",
+      "aliases": [],
+      "region": "CO",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Grand Rapids Griffins",
+      "aliases": [],
+      "region": "MI",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Hamilton Hammers",
+      "aliases": [
+        "Bridgeport Islanders"
+      ],
+      "region": "ON",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Hartford Wolf Pack",
+      "aliases": [],
+      "region": "CT",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Henderson Silver Knights",
+      "aliases": [],
+      "region": "NV",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Hershey Bears",
+      "aliases": [],
+      "region": "PA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Iowa Wild",
+      "aliases": [],
+      "region": "IA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Laval Rocket",
+      "aliases": [],
+      "region": "QC",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Lehigh Valley Phantoms",
+      "aliases": [],
+      "region": "PA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Manitoba Moose",
+      "aliases": [],
+      "region": "MB",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Milwaukee Admirals",
+      "aliases": [],
+      "region": "WI",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Ontario Reign",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Providence Bruins",
+      "aliases": [],
+      "region": "RI",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Rochester Americans",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Rockford IceHogs",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "San Diego Gulls",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "San Jose Barracuda",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Springfield Thunderbirds",
+      "aliases": [],
+      "region": "MA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Syracuse Crunch",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Texas Stars",
+      "aliases": [],
+      "region": "TX",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Toronto Marlies",
+      "aliases": [],
+      "region": "ON",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Tucson Roadrunners",
+      "aliases": [],
+      "region": "AZ",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Utica Comets",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "ahl",
+      "name": "Wilkes-Barre/Scranton Penguins",
+      "aliases": [
+        "Wilkes Barre Scranton Penguins",
+        "Wilkes-Barre Scranton Penguins"
+      ],
+      "region": "PA",
+      "source": "https://theahl.com/team-map-directory"
+    },
+    {
+      "scope": "echl",
+      "name": "Adirondack Thunder",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Allen Americans",
+      "aliases": [],
+      "region": "TX",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Atlanta Gladiators",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Bloomington Bison",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Cincinnati Cyclones",
+      "aliases": [],
+      "region": "OH",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Florida Everblades",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Fort Wayne Komets",
+      "aliases": [],
+      "region": "IN",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Greensboro Gargoyles",
+      "aliases": [],
+      "region": "NC",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Greenville Swamp Rabbits",
+      "aliases": [],
+      "region": "SC",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Idaho Steelheads",
+      "aliases": [],
+      "region": "ID",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Indy Fuel",
+      "aliases": [],
+      "region": "IN",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Jacksonville Icemen",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Kalamazoo Wings",
+      "aliases": [],
+      "region": "MI",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Kansas City Mavericks",
+      "aliases": [],
+      "region": "MO",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Maine Mariners",
+      "aliases": [],
+      "region": "ME",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "New Mexico Goatheads",
+      "aliases": [],
+      "region": "NM",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Norfolk Admirals",
+      "aliases": [],
+      "region": "VA",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Orlando Solar Bears",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Rapid City Rush",
+      "aliases": [],
+      "region": "SD",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Reading Royals",
+      "aliases": [],
+      "region": "PA",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Savannah Ghost Pirates",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "South Carolina Stingrays",
+      "aliases": [],
+      "region": "SC",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Tahoe Knight Monsters",
+      "aliases": [],
+      "region": "NV",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Toledo Walleye",
+      "aliases": [],
+      "region": "OH",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Trenton Ironhawks",
+      "aliases": [],
+      "region": "NJ",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Trois-Rivières Lions",
+      "aliases": [
+        "Trois-Rivières",
+        "Trois Rivieres",
+        "Trois-Rivieres Lions",
+        "Trois-Rivieres Lions"
+      ],
+      "region": "QC",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Tulsa Oilers",
+      "aliases": [],
+      "region": "OK",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Wheeling Nailers",
+      "aliases": [],
+      "region": "WV",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Wichita Thunder",
+      "aliases": [],
+      "region": "KS",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "echl",
+      "name": "Worcester Railers",
+      "aliases": [],
+      "region": "MA",
+      "source": "https://echl.com/teams"
+    },
+    {
+      "scope": "sphl",
+      "name": "Athens Rock Lobsters",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Huntsville Havoc",
+      "aliases": [],
+      "region": "AL",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Pee Dee IceCats",
+      "aliases": [],
+      "region": "SC",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Roanoke Rail Yard Dawgs",
+      "aliases": [
+        "Roanoke Rail-Yard Dawgs"
+      ],
+      "region": "VA",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Birmingham Bulls",
+      "aliases": [],
+      "region": "AL",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Knoxville Ice Bears",
+      "aliases": [],
+      "region": "TN",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Pensacola Ice Flyers",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Evansville Thunderbolts",
+      "aliases": [],
+      "region": "IN",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Macon Mayhem",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Peoria Rivermen",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Fayetteville Marksmen",
+      "aliases": [],
+      "region": "NC",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "sphl",
+      "name": "Quad City Storm",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://www.thesphl.com/"
+    },
+    {
+      "scope": "fphl",
+      "name": "Binghamton Black Bears",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Blue Ridge Bobcats",
+      "aliases": [],
+      "region": "VA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Fresno Falcons",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Danbury Hat Tricks",
+      "aliases": [],
+      "region": "CT",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Baton Rouge Kingfish",
+      "aliases": [
+        "Baton Rouge HC",
+        "Baton Rouge Zydeco"
+      ],
+      "region": "LA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Monroe Moccasins",
+      "aliases": [],
+      "region": "LA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Mid-South Monarchs",
+      "aliases": [],
+      "region": "MS",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Minnesota Northern Lights",
+      "aliases": [],
+      "region": "MN",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Port Huron Prowlers",
+      "aliases": [],
+      "region": "MI",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Columbus River Dragons",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Motor City Rockers",
+      "aliases": [],
+      "region": "MI",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Topeka Scarecrows",
+      "aliases": [],
+      "region": "KS",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Indiana Sentinels",
+      "aliases": [],
+      "region": "IN",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Oceanside Shock",
+      "aliases": [
+        "Oceanside HC"
+      ],
+      "region": "CA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Stockton Thunder",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Twin City Thunderbirds",
+      "aliases": [
+        "Carolina Thunderbirds"
+      ],
+      "region": "NC",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "fphl",
+      "name": "Watertown Wolves",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://www.federalhockey.com/directory"
+    },
+    {
+      "scope": "ncaa",
+      "name": "Ole Miss Rebels",
+      "aliases": [
+        "Ole Miss",
+        "Ole Miss",
+        "MISS",
+        "Mississippi",
+        "Ole Miss"
+      ],
+      "region": "MS",
+      "city": "Oxford",
+      "source": "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/145?lang=en&region=us"
+    },
+    {
+      "scope": "ncaa",
+      "name": "Iowa Hawkeyes",
+      "aliases": [
+        "Iowa",
+        "Iowa",
+        "IOWA",
+        "Iowa"
+      ],
+      "region": "IA",
+      "city": "Iowa City",
+      "source": "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/2294?lang=en&region=us"
+    },
+    {
+      "scope": "ncaa",
+      "name": "Oregon Ducks",
+      "aliases": [
+        "Oregon",
+        "Oregon",
+        "ORE",
+        "Oregon"
+      ],
+      "region": "OR",
+      "city": "Eugene",
+      "source": "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/2483?lang=en&region=us"
+    },
+    {
+      "scope": "ncaa",
+      "name": "Texas Longhorns",
+      "aliases": [
+        "Texas",
+        "Texas",
+        "TEX",
+        "Texas"
+      ],
+      "region": "TX",
+      "city": "Austin",
+      "source": "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/251?lang=en&region=us"
+    },
+    {
+      "scope": "ncaa",
+      "name": "Penn State Nittany Lions",
+      "aliases": [
+        "Penn State",
+        "Penn State",
+        "PSU",
+        "Penn State"
+      ],
+      "region": "PA",
+      "city": "University Park",
+      "source": "https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/213?lang=en&region=us"
+    },
+    {
+      "scope": "nhl",
+      "name": "Anaheim Ducks",
+      "aliases": [],
+      "region": "CA",
+      "city": "Anaheim",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Boston Bruins",
+      "aliases": [],
+      "region": "MA",
+      "city": "Boston",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Buffalo Sabres",
+      "aliases": [],
+      "region": "NY",
+      "city": "Buffalo",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Calgary Flames",
+      "aliases": [],
+      "region": "AB",
+      "city": "Calgary",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Carolina Hurricanes",
+      "aliases": [],
+      "region": "NC",
+      "city": "Raleigh",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Chicago Blackhawks",
+      "aliases": [],
+      "region": "IL",
+      "city": "Chicago",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Colorado Avalanche",
+      "aliases": [],
+      "region": "CO",
+      "city": "Denver",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Columbus Blue Jackets",
+      "aliases": [],
+      "region": "OH",
+      "city": "Columbus",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Dallas Stars",
+      "aliases": [],
+      "region": "TX",
+      "city": "Dallas",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Detroit Red Wings",
+      "aliases": [],
+      "region": "MI",
+      "city": "Detroit",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Edmonton Oilers",
+      "aliases": [],
+      "region": "AB",
+      "city": "Edmonton",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Florida Panthers",
+      "aliases": [],
+      "region": "FL",
+      "city": "Sunrise",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Los Angeles Kings",
+      "aliases": [],
+      "region": "CA",
+      "city": "Los Angeles",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Minnesota Wild",
+      "aliases": [],
+      "region": "MN",
+      "city": "Saint Paul",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Montreal Canadiens",
+      "aliases": [
+        "Montréal Canadiens"
+      ],
+      "region": "QC",
+      "city": "Montreal",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Nashville Predators",
+      "aliases": [],
+      "region": "TN",
+      "city": "Nashville",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "New Jersey Devils",
+      "aliases": [],
+      "region": "NJ",
+      "city": "Newark",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "New York Islanders",
+      "aliases": [],
+      "region": "NY",
+      "city": "Elmont",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "New York Rangers",
+      "aliases": [],
+      "region": "NY",
+      "city": "New York",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Ottawa Senators",
+      "aliases": [],
+      "region": "ON",
+      "city": "Ottawa",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Philadelphia Flyers",
+      "aliases": [],
+      "region": "PA",
+      "city": "Philadelphia",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Pittsburgh Penguins",
+      "aliases": [],
+      "region": "PA",
+      "city": "Pittsburgh",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "San Jose Sharks",
+      "aliases": [],
+      "region": "CA",
+      "city": "San Jose",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Seattle Kraken",
+      "aliases": [],
+      "region": "WA",
+      "city": "Seattle",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "St. Louis Blues",
+      "aliases": [
+        "St Louis Blues"
+      ],
+      "region": "MO",
+      "city": "Saint Louis",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Tampa Bay Lightning",
+      "aliases": [],
+      "region": "FL",
+      "city": "Tampa",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Toronto Maple Leafs",
+      "aliases": [],
+      "region": "ON",
+      "city": "Toronto",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Utah Mammoth",
+      "aliases": [
+        "Utah Hockey Club"
+      ],
+      "region": "UT",
+      "city": "Salt Lake City",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Vancouver Canucks",
+      "aliases": [],
+      "region": "BC",
+      "city": "Vancouver",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Vegas Golden Knights",
+      "aliases": [],
+      "region": "NV",
+      "city": "Las Vegas",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Washington Capitals",
+      "aliases": [],
+      "region": "DC",
+      "city": "Washington",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nhl",
+      "name": "Winnipeg Jets",
+      "aliases": [],
+      "region": "MB",
+      "city": "Winnipeg",
+      "source": "https://www.nhl.com/info/teams/"
+    },
+    {
+      "scope": "nba",
+      "name": "Atlanta Hawks",
+      "aliases": [],
+      "region": "GA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Boston Celtics",
+      "aliases": [],
+      "region": "MA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Brooklyn Nets",
+      "aliases": [],
+      "region": "NY",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Charlotte Hornets",
+      "aliases": [],
+      "region": "NC",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Chicago Bulls",
+      "aliases": [],
+      "region": "IL",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Cleveland Cavaliers",
+      "aliases": [],
+      "region": "OH",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Dallas Mavericks",
+      "aliases": [],
+      "region": "TX",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Denver Nuggets",
+      "aliases": [],
+      "region": "CO",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Detroit Pistons",
+      "aliases": [],
+      "region": "MI",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Golden State Warriors",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Houston Rockets",
+      "aliases": [],
+      "region": "TX",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Indiana Pacers",
+      "aliases": [],
+      "region": "IN",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "LA Clippers",
+      "aliases": [
+        "Los Angeles Clippers"
+      ],
+      "region": "CA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Los Angeles Lakers",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Memphis Grizzlies",
+      "aliases": [],
+      "region": "TN",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Miami Heat",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Milwaukee Bucks",
+      "aliases": [],
+      "region": "WI",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Minnesota Timberwolves",
+      "aliases": [],
+      "region": "MN",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "New Orleans Pelicans",
+      "aliases": [],
+      "region": "LA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "New York Knicks",
+      "aliases": [
+        "Knicks"
+      ],
+      "region": "NY",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Oklahoma City Thunder",
+      "aliases": [],
+      "region": "OK",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Orlando Magic",
+      "aliases": [],
+      "region": "FL",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Philadelphia 76ers",
+      "aliases": [
+        "Philadelphia Sixers",
+        "76ers"
+      ],
+      "region": "PA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Phoenix Suns",
+      "aliases": [],
+      "region": "AZ",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Portland Trail Blazers",
+      "aliases": [],
+      "region": "OR",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Sacramento Kings",
+      "aliases": [],
+      "region": "CA",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "San Antonio Spurs",
+      "aliases": [],
+      "region": "TX",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Toronto Raptors",
+      "aliases": [],
+      "region": "ON",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Utah Jazz",
+      "aliases": [],
+      "region": "UT",
+      "source": "https://www.nba.com/teams"
+    },
+    {
+      "scope": "nba",
+      "name": "Washington Wizards",
+      "aliases": [],
+      "region": "DC",
+      "source": "https://www.nba.com/teams"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ HLS_ROOT = SETTINGS.cast_hls_dir
 HLS_ROOT.mkdir(parents=True, exist_ok=True)
 CAST_ROOT = HLS_ROOT
 SEGMENT_SECONDS = 2
+STARTUP_TIMEOUT_SECONDS = 30.0
 # Enough history for a 30-second entertainment cushion without affecting a
 # sports receiver that explicitly joins four seconds behind the live edge.
 PLAYLIST_SEGMENTS = 40
@@ -333,7 +334,7 @@ def _wait_ready(
 ) -> bool:
     previous_mtime, previous_segments = previous
     playlist_path = session.directory / "stream.m3u8"
-    deadline = time.monotonic() + max(1.0, startup_timeout)
+    deadline = time.monotonic() + max(0.0, startup_timeout)
     while time.monotonic() < deadline:
         if session.recovery_cancelled.is_set():
             return False
@@ -473,7 +474,7 @@ def _schedule_recovery(session: HlsSession) -> None:
 def start_session(
     targets: str | Iterable[str],
     *,
-    startup_timeout: float = 12.0,
+    startup_timeout: float = STARTUP_TIMEOUT_SECONDS,
     on_target: Callable[[str | None], None] | None = None,
     read_ahead: bool = False,
     retain_history: bool = False,
@@ -487,6 +488,7 @@ def start_session(
     candidates = _normalize_targets(targets)
     if not candidates:
         raise RuntimeError("Curated stream was not found.")
+    startup_deadline = time.monotonic() + max(0.0, startup_timeout)
 
     shared_tokens: list[str] = []
     with _LOCK:
@@ -536,7 +538,10 @@ def start_session(
         stop_session(old.token)
 
     for index in range(len(candidates)):
-        if _try_target(session, index, startup_timeout):
+        remaining = startup_deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if _try_target(session, index, remaining):
             with _LOCK:
                 _SESSIONS[token] = session
                 if not retain_history:

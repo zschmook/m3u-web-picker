@@ -1,0 +1,53 @@
+<div id="sports-app" tabindex="-1" aria-label="Sports map">
+  <div class="sports-map-heading">
+    <div><h2>Sports map</h2><p id="coverage" class="muted">Loading generated sports channels…</p></div>
+    <span class="muted">US + Canada</span>
+  </div>
+  <div class="map-toolbar">
+    <div><strong id="selection">Pick a region</strong><span id="selection-count" class="muted"></span></div>
+    <div class="toolbar-actions">
+      <div class="league-option">
+        <button id="league-filter" class="league-picker" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="league-options">All sports ▾</button>
+        <div id="league-options" class="league-menu" role="listbox" aria-label="Sport or league" hidden></div>
+      </div>
+      <label class="weight-option" title="Larger tiles have more games. A compressed scale keeps smaller regions readable."><input id="weighted" type="checkbox"> Size by games</label>
+      <button id="collapse" type="button" hidden>← Back</button>
+    </div>
+  </div>
+  <div id="map-stage" class="map-stage">
+    <svg id="state-map" role="group" aria-label="United States and Canada. Open a region to choose a game.">
+      <g id="connections" aria-hidden="true"></g><g id="state-shapes"></g>
+    </svg>
+    <div id="bubble-layer" class="bubble-layer"></div>
+    <div id="empty-state" class="empty-state" hidden>No generated games in this region for the selected sport.</div>
+    <section id="game-detail" class="game-detail" aria-label="Selected game" hidden>
+      <p id="detail-league" class="eyebrow"></p><h3 id="detail-matchup"></h3>
+      <p id="detail-time"></p><p id="detail-venue" class="muted"></p>
+      <div id="feed-list" class="feed-list"></div>
+      <p id="feed-message" class="muted" role="status"></p>
+      <button id="detail-back" type="button">← Back to games</button>
+    </section>
+  </div>
+  <div class="below-map">
+    <p id="map-hint">Pick a state or province. Only generated sports channels appear.</p>
+    <div id="page-controls" hidden>
+      <button id="previous-page" type="button">← Previous games</button><span id="page-count"></span>
+      <button id="next-page" type="button">More games →</button>
+    </div>
+  </div>
+  <div class="remote" role="group" aria-label="Map remote control">
+    <div class="dpad">
+      <button data-key="up" type="button" aria-label="Up">↑</button>
+      <button data-key="left" type="button" aria-label="Left">←</button>
+      <button data-key="ok" type="button">OK</button>
+      <button data-key="right" type="button" aria-label="Right">→</button>
+      <button data-key="down" type="button" aria-label="Down">↓</button>
+    </div>
+    <div class="remote-extras">
+      <button data-key="next" type="button">CH +</button><button data-key="back" type="button">Back</button><button data-key="prev" type="button">CH −</button>
+    </div>
+    <p id="remote-help" class="muted">Arrows: regions · Enter: open · Esc / Backspace: back · + / −: regions with games</p>
+  </div>
+  <footer><p id="freshness" class="muted" role="status">Loading map…</p><p id="location-status" class="muted"></p></footer>
+  <output id="announcement" class="sr-only" aria-live="polite"></output>
+</div>

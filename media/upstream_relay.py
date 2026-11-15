@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from flask import Response,request,stream_with_context
 import vpn_runtime
 import stream_monitor
+import network_config
 _KEY=secrets.token_bytes(32);_TARGETS=OrderedDict();_LOCK=threading.RLock();_TTL=21600
 _URI=re.compile(r'(?<![\w-])URI="([^"]*)"')
 _ACTIVE=0
@@ -107,8 +108,9 @@ def register_routes(app):
   if request.path.startswith('/stream/relay/'):
    response.headers['Access-Control-Allow-Origin']='*';response.headers['Access-Control-Allow-Headers']='Range, If-Range';response.headers['Access-Control-Expose-Headers']='Content-Length, Content-Range, Accept-Ranges'
   if not vpn_runtime.required():return response
-  base=request.url_root.rstrip('/')
-  def external(value):return value.startswith(('http://','https://')) and not value.startswith(base+'/')
+  base=network_config.media_origin(request.url_root)
+  local_origins={base,request.url_root.rstrip('/')}
+  def external(value):return value.startswith(('http://','https://')) and not any(value.startswith(origin+'/') for origin in local_origins)
   location=response.headers.get('Location','')
   if 300<=response.status_code<400 and external(location):return response_for(location)
   if 'mpegurl' not in response.content_type.lower() or response.headers.get('X-Picker-Relay'):return response

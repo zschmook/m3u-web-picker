@@ -1,0 +1,12 @@
+ARG APP_IMAGE=m3u-web-picker:development
+FROM ${APP_IMAGE}
+
+COPY requirements-dev.txt /app/requirements-dev.txt
+RUN pip install --no-cache-dir -r /app/requirements-dev.txt
+
+ENV M3U_DATA_DIR=/tmp/m3u-picker-tests \
+    M3U_DISABLE_SCHEDULER=true
+
+# The runtime inventory is checked against the unmodified application image;
+# adding test-only packages here must not change that product inventory.
+CMD ["python", "-m", "pytest", "-q", "tests", "--ignore=tests/test_third_party_notices.py"]

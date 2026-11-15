@@ -29,7 +29,18 @@ end function
 sub refreshMovieLighting()
     if m.server = "" or m.movieLightRokuHost = "" or m.movieLightConfigLoading then return
     m.movieLightConfigLoading = true
-    requestApi("/api/roku/movie-lighting?roku_host=" + m.movieLightRokuHost, "GET", {}, "movie_lighting")
+    path = "/api/roku/movie-lighting?roku_host=" + m.movieLightRokuHost
+    if m.currentChannel <> invalid
+        if m.currentChannel.is_sports = true then path = path + "&is_sports=true"
+        if GetInterface(m.currentChannel.play_url, "ifString") <> invalid
+            ' Canonical app-local paths contain only query-safe path characters.
+            ' Never create a network component on the SceneGraph render thread.
+            if CreateObject("roRegex", "^/[A-Za-z0-9/_-]+$", "").isMatch(m.currentChannel.play_url)
+                path = path + "&play_url=" + m.currentChannel.play_url
+            end if
+        end if
+    end if
+    requestApi(path, "GET", {}, "movie_lighting")
 end sub
 
 sub onMovieLightingConfig(result as Object)
@@ -71,7 +82,22 @@ sub onMovieLightingConfig(result as Object)
         m.movieLightApplied = ""
         m.movieLightAttempted = ""
     end if
+    if m.movieLighting <> invalid
+        if m.movieLighting.sports_team <> settings.sports_team
+            m.movieLightApplied = ""
+            m.movieLightAttempted = ""
+        end if
+    end if
     m.movieLighting = settings
+    if m.video <> invalid
+        if m.video.state = "playing"
+            m.movieLightDesired = "guide"
+            if movieLightingPlayback() then m.movieLightDesired = "dim"
+        else if m.video.state = "paused"
+            m.movieLightDesired = "guide"
+            if movieLightingPlayback() then m.movieLightDesired = "pause"
+        end if
+    end if
     runMovieLighting()
 end sub
 
@@ -88,9 +114,16 @@ function movieLightingSameGroup(first as Object, second as Object) as Boolean
 end function
 
 function movieLightingPlayback() as Boolean
+    if m.movieLighting <> invalid
+        if m.movieLighting.sports_active = true then return true
+    end if
     if m.movie then return true
     if m.currentChannel <> invalid
         if m.currentChannel.is_movie = true then return true
+        if m.currentChannel.is_sports = true then return true
+        if type(m.currentChannel.play_url) = "roString"
+            if Left(m.currentChannel.play_url, 19) = "/guide/play/sports/" then return true
+        end if
     end if
     if m.session <> invalid
         if m.session.kind = "movie" then return true

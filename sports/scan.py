@@ -533,7 +533,7 @@ def scan_channels(
     cancel_check: _s.CancelCheck = None,
 ) -> dict:
     scan_clock = perf_counter()
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     _s._raise_if_cancelled(cancel_check)
     started_at = started_at or _s._now_iso()
     settings = _s.get_settings(db_path)

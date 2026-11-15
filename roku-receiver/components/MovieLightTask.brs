@@ -111,6 +111,11 @@ function movieLightPrepare(settings as Object, action as String, target as Objec
                 item.error = "brightness_unavailable"
             else
                 item.desired = {on_off: 1, brightness: settings.brightness}
+                if (product.is_color = 1 or product.is_color = true) and type(settings.sports_hsv) = "roAssociativeArray"
+                    item.desired.color_temp = 0
+                    item.desired.hue = settings.sports_hsv.hue
+                    item.desired.saturation = settings.sports_hsv.saturation
+                end if
             end if
         else if action = "pause" or action = "guide"
             if state.on_off <> 0 and state.on_off <> 1
@@ -126,6 +131,9 @@ function movieLightPrepare(settings as Object, action as String, target as Objec
             item.error = "invalid_original_state"
         else
             item.desired = {on_off: 1, brightness: previous.brightness}
+            if previous.color_temp <> invalid then item.desired.color_temp = previous.color_temp
+            if previous.hue <> invalid then item.desired.hue = previous.hue
+            if previous.saturation <> invalid then item.desired.saturation = previous.saturation
         end if
     end if
     return item
@@ -211,6 +219,9 @@ function movieLightState(state as Object) as Object
     result = {}
     if state.on_off <> invalid then result.on_off = state.on_off
     if state.brightness <> invalid then result.brightness = state.brightness
+    if state.color_temp <> invalid then result.color_temp = state.color_temp
+    if state.hue <> invalid then result.hue = state.hue
+    if state.saturation <> invalid then result.saturation = state.saturation
     return result
 end function
 

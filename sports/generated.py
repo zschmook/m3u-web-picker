@@ -100,7 +100,7 @@ def purge_stale_generated(
     now: datetime | None = None,
 ) -> int:
     """Remove generated channels after their event end plus postgame grace."""
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     settings = _s.get_settings(db_path)
     if not settings.get("enabled"):
         return 0
@@ -137,7 +137,7 @@ def generated_rows(
     now: datetime | None = None,
 ) -> list[dict]:
     """Return generated rows visible to clients, or the disabled cache."""
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     _s.purge_expired_disabled_cache(db_path, now)
     if not include_cached and not _s.get_settings(db_path).get("enabled"):
         return []
@@ -191,7 +191,7 @@ def move_generated_above(db_path: Path | str, minimum_start: int) -> int:
 
 def generated_stream_target(db_path: Path | str, assigned_number: int) -> str:
     """Resolve a generated slot to its current provider playback URL."""
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     if not _s.get_settings(db_path).get("enabled"):
         return ""
     from channel_availability import availability

@@ -11,6 +11,42 @@ from media import hls, mpegts
 
 
 class SharedMediaSessionTests(unittest.TestCase):
+    def test_slow_live_source_can_start_within_thirty_second_budget(self):
+        clock = [100.0]
+        def ready(session, index, timeout):
+            self.assertEqual(timeout, 30.0)
+            clock[0] += 18
+            session.process = Mock()
+            return True
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(hls, 'HLS_ROOT', Path(directory)), \
+                patch.object(hls.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(hls.media_pipeline, 'acquire_session', return_value='pipeline'), \
+                patch.object(hls, '_try_target', side_effect=ready):
+            session = hls.start_session('slow source')
+            self.assertIs(hls._SESSIONS[session.token], session)
+
+    def test_fallback_attempts_share_one_startup_deadline(self):
+        clock = [100.0]
+        attempts = []
+        def unavailable(session, index, timeout):
+            attempts.append((index, timeout))
+            clock[0] += min(21, timeout)
+            return False
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(hls, 'HLS_ROOT', Path(directory)), \
+                patch.object(hls.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(hls.media_pipeline, 'acquire_session', return_value='pipeline'), \
+                patch.object(hls.media_pipeline, 'release_session') as release, \
+                patch.object(hls, '_try_target', side_effect=unavailable):
+            with self.assertRaises(RuntimeError):
+                hls.start_session(['primary', 'fallback', 'another fallback'])
+            self.assertEqual(attempts, [(0, 30.0), (1, 9.0)])
+            self.assertEqual(clock[0], 130.0)
+            self.assertFalse(hls._SESSIONS)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            release.assert_called_once_with('pipeline')
+
     def test_alive_hls_encoder_with_stalled_output_recovers_without_new_token(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -68,7 +104,7 @@ class SharedMediaSessionTests(unittest.TestCase):
 
     @patch("media.mpegts.threading.Thread.start")
     @patch("media.mpegts.media_pipeline.acquire_session", return_value="pipeline")
-    @patch("media.mpegts.normalized_live_input_args", return_value=["ffmpeg"])
+    @patch("media.mpegts.normalized_live_input_args", return_value=["ffmpeg", "-fflags", "+genpts", "-i", "source"])
     @patch("media.mpegts.subprocess.Popen")
     def test_mpegts_same_target_uses_one_process(self, popen, _args, _acquire, _start):
         process = Mock(stdout=io.BytesIO())

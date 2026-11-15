@@ -99,7 +99,7 @@ def guide():
     html = render_template("guide.html")
     html = html.replace(
         "</head>",
-        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=guide-availability-1">\n'
+        '<link rel="stylesheet" href="/static/css/guide_programmes.css?v=probe-retry-1">\n'
         '<link rel="stylesheet" href="/static/css/guide_dvr.css?v=dvr-library-7">\n'
         '<link rel="stylesheet" href="/static/css/event_logo_normalization.css?v=event-logo-2">\n'
         '<link rel="stylesheet" href="/static/css/ui_themes.css?v=theme-pack-2">\n'
@@ -119,12 +119,16 @@ def guide():
         '<script src="/static/js/guide_cast_ui.js?v=cast-flow-3"></script>\n'
         '<script src="/static/js/guide_pip.js?v=pip-4"></script>\n'
         '<script src="/static/js/guide_stream_menu.js?v=stream-menu-1"></script>\n'
-        '<script src="/static/js/guide_programmes.js?v=android-vlc-1"></script>\n'
-        '<script src="/static/js/guide_dvr.js?v=movie-actions-3"></script>\n'
+        '<script src="/static/js/guide_programmes.js?v=probe-retry-1"></script>\n'
+        '<script src="/static/js/guide_dvr.js?v=movie-actions-4"></script>\n'
         '<script src="/static/js/guide_event_logo_bridge.js?v=event-logo-2"></script>\n'
         '<script src="/static/js/guide_roku_button.js?v=roku-button-2"></script>\n'
         '<script src="/static/js/ui_resilient_images.js?v=logo-registry-1"></script>\n'
-        '<script src="/static/js/guide_back_button.js?v=guide-back-3"></script>\n</body>',
+        '<script src="/static/js/guide_back_button.js?v=guide-back-3"></script>\n'
+        '<script src="/static/js/sports_tile_layout.js?v=sports-map-1"></script>\n'
+        '<script src="/static/js/sports_bubble_layout.js?v=sports-map-1"></script>\n'
+        '<script src="/static/js/guide_sports_map.js?v=sports-map-1"></script>\n'
+        '<script src="/static/js/guide_views.js?v=sports-map-1"></script>\n</body>',
     )
 
 

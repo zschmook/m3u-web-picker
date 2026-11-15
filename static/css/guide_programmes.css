@@ -22,8 +22,6 @@ body.guide-body .guide-grid-row.guide-unavailable-row .guide-programme-block-tim
 
 body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-play,
 body.guide-body .guide-grid-row.guide-unavailable-row .guide-station-listen {
-  text-decoration: line-through;
-  text-decoration-thickness: 2px;
   color: #fecdd3 !important;
   background: #571f2a !important;
   border-color: #fb7185 !important;

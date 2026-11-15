@@ -6,6 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from schema_cache import ensure_schema
 
 import sports as _s
 from . import migrations
@@ -47,14 +48,14 @@ def _refresh_time_parts(settings: dict) -> tuple[int, int]:
     return 3, 0
 
 
-def init_db(db_path: Path | str) -> None:
+def init_db(db_path: Path | str, *, once: bool = False) -> None:
     """Initialize sports persistence without mixing migration concerns."""
     with closing(connect(db_path)) as conn:
-        migrations.initialize(conn)
+        ensure_schema(conn, db_path, 'sports', migrations.initialize, force=not once)
 
 
 def get_settings(db_path: Path | str) -> dict:
-    init_db(db_path)
+    init_db(db_path, once=True)
     output = dict(_s.DEFAULT_SETTINGS)
     with closing(connect(db_path)) as conn:
         for row in conn.execute("SELECT key, value FROM sports_settings"):
@@ -97,7 +98,7 @@ def _disabled_at_from_conn(conn: sqlite3.Connection) -> datetime | None:
 
 
 def disabled_cache_status(db_path: Path | str, now: datetime | None = None) -> dict:
-    init_db(db_path)
+    init_db(db_path, once=True)
     current = (now or datetime.now().astimezone()).astimezone()
     with closing(connect(db_path)) as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM sports_generated").fetchone()[0])
@@ -120,7 +121,7 @@ def disabled_cache_status(db_path: Path | str, now: datetime | None = None) -> d
 
 
 def purge_expired_disabled_cache(db_path: Path | str, now: datetime | None = None) -> bool:
-    init_db(db_path)
+    init_db(db_path, once=True)
     current = (now or datetime.now().astimezone()).astimezone()
     settings = get_settings(db_path)
     if settings.get("enabled"):
@@ -138,7 +139,7 @@ def purge_expired_disabled_cache(db_path: Path | str, now: datetime | None = Non
 
 
 def clear_generated_channels(db_path: Path | str) -> int:
-    init_db(db_path)
+    init_db(db_path, once=True)
     with closing(connect(db_path)) as conn:
         deleted = conn.execute("DELETE FROM sports_generated").rowcount
         conn.commit()

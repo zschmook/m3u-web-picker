@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SportsMap" extends="Group">
+  <interface>
+    <field id="data" type="assocarray" onChange="updateSportsData" />
+    <field id="status" type="string" onChange="drawSportsMap" />
+    <field id="feedSelected" type="assocarray" alwaysNotify="true" />
+    <field id="tabsRequested" type="boolean" alwaysNotify="true" />
+    <function name="activate" />
+    <function name="resetMap" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/SportsMapLogic.brs" />
+  <script type="text/brightscript" uri="pkg:/components/SportsMap.brs" />
+  <children>
+    <Label text="Sports Map" translation="[64, 134]" width="700" height="56" font="font:LargeBoldSystemFont" />
+    <Label id="summary" translation="[64, 196]" width="1750" height="38" color="0xaabbd4ff" font="font:SmallSystemFont" />
+    <Group id="toolbar" translation="[600, 54]" />
+    <Group id="mapCanvas" translation="[64, 270]" />
+    <Group id="bubbleCanvas" translation="[64, 270]" />
+    <Group id="detailCanvas" translation="[1340, 270]" />
+    <Group id="menuCanvas" translation="[590, 114]" />
+    <Label id="hint" translation="[64, 988]" width="1780" height="42" color="0xaacbffff" font="font:SmallSystemFont" />
+  </children>
+</component>

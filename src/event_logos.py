@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import re
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -41,16 +42,32 @@ def _paths() -> tuple[Path, Path, Path]:
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_bytes(payload)
-    temporary.replace(path)
+    temporary = None
+    try:
+        # Concurrent requests must never share a staging filename. Close the
+        # handle before replacement so publishing also works on Windows.
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        for attempt in range(4):
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError as error:
+                # NTFS can briefly deny overlapping replacements even after
+                # both writers close their handles. Other failures propagate.
+                if getattr(error, "winerror", None) not in (5, 32) or attempt == 3:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    temporary.replace(path)
+    _atomic_write_bytes(path, text.encode("utf-8"))
 
 
 def event_digest(event_key: object, away_team_id: object, home_team_id: object) -> str:

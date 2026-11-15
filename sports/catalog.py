@@ -25,7 +25,7 @@ _BROADCAST_EVENT_TEAM_PATTERNS = (
 
 
 def _catalog_rows(db_path: Path | str, scope_type: str = "") -> list[dict]:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     sql = """
         SELECT scope_type, scope_id, display_name, subtitle, league_id,
                aliases_json, logo_url, metadata_json, source, updated_at
@@ -174,7 +174,7 @@ def _known_mlb_aliases(team_name: str) -> list[str]:
 
 
 def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]) -> int:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     discovered: dict[tuple[str, str], tuple[str, list[str], str]] = {}
     for channel in channels:
         identity = _team_feed_identity(channel)
@@ -220,7 +220,7 @@ def discover_catalog_from_channels(db_path: Path | str, channels: Iterable[dict]
 
 
 def get_rules(db_path: Path | str) -> list[dict]:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         rows = conn.execute(
             """

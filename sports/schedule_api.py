@@ -16,7 +16,7 @@ import sports as _s
 
 
 def _schedule_api_secret(db_path: Path | str) -> str:
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         row = conn.execute(
             "SELECT value FROM sports_settings WHERE key = ?",
@@ -225,7 +225,7 @@ def update_schedule_api_config(
     clear_key: bool = False,
 ) -> dict:
     """Persist API-SPORTS enable/key state without exposing the secret."""
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     changes = {}
     if enabled is not None:
         changes["schedule_api_enabled"] = bool(enabled)

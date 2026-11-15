@@ -9,4 +9,5 @@
     <field id="result" type="assocarray" alwaysNotify="true" />
   </interface>
   <script type="text/brightscript" uri="pkg:/components/ApiTask.brs" />
+  <script type="text/brightscript" uri="pkg:/components/GuideCategories.brs" />
 </component>

@@ -2,6 +2,7 @@ from flask import Response, redirect, request, send_file
 
 import core
 import media_pipeline
+import network_config
 import public_epg_logos
 import sports
 from media import director, mpegts
@@ -20,15 +21,18 @@ def register_output_routes(app):
 
     def curated_playlist_text(*, encoded: bool) -> str:
         lines = ["#EXTM3U"]
-        base_url = request.url_root.rstrip("/")
+        base_url = network_config.media_origin(request.url_root)
         fallback_sets = core.manual_fallback_channel_sets()
         primary_channels = core.active_primary_channels()
         enabled_urls = {item.get("url") for item in core.manual_channel_catalog()}
         for number, channel in enumerate(core.saved_manual_guide_channels(), start=1):
             candidates = core.candidate_urls(channel, primary_channels, fallback_sets, core.channel_key)
             available, target = core.availability.lookup(candidates)
-            if available is False:
+            # Saved lineup membership must survive a failed background probe.
+            # Clients may retain this export long after the source recovers.
+            if not candidates:
                 continue
+            target = target or candidates[0]
             raw = core.apply_channel_number(channel, number)
             if not raw:
                 continue
@@ -44,8 +48,9 @@ def register_output_routes(app):
         for row in sports.generated_rows(core.DB_PATH):
             candidates = core.enabled_sports_candidates(row, enabled_urls=enabled_urls)
             available, target = core.availability.lookup(candidates)
-            if available is False:
+            if not candidates:
                 continue
+            target = target or candidates[0]
             raw = list(row.get("raw", []))
             if not raw:
                 continue
@@ -165,13 +170,14 @@ def register_output_routes(app):
     @app.get("/playlist/channels.m3u")
     @app.get("/playlist/custom.m3u")
     def playlist():
-        guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
+        origin = network_config.media_origin(request.url_root)
+        guide_url = origin + "/epg/epg.xml"
         with core.state_lock:
             text = curated_playlist_text(encoded=media_pipeline.settings()["enabled"])
         lines = text.splitlines()
         lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
         text = "\n".join(lines) + "\n"
-        text = director.inject_channel(text, request.url_root.rstrip("/"))
+        text = director.inject_channel(text, origin)
         text = with_manual_epg_logos(text)
         response = Response(text, mimetype="audio/x-mpegurl")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -179,7 +185,7 @@ def register_output_routes(app):
 
     @app.get("/playlist/channels.direct.m3u")
     def playlist_direct():
-        guide_url = request.url_root.rstrip("/") + "/epg/epg.xml"
+        guide_url = network_config.media_origin(request.url_root) + "/epg/epg.xml"
         with core.state_lock:
             lines = curated_playlist_text(encoded=False).splitlines()
         lines[0] = f'#EXTM3U url-tvg="{guide_url}" x-tvg-url="{guide_url}"'
@@ -190,7 +196,7 @@ def register_output_routes(app):
     @app.get("/playlist/all.m3u")
     def playlist_all():
         text = core.m3u_from_channels(core.all_grouped_channels())
-        text = director.inject_channel(text, request.url_root.rstrip("/"))
+        text = director.inject_channel(text, network_config.media_origin(request.url_root))
         return Response(
             with_manual_epg_logos(text),
             mimetype="audio/x-mpegurl",

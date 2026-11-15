@@ -6,6 +6,14 @@ import app_config
 from settings import load_settings
 
 
+def media_origin(request_origin: str) -> str:
+    """Advertise the configured server even when a playlist is fetched locally."""
+    current = load_settings()
+    if current.lan_host:
+        return f"http://{current.lan_host}:{current.external_port}"
+    return request_origin.rstrip("/")
+
+
 def status() -> dict:
     current = load_settings()
     return {

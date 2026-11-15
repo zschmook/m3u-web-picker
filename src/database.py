@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from schema_cache import ensure_schema
 
 
 def connect(db_path: Path | str) -> sqlite3.Connection:
@@ -9,7 +10,7 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        _ensure_core_schema(conn)
+        ensure_schema(conn, db_path, 'core', _ensure_core_schema)
     except Exception:
         conn.close()
         raise

@@ -794,7 +794,6 @@ async function showListenFailureDetail(fallback = "The channel did not produce a
 }
 
 function startListenMode(channel, {handoff = false} = {}) {
-  if (channel?.available === false) return;
   // Keep play() in the original click call stack. Some browsers revoke media
   // autoplay permission as soon as an awaited cleanup yields control.
   stopLocalStream({hidePanel: false});
@@ -836,7 +835,7 @@ function restoreListenSession() {
   const channel = guideState.channels.find(item => (
     String(item.play_url || "") === String(session.channel.play_url || "")
   ));
-  if (!channel || channel.available === false) {
+  if (!channel) {
     localStorage.removeItem(GUIDE_LISTEN_SESSION_KEY);
     return;
   }
@@ -972,7 +971,6 @@ async function castChannel(channel) {
 }
 
 async function playChannel(channel) {
-  if (channel?.available === false) return;
   if (guidePrefersVlc()) {
     playGuideInVlc(channel);
     return;

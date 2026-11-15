@@ -36,10 +36,14 @@ class CommercialLabRotationTests(unittest.TestCase):
             self.db_path, self.channels, dvr.schedule_recording, current=current, now=now
         )
         self.assertEqual(len(first), 4)
-        dvr._update_recording(self.db_path, first[0]["id"], status="completed")
+        completed_at = now + timedelta(minutes=20)
+        dvr._update_recording(
+            self.db_path, first[0]["id"], status="completed",
+            completed_at=completed_at.isoformat(),
+        )
 
         replacement = commercial_lab_rotation.ensure_capacity(
-            self.db_path, self.channels, dvr.schedule_recording, current=current, now=now
+            self.db_path, self.channels, dvr.schedule_recording, current=current, now=completed_at
         )
         self.assertEqual(len(replacement), 1)
         active = [

@@ -478,6 +478,7 @@
     el("guideDvrPanel")?.classList.toggle("d-none", !state.panelOpen);
     el("guideBrowseControls")?.classList.toggle("d-none", state.panelOpen);
     el("guideBrowseList")?.classList.toggle("d-none", state.panelOpen);
+    window.dispatchEvent(new CustomEvent("m3u-guide-dvr-panel", {detail: {open: state.panelOpen}}));
   }
 
   el("guideDvrBtn")?.addEventListener("click", () => {

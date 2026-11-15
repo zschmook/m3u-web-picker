@@ -597,7 +597,7 @@ def retain_recent_finals(
     anchor = _local_now(timezone_name, now)
     anchor_utc = anchor.astimezone(timezone.utc)
     active_keys = {_event_key(card) for card in cards if _event_key(card)}
-    _s.init_db(db_path)
+    _s.init_db(db_path, once=True)
     with closing(_s._connect(db_path)) as conn:
         conn.execute(
             "DELETE FROM sports_remote_score_history WHERE expires_at <= ?",

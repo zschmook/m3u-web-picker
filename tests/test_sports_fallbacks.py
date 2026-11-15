@@ -49,7 +49,8 @@ class SportsFallbackTests(unittest.TestCase):
         self.assertEqual(cache.resolve(['primary','backup']),'backup')
         self.assertEqual(calls,['primary','backup'])
         cache.probe=lambda url: False
-        self.assertEqual(cache.resolve(['primary','backup']),'')
+        self.assertEqual(cache.resolve(['primary','backup']),'primary')
+        self.assertEqual(cache.peek(['primary','backup']), (False, ''))
         cache.probe=lambda url: True
         self.assertEqual(cache.resolve(['primary','backup']),'primary')
 

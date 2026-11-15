@@ -6,16 +6,22 @@
   <script type="text/brightscript" uri="pkg:/components/GuideDetails.brs" />
   <script type="text/brightscript" uri="pkg:/components/PlaybackDiagnostics.brs" />
   <script type="text/brightscript" uri="pkg:/components/MovieLighting.brs" />
+  <script type="text/brightscript" uri="pkg:/components/SportsMapView.brs" />
   <children>
-    <Group id="guidePanel">
+    <Group id="appHeader">
       <Poster uri="pkg:/images/icon.png" translation="[64, 44]" width="72" height="72" />
-      <Label text="TV Guide" translation="[156, 44]" width="1600" height="72" vertAlign="center" font="font:LargeBoldSystemFont" />
+      <Label text="M3U TV" translation="[156, 44]" width="650" height="72" vertAlign="center" font="font:LargeBoldSystemFont" />
+      <GuideTabs id="viewTabs" translation="[1430, 52]" />
+    </Group>
+    <Group id="guidePanel">
       <Label id="status" visible="false" translation="[64, 236]" width="1760" height="44" color="0x9eafc8ff" />
       <GuideTabs id="tabs" translation="[64, 136]" />
       <GuideGrid id="grid" translation="[64, 216]" duration="10800" numRows="9" />
     </Group>
+    <SportsMap id="sportsMap" visible="false" />
     <Video id="video" visible="false" width="1920" height="1080" enableUI="false" />
     <Label id="playerStatus" visible="false" translation="[64, 980]" width="1760" height="64" color="0xffffffff" />
     <Timer id="refreshTimer" duration="120" repeat="true" />
+    <Timer id="sportsMapTimer" duration="30" repeat="true" />
   </children>
 </component>

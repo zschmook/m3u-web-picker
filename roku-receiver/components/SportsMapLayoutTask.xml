@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SportsMapLayoutTask" extends="Task">
+  <interface>
+    <field id="regions" type="array" />
+    <field id="weighted" type="boolean" />
+    <field id="requestId" type="integer" />
+    <field id="result" type="assocarray" alwaysNotify="true" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/SportsMapLogic.brs" />
+  <script type="text/brightscript" uri="pkg:/components/SportsMapLayoutTask.brs" />
+</component>

@@ -322,10 +322,12 @@ http://provider.test/news.ts
         self.assertNotIn("api_key", status["schedule_api"])
 
     def test_force_schedule_api_refresh_route_uses_explicit_force(self):
-        with patch("sports.refresh_schedule_api_if_due", return_value={"enabled": True, "fetched": []}) as refresh:
+        result = {"schedule_api": {"enabled": True, "fetched": []}}
+        with patch("core.run_sports_scan", return_value=result) as refresh:
             response = self.client.post("/api/sports/schedule-api/refresh")
         self.assertEqual(response.status_code, 200)
-        refresh.assert_called_once_with(core.DB_PATH, force=True)
+        refresh.assert_called_once_with(trigger='manual', force_api_refresh=True)
+        self.assertEqual(response.get_json()['result'], result['schedule_api'])
         self.assertIn("schedule_api", response.get_json())
 
     def test_master_switch_rewrites_served_outputs_and_restores_cached_rows(self):

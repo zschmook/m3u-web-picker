@@ -6,6 +6,32 @@
   let knownLights = [], knownRokus = [], savedRokus = [], discoveredRokus = [];
   let rokuRevision = 0, draftNumber = 0, loaded = false, busy = false, selectedRoom = "";
   const rooms = new Map();
+  let sportsTeams = [];
+  const teamField = document.createElement('fieldset');
+  teamField.className = 'ui-lighting-lights';
+  const teamLegend = document.createElement('legend'); teamLegend.textContent = 'Sports teams and colors';
+  const teamHelp = document.createElement('p');
+  teamHelp.textContent = 'Teams come from the Sports Automation catalog, with your enabled selections first. Select teams to light only their games, then choose their light colors. No selections means all sports use brightness only. First matching selection wins when two selected teams play.';
+  const teamSearch = document.createElement('input'); teamSearch.type = 'search'; teamSearch.placeholder = 'Search teams'; teamSearch.setAttribute('aria-label', 'Search sports lighting teams'); teamSearch.className = 'form-control';
+  teamSearch.addEventListener('input', () => {
+    for (const label of teamList.querySelectorAll('label')) label.hidden = !label.textContent.toLowerCase().includes(teamSearch.value.toLowerCase());
+  });
+  const teamList = document.createElement('div'); teamList.id = 'uiLightingTeams';
+  teamList.style.maxHeight = '260px'; teamList.style.overflowY = 'auto';
+  teamField.append(teamLegend, teamHelp, teamSearch, teamList);
+  el('uiLightingEditor').insertBefore(teamField, el('uiLightingPlaying').closest('label'));
+  function renderTeams(room) {
+    teamList.replaceChildren();
+    for (const team of sportsTeams) {
+      const saved = (room.sports_teams || []).find(value => value.id === team.id);
+      const label = document.createElement('label'); label.className = 'ui-lighting-light';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = team.id; checkbox.checked = Boolean(saved);
+      const text = document.createElement('span'); text.textContent = team.name + ' · ' + team.league_id;
+      const color = document.createElement('input'); color.type = 'color'; color.value = saved?.color || '#ffffff'; color.setAttribute('aria-label', team.name + ' light color');
+      label.append(checkbox, text, color); teamList.append(label);
+    }
+    if (!sportsTeams.length) teamList.textContent = 'Add team selections in Sports Automation to choose their lighting colors here.';
+  }
   const status = (message, error = false) => {
     el("uiLightingStatus").textContent = message;
     el("uiLightingStatus").className = `ui-settings-status is-${error ? "error" : "success"}`;
@@ -32,6 +58,8 @@
     if (!room) return;
     room.name = el("uiLightingRoomName").value;
     room.enabled = el("uiLightingEnabled").checked;
+    room.sports_teams = [...teamList.querySelectorAll('label')].filter(label => label.querySelector('input[type="checkbox"]').checked)
+      .map(label => ({id: label.querySelector('input[type="checkbox"]').value, color: label.querySelector('input[type="color"]').value}));
     room.brightness = Number(el("uiLightingPlaying").value);
     room.paused_brightness = Number(el("uiLightingPaused").value);
     room.transition_ms = Math.round(Number(el("uiLightingFade").value) * 1000);
@@ -83,6 +111,7 @@
     el("uiLightingFade").value = room.transition_ms / 1000;
     renderLights(room.targets.map(light => light.device_id));
     renderRokus(room.roku_host);
+    renderTeams(room);
     syncButtons();
   }
   function addDraft() {
@@ -122,7 +151,7 @@
     event.preventDefault();
     if (!loaded || busy || !form.reportValidity()) return;
     captureRoom();
-    const room = rooms.get(selectedRoom), {id, revision, ...values} = room;
+    const room = rooms.get(selectedRoom), {id, revision, sports_teams = [], ...values} = room;
     if (room.enabled && (!room.roku_host || !room.targets.length)) {
       status("Choose a Roku and at least one light before enabling this room.", true); return;
     }
@@ -133,8 +162,14 @@
       if (!id) rooms.delete(selectedRoom);
       selectedRoom = saved.id;
       rooms.set(saved.id, saved);
+      saved.sports_teams = sports_teams;
+      try {
+        await request({method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sports_teams)}, `/api/lighting/rooms/${encodeURIComponent(saved.id)}/teams`);
+      } catch (error) {
+        renderRoom(); status('Room saved, but team lighting was not saved: ' + error.message, true); return;
+      }
       renderRoom();
-      status("Room saved. Brightness changes apply on play or pause; changes to its light group apply to the next movie.");
+      status("Room and team lighting saved. Changes apply on the next playback action.");
     } catch (error) { status(error.message, true); }
     finally { busy = false; syncButtons(); }
   });
@@ -178,11 +213,15 @@
   document.querySelector('[data-settings-panel="lighting"]')?.addEventListener("click", refreshRokus);
   syncButtons();
   const initialRevision = rokuRevision;
-  Promise.all([request(), request({}, "/api/movie-lighting/lights"), request({}, "/api/guide/roku/devices")])
-    .then(([settings, lights, rokus]) => {
+  Promise.all([request(), request({}, "/api/movie-lighting/lights"), request({}, "/api/guide/roku/devices"), request({}, '/api/lighting/teams')])
+    .then(async ([settings, lights, rokus, teams]) => {
+      sportsTeams = teams.teams;
       knownLights = lights.lights;
       if (initialRevision === rokuRevision) updateRokus(rokus.devices);
-      for (const room of settings.rooms || []) rooms.set(room.id, room);
+      for (const room of settings.rooms || []) {
+        room.sports_teams = (await request({}, `/api/lighting/rooms/${encodeURIComponent(room.id)}/teams`)).teams;
+        rooms.set(room.id, room);
+      }
       selectedRoom = rooms.keys().next().value;
       if (!selectedRoom) addDraft();
       loaded = true; renderRoom();

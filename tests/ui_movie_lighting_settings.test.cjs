@@ -13,13 +13,17 @@ const room = {id: 'legacy', name: 'Room 1', enabled: true, brightness: 10, pause
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function setup(respond = () => undefined) {
   class Element {
-    constructor(tag) { this.tag = tag; this.children = []; this.value = ''; this.events = {}; this.checked = false; }
+    constructor(tag) { this.tag = tag; this.children = []; this.value = ''; this.events = {}; this.checked = false; this.style = {}; }
+    setAttribute(name, value) { this[name] = value; }
+    closest() { return this; }
+    insertBefore(child) { this.children.push(child); }
     addEventListener(type, callback) { this.events[type] = callback; }
     replaceChildren(...children) { this.children = children; this.value = ''; }
     append(...children) { this.children.push(...children); }
     add(option) { this.children.push(option); }
     reportValidity() { return true; }
-    querySelectorAll() { return this.children.flatMap(label => label.children).filter(input => input.tag === 'input' && input.checked); }
+    querySelectorAll(selector) { return selector === 'label' ? this.children.filter(child => child.tag === 'label') : this.children.flatMap(label => label.children).filter(input => input.tag === 'input' && input.checked); }
+    querySelector(selector) { return this.children.find(child => child.tag === 'input' && selector.includes(child.type)); }
   }
   class Select extends Element {
     get value() { return this.selected || ''; }
@@ -38,7 +42,7 @@ function setup(respond = () => undefined) {
     fetch: async (url, options) => {
       calls.push({url, options});
       const custom = await respond(url, options);
-      const data = custom ?? (url === '/api/movie-lighting' ? {rooms: []}
+      const data = custom ?? (url.startsWith('/api/lighting/') ? {teams: []} : url === '/api/movie-lighting' ? {rooms: []}
         : url === '/api/movie-lighting/lights' ? {lights: [shelf]}
           : options.method === 'POST' || options.method === 'PATCH' ? {...JSON.parse(options.body), id: 'saved'}
             : {ok: true, devices: [living]});
@@ -62,6 +66,20 @@ test('loading creates a disabled draft without automatic scans or saves', async 
   assert.equal(ui.elements.get('uiLightingRoomName').value, 'Room 1');
   assert.equal(ui.elements.get('uiLightingEnabled').checked, false);
   assert.ok(ui.calls.every(call => !call.options.method));
+});
+
+test('team choice and color save separately from room brightness', async () => {
+  const ui = setup(url => url === '/api/movie-lighting' ? {rooms: [room]}
+    : url === '/api/lighting/teams' ? {teams: [{id: 'ncaaf-fbs:penn-state', name: 'Penn State', league_id: 'ncaaf-fbs'}]} : undefined);
+  await ui.ready();
+  const field = ui.elements.get('uiLightingEditor').children[0];
+  const list = field.children.find(child => child.id === 'uiLightingTeams');
+  list.children[0].children[0].checked = true;
+  list.children[0].children[2].value = '#041e42';
+  await ui.submit();
+  const call = ui.calls.find(call => call.options.method === 'PUT');
+  assert.deepEqual(JSON.parse(call.options.body), [{id: 'ncaaf-fbs:penn-state', color: '#041e42'}]);
+  assert.equal(JSON.parse(ui.calls.find(call => call.options.method === 'PATCH').options.body).brightness, 10);
 });
 test('existing pairing appears as a named room with the same light and levels', async () => {
   const ui = setup(url => url === '/api/movie-lighting' ? {rooms: [room]} : undefined); await ui.ready();

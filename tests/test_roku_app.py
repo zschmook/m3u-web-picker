@@ -215,6 +215,19 @@ class RokuAppTests(unittest.TestCase):
         self.assertEqual(roku_app.LIVE_LEASES, {})
         self.assertNotIn('private', response.get_data(as_text=True))
 
+    def test_roku_buffer_uses_remaining_startup_budget(self):
+        clock = [100.0]
+        def start(*args, **kwargs):
+            clock[0] += 18
+            return SimpleNamespace(token='opaque', directory=Path('relay'), process=Mock())
+        with patch.object(roku_app.guide, '_resolve_guide_hls_targets', return_value=(['source'], None)), \
+                patch.object(roku_app.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(roku_app.hls, 'start_session', side_effect=start), \
+                patch.object(roku_app.hls, 'wait_for_buffer', return_value=True) as warm:
+            response = self.client.post('/api/roku/playback', json=dict(play_url='/guide/play/manual/a'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(warm.call_args.kwargs['timeout'], 12.0)
+
     def test_restart_keeps_plex_auth_on_server(self):
         source = dict(target='http://plex/private', input_headers={'X-Plex-Token': 'secret'}, title='Movie')
         with patch.object(roku_app.movie_restart, 'resolve', return_value=source), \

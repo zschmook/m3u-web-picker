@@ -203,7 +203,7 @@
         <button class="ui-settings-tab" type="button" data-settings-panel="streams">Streams</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="dvr">DVR</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="network">Network</button>
-        <button class="ui-settings-tab" type="button" data-settings-panel="lighting">Movie Lighting</button>
+        <button class="ui-settings-tab" type="button" data-settings-panel="lighting">Lighting</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="jellyfin">Jellyfin Cache</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="epg">EPG</button>
         <button class="ui-settings-tab" type="button" data-settings-panel="devices">Devices</button>
@@ -305,7 +305,7 @@
         </section>
         </section>
         <section class="ui-modern-card ui-settings-panel" data-settings-panel-content="lighting" aria-labelledby="uiLightingTitle">
-          <div class="ui-card-heading"><div><span id="uiLightingTitle">Movie Lighting</span><small>Create rooms with one Roku and a group of lights.</small></div></div>
+          <div class="ui-card-heading"><div><span id="uiLightingTitle">Lighting</span><small>Use the same play/pause lighting for movies and sports.</small></div></div>
           <form id="uiLightingForm" class="ui-settings-form">
             <label class="ui-settings-field" for="uiLightingRoom"><span>Room</span><select id="uiLightingRoom" class="form-control"><option value="">Loading rooms…</option></select></label>
             <div class="ui-settings-actions"><button class="btn ui-btn-secondary" id="uiLightingAddRoom" type="button">Add Room</button><button class="btn ui-btn-secondary" id="uiLightingDeleteRoom" type="button">Delete Room</button></div>

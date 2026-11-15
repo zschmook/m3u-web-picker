@@ -1,0 +1,22 @@
+{
+  "venues": [
+    {
+      "name": "Prestonwood Country Club",
+      "region": "NC",
+      "city": "Cary",
+      "source": "https://saschampionship.com/contact-us/"
+    },
+    {
+      "name": "Secret Harbour Golf Links",
+      "region": "INTL",
+      "city": "Secret Harbour, Western Australia",
+      "source": "https://www.westernaustralia.com/au/attraction/secret-harbour-golf-links/56b26817d5f1565045dab5b8"
+    },
+    {
+      "name": "Madison Square Garden",
+      "region": "NY",
+      "city": "New York",
+      "source": "https://www.msg.com/madison-square-garden"
+    }
+  ]
+}

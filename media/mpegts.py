@@ -36,7 +36,23 @@ class SharedMpegtsStream:
 
 
 def _command(target: str) -> list[str]:
-    return normalized_live_input_args(target) + [
+    command = normalized_live_input_args(target, preserve_av_timing=True)
+    # Ignore malformed decode timestamps when presentation timestamps exist.
+    # Otherwise FFmpeg's DTS correction invents gaps before resampling audio.
+    command[command.index('-fflags') + 1] = '+genpts+igndts'
+    return command + [
+        # A live broadcast has a continuous frame/sample clock. Bad provider
+        # DTS can make FFmpeg's discontinuity correction repeatedly add ~150 ms
+        # to both tracks even though their source PTS and content are healthy.
+        # Count decoded frames/samples instead of inheriting those added gaps.
+        # Retain STARTPTS on each track so joining between keyframes or a real
+        # initial A/V offset does not move the sound relative to the picture.
+        # FRAME_RATE is undefined for some variable-rate inputs; retain their
+        # presentation timestamps rather than manufacturing invalid ones.
+        "-vf", "setpts='if(gt(FRAME_RATE,0),STARTPTS+N/(FRAME_RATE*TB),PTS)'",
+        # Fill missing audio time before counting samples. Counting received
+        # samples alone compresses packet-loss gaps and advances audible content.
+        "-af", "aresample=async=1,asetpts=STARTPTS+N/(SR*TB)",
         "-f", "mpegts", "-mpegts_flags", "+resend_headers",
         "-muxdelay", "0", "-muxpreload", "0", "pipe:1",
     ]

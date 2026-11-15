@@ -70,12 +70,16 @@ def normalized_live_input_args(
     if encoder == "libx264":
         encoder_options = ["-preset", "ultrafast", "-tune", "zerolatency"]
     elif encoder == "h264_nvenc":
-        # NVENC's quality defaults can hold a large reordered timestamp window
-        # on MPEG-TS inputs. For live playback that appeared as a frozen player
-        # followed by video roughly 100 seconds behind the audio.
+        # Give high-motion 1080p60 feeds an explicit quality/bitrate budget.
+        # Keep the low-delay controls: frame reordering/lookahead previously
+        # made live MPEG-TS video fall far behind its audio.
         encoder_options = [
-            "-preset", "p1",
+            "-preset", "p5",
             "-tune", "ll",
+            "-rc", "vbr",
+            "-b:v", "8M",
+            "-maxrate", "12M",
+            "-bufsize", "16M",
             "-zerolatency", "1",
             "-delay", "0",
             "-bf", "0",

@@ -28,13 +28,18 @@ def probe_stream(url):
             capture_output=True, timeout=10, check=False,
         )
         if result.returncode != 0:
+            # A short health check cannot prove that a slow live source is
+            # offline. Keep real playback available when the probe times out.
+            detail = (result.stderr or b"").decode("utf-8", errors="replace").lower()
+            if "timed out" in detail or "timeout" in detail:
+                return None
             return False
         payload = json.loads(result.stdout or b"{}")
         return any(int(packet.get("size") or 0) > 0 for packet in payload.get("packets", []))
     except (ValueError, TypeError):
         return False
     except subprocess.TimeoutExpired:
-        return False
+        return None
     except OSError:
         return None
 
@@ -102,7 +107,8 @@ class AvailabilityCache:
         if cached is None or time.monotonic() - cached[0] >= self.ttl:
             self._check(urls)
         available, target = self.peek(urls)
-        return target or (urls[0] if available is None else "")
+        # Health probes are advisory; real playback must be allowed to retry.
+        return target or urls[0]
 
     def peek(self, urls):
         """Read the latest result without scheduling a stream check."""

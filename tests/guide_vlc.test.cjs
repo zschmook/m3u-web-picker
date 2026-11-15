@@ -95,10 +95,11 @@ for (const destination of ['roku', 'cast']) {
   });
 }
 
-test('unavailable channels never launch VLC', async () => {
+test('failed probes still allow VLC playback retries', async () => {
   const {context, calls} = setup();
   await context.playChannel({available: false, play_url: '/guide/play/manual/token'});
-  assert.deepEqual(calls, []);
+  assert.equal(calls[2][0], 'launch');
+  assert.match(calls[2][1], /guide\/play\/manual\/token#Intent/);
 });
 
 test('intent rejects external and non-HTTP URLs and prevents injected intent fields', () => {

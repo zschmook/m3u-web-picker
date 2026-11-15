@@ -29,9 +29,8 @@ test('listen handoff uses current server metadata instead of a cached channel sn
   assert.equal(ui.starts[0], current);
 });
 
-for (const channels of [[], [{play_url:'/guide/play/manual/bravo'}],
-  [{play_url:'/guide/play/manual/alpha', available:false}]]) {
-  test(`listen handoff cannot resurrect a removed or unavailable channel: ${JSON.stringify(channels)}`, () => {
+for (const channels of [[], [{play_url:'/guide/play/manual/bravo'}]]) {
+  test(`listen handoff cannot resurrect a removed channel: ${JSON.stringify(channels)}`, () => {
     const ui=setup(channels, cached());
     ui.context.restoreListenSession();
     assert.deepEqual(ui.starts, []);
@@ -78,3 +77,5 @@ test('Guide ignores cached server-status fallback and does not poll hidden tabs'
   assert.deepEqual(calls,['/api/ui/status']);
   assert.equal(context.guideState.channels[0].name,'Current');
 });
+
+ test('failed probe does not block restoring a current saved channel',()=>{const current={play_url:'/guide/play/manual/alpha',available:false};const ui=setup([current],cached());ui.context.restoreListenSession();assert.equal(ui.starts[0],current);});

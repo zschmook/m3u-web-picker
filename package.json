@@ -1,0 +1,12 @@
+{
+  "name": "m3u-web-picker-development",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/test_browser.cjs",
+    "check:roku": "bsc --project roku-receiver/bsconfig.json"
+  },
+  "devDependencies": {
+    "brighterscript": "0.73.5",
+    "brs": "0.45.0"
+  }
+}

@@ -4,12 +4,21 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import app_config
 import network_config
 
 
 class NetworkConfigTests(unittest.TestCase):
+    def test_media_origin_uses_configured_lan_address_for_local_requests(self):
+        with patch.object(network_config, "load_settings", return_value=SimpleNamespace(lan_host="10.0.0.18", external_port=9999)):
+            self.assertEqual(network_config.media_origin("http://localhost:9998/"), "http://10.0.0.18:9999")
+
+    def test_media_origin_falls_back_to_request_when_no_lan_host_is_configured(self):
+        with patch.object(network_config, "load_settings", return_value=SimpleNamespace(lan_host="", external_port=9999)):
+            self.assertEqual(network_config.media_origin("https://tv.example.test/"), "https://tv.example.test")
+
     def test_public_port_persists_and_overrides_environment(self):
         with tempfile.TemporaryDirectory() as temp:
             config_path = Path(temp) / "config.json"
