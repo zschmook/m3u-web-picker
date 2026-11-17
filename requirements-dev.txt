@@ -1,2 +1,2 @@
 # Kept in the isolated test image, never installed in the application image.
-pytest==9.1.1
+pytest==9.2.0

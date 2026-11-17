@@ -19,7 +19,7 @@ class UserGuideContractTests(unittest.TestCase):
         self.assertIn('"/user-guide"', app_source)
         self.assertIn("{{ guide_content }}", template)
         self.assertNotIn("cdn.jsdelivr.net", template)
-        self.assertIn("Markdown>=3.6,<4", requirements)
+        self.assertIn("Markdown>=3.11.3,<4", requirements)
 
     def test_user_guide_tracks_current_runtime_documentation(self):
         guide = (ROOT / "docs" / "USER-GUIDE.md").read_text(encoding="utf-8")
